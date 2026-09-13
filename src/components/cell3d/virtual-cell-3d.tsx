@@ -12,8 +12,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType, RefObject } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
-import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
+import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
+import { EffectComposer, Bloom, Noise, Vignette } from '@react-three/postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
@@ -142,10 +142,12 @@ function trackedMolecule(layout: ReturnType<typeof layout3D> | null) {
   return null;
 }
 
-function SceneContents({ showAnatomy, showLabels, focus, sim }: {
+function SceneContents({ showAnatomy, showLabels, focus, perf, sim }: {
   showAnatomy: boolean;
   showLabels: boolean;
   focus: boolean;
+  /** 低端设备流畅模式（禁用折射/减实例） */
+  perf: boolean;
   sim: { current: SimSnapshot };
 }) {
   const graph = useLabStore((s) => s.graph);
@@ -164,7 +166,7 @@ function SceneContents({ showAnatomy, showLabels, focus, sim }: {
 
   return (
     <group scale={layout.spec.scale}>
-      <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} />
+      <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} />
       <EdgeLayer edges={layout.edges} sim={sim} />
       <MoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />
       {/* mRNA 转录出核流（表达事件驱动） */}
@@ -186,7 +188,7 @@ export function VirtualCell3D() {
   const cell = CELL_TYPE_MAP.get(cellId);
   const morph = cell?.morphology ?? 'hepatocyte';
 
-  const [showAnatomy, setShowAnatomy] = useState(false);
+  const [showAnatomy, setShowAnatomy] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [focus, setFocus] = useState(false);
   const [autoRotate, setAutoRotate] = useState(true);
@@ -319,11 +321,25 @@ export function VirtualCell3D() {
           gl={{ antialias: !perfMode, alpha: true }}
           onPointerMissed={() => selectNode(null)}
         >
-          <ambientLight intensity={0.55} />
-          <directionalLight position={[6, 10, 8]} intensity={1.15} color="#e7fffb" />
+          <ambientLight intensity={0.4} />
+          <directionalLight position={[6, 10, 8]} intensity={0.9} color="#e7fffb" />
           <pointLight position={[0, 2.2, 0]} intensity={16} distance={26} decay={2} color="#14b8a6" />
           <pointLight position={[0, 0, 0]} intensity={7} distance={9} decay={2} color="#fb7185" />
-          <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} sim={sim} />
+          {/* 指数雾: 深度层次感（远端结构淡入背景） */}
+          <fogExp2 attach="fog" args={['#020a12', 0.0072]} />
+          {/* 程序化环境光照: Lightformer 阵列烘焙镜面形体感（离线, 无外部 HDR） */}
+          <Environment resolution={perfMode ? 64 : 128} frames={1}>
+            <color attach="background" args={['#02101a']} />
+            {/* 顶部主光: 冷青生物荧光 */}
+            <Lightformer intensity={2.4} color="#7ffcf0" position={[0, 14, 4]} scale={[12, 8, 1]} rotation-x={-Math.PI / 2.2} />
+            {/* 侧逆光: 暖琥珀（分子标签色系） */}
+            <Lightformer intensity={1.6} color="#ffc87a" position={[-12, 2, 5]} scale={[7, 5, 1]} rotation-y={Math.PI / 2.6} />
+            {/* 右侧补光: 玫瑰（转录/核色系） */}
+            <Lightformer intensity={1.1} color="#ff9ab5" position={[12, -3, 2]} scale={[6, 4, 1]} rotation-y={-Math.PI / 2.4} />
+            {/* 底部微光: 深青 */}
+            <Lightformer intensity={0.7} color="#0e5f56" position={[0, -12, 0]} scale={[14, 14, 1]} rotation-x={Math.PI / 2} />
+          </Environment>
+          <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} sim={sim} />
           <CameraRig mode={camMode} layout={layout} spec={layoutSpec} controlsRef={controlsRef} tourTarget={tourTarget} />
           <OrbitControls
             ref={controlsRef}
@@ -335,10 +351,11 @@ export function VirtualCell3D() {
             autoRotateSpeed={0.5}
             makeDefault
           />
-          {/* 生物荧光辉光: Bloom 提亮发光体 + 暗角聚焦视线（流畅模式关闭 MSAA 降帧缓冲内存） */}
+          {/* 生物荧光辉光: Bloom 提亮发光体 + 微粒胶片噪声 + 暗角聚焦视线（流畅模式降采样） */}
           {glow && (
             <EffectComposer multisampling={perfMode ? 0 : 4} enableNormalPass={false}>
-              <Bloom mipmapBlur intensity={1.25} luminanceThreshold={0.52} luminanceSmoothing={0.32} />
+              <Bloom mipmapBlur intensity={1.15} luminanceThreshold={0.5} luminanceSmoothing={0.3} />
+              {!perfMode && <Noise premultiply opacity={0.05} />}
               <Vignette offset={0.22} darkness={0.52} />
             </EffectComposer>
           )}

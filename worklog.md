@@ -201,3 +201,47 @@ Stage Summary:
   2. 更多通路教学级联手工策划（PI3K-Akt / JAK-STAT / cAMP）
   3. 报告导出增加转录组热图页（复用热图渲染逻辑到 canvas）
   4. 事件脉冲粒子在低端设备的数量自适应（当前固定池 14+10）
+
+---
+Task ID: 10
+Agent: 主协调 Agent (Z.ai Code)
+Task: 3D 虚拟细胞高精度重构（建模+贴图路线）+ GitHub 推送
+
+Work Log:
+- 用户反馈 v1 3D（基础球/胶囊/圆环拼装）太粗糙, 要求高精度真实建模, 建议建模+贴图路线 → 完全重构
+- 新建 src/components/cell3d/textures.ts —— 程序化 PBR 贴图工厂（Canvas 运行时生成, 模块级缓存）:
+  · organicNormalMap（FBM 高度场 → Sobel 法线, 可平铺 lattice value noise）
+  · speckleNormalMap（高斯凸点, 核糖体/衣被蛋白）; stripeNormalMap（胶原 D-带 67nm 周期 / 微管 13 原纤维）
+  · roughnessMap（光泽微变化）; glowSpriteTexture（径向柔光粒子）
+- 新建 src/components/cell3d/procedural.ts —— 3D FBM 顶点位移（有机不规则形, 去除完美几何感）/ mergeGeoms 几何合并（减 draw call, 支持逐部件顶点色）/ fibSphere+球坐标采样
+- 新建 src/components/cell3d/materials.ts —— 有机材质工厂:
+  · patchOrganicFlow: onBeforeCompile 注入 GLSL（vObjPos varying + value-noise FBM + uTime 流动 emissive + Fresnel 边缘微光, 兼容 instancing）
+  · organelleMaterial: MeshPhysicalMaterial（transmission 折射/iridescence 虹彩/sheen/clearcoat/法线+粗糙度贴图, dim 专注模式联动, 低端自动降级为普通透明）
+  · glowMaterial: Additive 发光壳（fog:false）
+- 完全重写 src/components/cell3d/organelles.tsx（buildCellBody v2, 接口不变+perf 参数）:
+  · 质膜: 位移二十面体 + transmission 0.58 + 虹彩 + 脂双层双叶 860×2 脂头（对齐位移场 surf()）+ 64 跨膜蛋白 + 膜流动镶嵌缓慢对流旋转
+  · 核被膜: 双层（间隙 0.22）+ 核孔复合体四部件（胞质环/核质环/中央栓/核篮, 共享实例矩阵, 表面位移对齐）
+  · 染色质: 外周异染色质边集化（~180 颗粒成簇）+ 常染色质纤维（合并单几何）+ 核仁（纤维中心核 + 颗粒组分 56 speckles）
+  · 线粒体: 位移外膜（透射）+ 基质 + 板层嵴 9 条/个（压扁波浪管, 合并）+ 嵴膜 ATP 合酶发光点
+  · RER: 核旁连续囊池（扁平化管）+ 池间连接小管 + 膜旁核糖体双排 + 游离多聚核糖体 26 链 + 肝细胞 SER 管系
+  · 高尔基: 顺→反 6 池顶点色渐变（teal→amber）+ 池间小管 + 出芽囊泡（衣被蛋白斑点法线）
+  · 细胞骨架: 中心体双联中心粒 + 微管合并（原纤维条纹法线）+ 皮层肌动蛋白 72 根切向定向
+  · 胞质: 430 分子拥挤颗粒（instanceColor 双色系）+ 胞外悬浮微粒双云（柔光 sprite, 浸没感）
+  · 特化结构升级: 糖原玫瑰体/微绒毛（位移场对齐）/紧密连接/胶原 D-带条纹/膜出芽（透射）/髓鞘+树突棘
+  · 动画: uTime 驱动流光 + 线粒体漂浮 + 脂双层对流 + 核仁呼吸 + 细胞整体微幅胀缩（呼吸）
+- 升级 src/components/cell3d/virtual-cell-3d.tsx 渲染管线:
+  · Environment + Lightformer 阵列（顶部冷青/侧逆暖琥珀/右侧玫瑰/底部深青, 程序化离线烘焙, 零外部 HDR）
+  · fogExp2 指数雾（深度层次）; Bloom 调优 + 高清模式 Noise 胶片颗粒 + Vignette
+  · SceneContents 透传 perfMode → CellBody（低端设备禁用折射/实例×0.45/细节-1）; 解剖标注默认开启
+  · 修复 perf 变量名 bug（Canvas 内误用 perf → perfMode）
+- QA（agent-browser, SwiftShader 软件渲染下自动流畅模式 + 手动切高清模式均验证）:
+  · 新会话 0 错误; 3D 切换/播放（T+2.0s）/细胞系切换（心肌→癌细胞全量重建）/教学引导/核内视角/全景全部通过
+  · VLM 评估: 高清全景"细胞器清晰可辨+膜通透优秀+无明显错误"; 核内视角 7.5/10; 癌细胞多形核+膜出芽+聚焦效果确认
+  · bun run lint 零错误; dev.log 无运行时错误
+- GitHub 推送: 用 token 创建 remote 并 push（见下）
+
+Stage Summary:
+- 3D 视觉从"几何拼装"升级为"高精度程序化建模 + 程序化贴图 + 物理材质 + 环境光照"管线, 零外部资源依赖（沙箱离线可用）
+- 帧驱动架构不变（zustand 快照 + imperative useFrame）, 分子层/边层/事件层接口完全兼容
+- 已知限制: agent-browser 为 SwiftShader 软渲染（自动流畅模式）, 真实 GPU 下 transmission/虹彩效果更佳; VLM 建议后续可加体积次表面散射（需体积渲染 pass, 成本高）
+- 下阶段建议: ① 分子层升级 PBR 材质响应环境光 ② 线粒体嵴实时形变动画 ③ 切面模式（ClipPlane 展示内部） ④ 报告导出嵌入 3D 截图
