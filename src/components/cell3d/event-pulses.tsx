@@ -27,10 +27,26 @@ const PULSE_COLORS: Record<string, string> = {
   mutation: '#fb7185',
 };
 
-const BOLT_POOL = 14;
-const WAVE_POOL = 10;
 const BOLT_TRAVEL_S = { min: 0.55, max: 1.05 };
 const WAVE_S = 0.6;
+
+/** 低端设备检测（与 virtual-cell-3d 同款启发式） */
+function detectLowEnd(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const nav = navigator as Navigator & { deviceMemory?: number };
+  if (nav.deviceMemory !== undefined && nav.deviceMemory <= 4) return true;
+  if (nav.hardwareConcurrency && nav.hardwareConcurrency <= 4) return true;
+  try {
+    const c = document.createElement('canvas');
+    const gl = (c.getContext('webgl2') ?? c.getContext('webgl')) as WebGLRenderingContext | null;
+    if (!gl) return true;
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const renderer = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+    return /swiftshader|llvmpipe|software|basic\s*render|angle \(.*software/i.test(renderer);
+  } catch {
+    return false;
+  }
+}
 
 interface Bolt {
   active: boolean;
@@ -55,8 +71,11 @@ export function EventPulses({ nodes, sim }: { nodes: Node3D[]; sim: { current: S
   const tailRefs = useRef<(THREE.Mesh | null)[]>([]);
   const waveRefs = useRef<(THREE.Mesh | null)[]>([]);
 
+  // 粒子池自适应: 高端 14+10 / 低端 6+4（软件渲染下保持帧率）
+  const lowEnd = useMemo(() => detectLowEnd(), []);
+
   const bolts = useMemo<Bolt[]>(
-    () => Array.from({ length: BOLT_POOL }, () => ({
+    () => Array.from({ length: lowEnd ? 6 : 14 }, () => ({
       active: false, t0: 0,
       curve: new THREE.QuadraticBezierCurve3(new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()),
       duration: 0.8, color: new THREE.Color('#34d399'),
@@ -65,7 +84,7 @@ export function EventPulses({ nodes, sim }: { nodes: Node3D[]; sim: { current: S
     [],
   );
   const waves = useMemo<Wave[]>(
-    () => Array.from({ length: WAVE_POOL }, () => ({
+    () => Array.from({ length: lowEnd ? 4 : 10 }, () => ({
       active: false, t0: 0, at: new THREE.Vector3(), color: new THREE.Color('#34d399'),
     })),
     [],
@@ -107,7 +126,7 @@ export function EventPulses({ nodes, sim }: { nodes: Node3D[]; sim: { current: S
     const unsub = useLabStore.subscribe((s) => {
       const evs = s.events;
       let spawned = 0;
-      for (let i = evs.length - 1; i >= 0 && i > evs.length - 24 && spawned < 4; i--) {
+      for (let i = evs.length - 1; i >= 0 && i > evs.length - 24 && spawned < (lowEnd ? 2 : 4); i--) {
         const ev = evs[i];
         if (!ev.nodeId || !PULSE_COLORS[ev.kind]) continue;
         if (processed.current.has(ev.id)) continue;
@@ -153,7 +172,7 @@ export function EventPulses({ nodes, sim }: { nodes: Node3D[]; sim: { current: S
       if (processed.current.size > 500) processed.current.clear();
     });
     return unsub;
-  }, [bolts, waves, byId, sim]);
+  }, [bolts, waves, byId, sim, lowEnd]);
 
   useFrame(() => {
     const now = performance.now() / 1000;
@@ -224,23 +243,23 @@ export function EventPulses({ nodes, sim }: { nodes: Node3D[]; sim: { current: S
 
   return (
     <group>
-      {/* 彗星池（头球 + 尾锥） */}
+      {/* 彗星池（头球 + 尾锥; 低端减容） */}
       {bolts.map((_, i) => (
         <group key={`bolt-${i}`} ref={(g) => { boltRefs.current[i] = g; }} visible={false}>
           <mesh ref={(m) => { headRefs.current[i] = m; }} scale={0.001}>
-            <sphereGeometry args={[0.13, 12, 10]} />
+            <sphereGeometry args={[0.13, lowEnd ? 8 : 12, lowEnd ? 6 : 10]} />
             <meshBasicMaterial transparent opacity={0.9} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
           </mesh>
           <mesh ref={(m) => { tailRefs.current[i] = m; }} scale={0.001}>
-            <coneGeometry args={[0.07, 0.6, 8]} />
+            <coneGeometry args={[0.07, 0.6, lowEnd ? 6 : 8]} />
             <meshBasicMaterial transparent opacity={0.4} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
           </mesh>
         </group>
       ))}
-      {/* 冲击波池（能量球壳） */}
+      {/* 冲击波池（能量球壳; 低端减容 + 降分段） */}
       {waves.map((_, i) => (
         <mesh key={`wave-${i}`} ref={(m) => { waveRefs.current[i] = m; }} visible={false} scale={0.001} renderOrder={93}>
-          <sphereGeometry args={[1, 20, 14]} />
+          <sphereGeometry args={[1, lowEnd ? 12 : 20, lowEnd ? 8 : 14]} />
           <meshBasicMaterial transparent opacity={0.5} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} side={THREE.DoubleSide} />
         </mesh>
       ))}

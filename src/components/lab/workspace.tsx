@@ -7,11 +7,13 @@
 import { useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useQuery } from '@tanstack/react-query';
-import { Microscope, Map as MapIcon, FlaskConical, Boxes, Orbit, Pill, Activity } from 'lucide-react';
+import { Microscope, Map as MapIcon, FlaskConical, Boxes, Orbit, Pill, Activity, GitCompare } from 'lucide-react';
 import type { PathwayGraph } from '@/types/kegg';
 import { useLabStore } from '@/store/lab-store';
+import { useCompareStore } from '@/store/compare-store';
 import { VirtualCellView } from './virtual-cell';
 import { PathwayMapView } from './pathway-map-view';
+import { CompareView } from './compare-view';
 import { PlaybackControls } from './playback';
 import { MoleculeInspector } from './inspector';
 import { EventTimeline } from './timeline';
@@ -145,6 +147,17 @@ export function LabWorkspace() {
             </button>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => {
+                if (graph) useCompareStore.getState().open(pathwayId, graph);
+              }}
+              disabled={!graph}
+              className="flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-[11px] text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-40"
+              title="同一通路在正常 vs 病变细胞中并排对照（单变量实验）"
+            >
+              <GitCompare className="h-3.5 w-3.5" />
+              对照实验
+            </button>
             <span className="hidden font-mono text-[10px] text-slate-600 sm:inline">
               {graph ? `${graph.stats.coreCount} 核心节点 · ${graph.stats.geneCount} 全图分子` : '加载中…'}
             </span>
@@ -189,6 +202,9 @@ export function LabWorkspace() {
           ) : (
             <PathwayMapView />
           )}
+
+          {/* 对照实验模式（覆盖层, 不干扰主实验台状态） */}
+          <CompareView />
         </div>
 
         {/* 控制台 */}

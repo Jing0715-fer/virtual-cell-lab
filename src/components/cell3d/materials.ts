@@ -191,7 +191,7 @@ export function organelleMaterial(o: OrganelleMatOpts): THREE.MeshPhysicalMateri
   });
   if (o.normalMap) mat.normalScale.set(o.normalScale ?? 0.5, o.normalScale ?? 0.5);
   if (useTransmission) {
-    mat.transmission = o.transmission;
+    mat.transmission = o.transmission ?? 0;
     mat.thickness = o.thickness ?? 0.8;
     mat.ior = 1.38;
   }

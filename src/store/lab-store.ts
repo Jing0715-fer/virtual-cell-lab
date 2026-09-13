@@ -11,6 +11,7 @@ import {
 import { applyScaffoldEdges } from '@/lib/simulation/scaffold';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
 import { INHIBITORS } from '@/data/inhibitors';
+import { resolveMutations } from '@/lib/simulation/mutation-equiv';
 
 export type ViewMode = 'cell' | 'map' | 'cell3d';
 
@@ -113,9 +114,7 @@ export const useLabStore = create<LabStore>((set, get) => ({
     };
     const states = initStates(enhanced.core);
     const cell = CELL_TYPE_MAP.get(get().cellId);
-    const mutations: MutationSpec[] = (cell?.mutations ?? []).filter(
-      (m) => enhanced.core.nodes.some((n) => n.id === m.node),
-    );
+    const mutations: MutationSpec[] = resolveMutations(cell?.mutations ?? [], enhanced.core.nodes);
     const mutEvents = applyMutations(enhanced.core, states, mutations);
     const phase0 = computePhase(enhanced.core, states);
     set({

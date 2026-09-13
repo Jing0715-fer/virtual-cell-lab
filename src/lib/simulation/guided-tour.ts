@@ -32,6 +32,9 @@ interface CuratedChain {
 /**
  * 手工策划的经典教学级联（标题 + 顺序经过教学设计审核）
  * MAPK: 生长因子 → 受体 → 接头 → GEF → 小 G 蛋白 → 三级激酶 → TF → 即早基因
+ * PI3K-Akt: 生长因子 → RTK → 脂质激酶 → 脂信使 → 双磷酸化 → 代谢/存活/翻译（三条分支汇合）
+ * JAK-STAT: 细胞因子 → 受体链 → Janus 激酶 → STAT 磷酸化二聚体入核 → 增殖基因 + 负反馈
+ * cAMP: 肾上腺素 → GPCR → Gs → 腺苷酸环化酶 → 第二信使 → 双分支（PKA/EPAC）→ 即早基因
  */
 const CURATED_TOURS: Record<string, CuratedChain> = {
   hsa04010: {
@@ -49,12 +52,63 @@ const CURATED_TOURS: Record<string, CuratedChain> = {
       '即早基因 · 转录应答',
     ],
   },
+  hsa04151: {
+    chain: ['IGF1', 'IGF1R', 'PIK3CA', 'cpd:C05981', 'PDPK1', 'AKT1', 'TSC2', 'RHEB', 'MTOR', 'RPS6KB1', 'EIF4EBP1'],
+    titles: [
+      '信号起点 · IGF-1 扩散',
+      'RTK 识别 · IRS 接头平台',
+      '脂质激酶 · PI3K 膜激活',
+      '脂质第二信使 · PIP3 富集',
+      'PDK1 · Thr308 引导磷酸化',
+      'Akt · Ser473 完全激活',
+      'TSC1/2 · GAP 抑制解除',
+      'Rheb · GTP 态维持',
+      'mTORC1 · 生长开关',
+      'S6K1 · 核糖体亚基磷酸化',
+      '4E-BP1 · 帽依赖翻译启动',
+    ],
+  },
+  hsa04630: {
+    chain: ['IL2', 'IL2RA', 'JAK1', 'STAT5A', 'MYC', 'BCL2L1', 'SOCS1', 'JAK1', 'STAT5A'],
+    titles: [
+      '信号起点 · IL-2 自分泌',
+      '高亲和受体 · 三链组装',
+      'Janus 激酶 · 交叉磷酸化',
+      'STAT5 · Y694 磷酸化二聚体',
+      '增殖基因 · c-myc 转录',
+      '存活信号 · Bcl-xL 抗凋亡',
+      '负反馈 · SOCS 诱导表达',
+      '信号关闭 · JAK 泛素化',
+      '回落 · STAT 信号重置',
+    ],
+  },
+  hsa04024: {
+    chain: ['EPI', 'ADRB2', 'GNAS', 'ADCY1', 'cpd:C00575', 'PRKACA', 'CREB1', 'FOS', 'RAPGEF3', 'RAP1A'],
+    titles: [
+      '信号起点 · 肾上腺素风暴',
+      'GPCR 识别 · TM6 外旋',
+      'Gs 蛋白 · 核苷酸交换',
+      '腺苷酸环化酶 · ATP 环化',
+      '第二信使 · cAMP 级联放大',
+      'PKA · 催化亚基解离',
+      'CREB · Ser133 磷酸化',
+      '即早基因 · CRE 转录应答',
+      'EPAC 支路 · 非激酶分支',
+      'Rap1 · 整合素激活终点',
+    ],
+  },
 };
 
 /** 手工策划链的补充文案（引导语，教育性 framing） */
 const CURATED_INTROS: Record<string, string> = {
   hsa04010:
     '经典 RTK-RAS-ERK 级联：一次生长因子刺激如何在 10 站之内从细胞外抵达细胞核内的基因。',
+  hsa04151:
+    '细胞的“生长开关”：IGF-1 如何在 11 站内接力激活 PI3K-Akt-mTOR 轴，最终开启帽依赖翻译机器（丝氨酸/苏氨酸磷酸化全程）。',
+  hsa04630:
+    '免疫细胞的增殖指令：IL-2 自分泌信号 9 站往返——从细胞因子到 JAK-STAT5 核内转录，再经 SOCS 负反馈关闭（含信号重置）。',
+  hsa04024:
+    '最古老的第一信使系统：肾上腺素 → GPCR → Gs → cAMP 第二信使放大 1000 倍，经 PKA 与 EPAC 双分支抵达基因与粘附终点。',
 };
 
 const EDGE_BIDIRECTIONAL = new Set(['binding', 'association']);
@@ -126,15 +180,28 @@ function autoChain(graph: PathwayGraph): string[] {
   return chain;
 }
 
-/** 构建教学引导步骤序列 */
+/** 构建教学引导步骤序列（同分子复现站去重: 保留首次出现） */
 export function buildGuidedTour(graph: PathwayGraph): TourStep[] {
   const curated = CURATED_TOURS[graph.meta.id];
-  const chain = curated ? curated.chain.filter((id) => graph.core.nodes.some((n) => n.id === id)) : autoChain(graph);
+  const rawChain = curated ? curated.chain.filter((id) => graph.core.nodes.some((n) => n.id === id)) : autoChain(graph);
+  // 同分子复现（如 JAK-STAT 负反馈环）: 只保留首次出现，避免引导卡重复跳转
+  const chain: string[] = [];
+  for (const id of rawChain) {
+    if (!chain.includes(id)) chain.push(id);
+  }
   if (chain.length === 0) return [];
 
   const byId = new Map(graph.core.nodes.map((n) => [n.id, n]));
   const roman = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩', '⑪', '⑫'];
   const steps: TourStep[] = [];
+
+  // 标题跟随去重后的链（同站复现时沿用原策划标题）
+  const titleAt = new Map<string, string>();
+  if (curated) {
+    curated.chain.forEach((id, i) => {
+      if (!titleAt.has(id) && curated.titles[i]) titleAt.set(id, curated.titles[i]);
+    });
+  }
 
   chain.forEach((id, i) => {
     const node = byId.get(id);
@@ -154,7 +221,7 @@ export function buildGuidedTour(graph: PathwayGraph): TourStep[] {
     steps.push({
       nodeId: id,
       label: node.label,
-      title: curated?.titles[i] ?? `${roman[i] ?? ''} ${node.label} · ${KIND_ZH[node.kind] ?? '分子'}`,
+      title: titleAt.get(id) ?? `${roman[i] ?? ''} ${node.label} · ${KIND_ZH[node.kind] ?? '分子'}`,
       text,
       edgeNote,
       phaseTag: `${COMPARTMENT_ZH[node.compartment] ?? '细胞'} · 层级 L${node.tier}`,

@@ -245,3 +245,45 @@ Stage Summary:
 - 帧驱动架构不变（zustand 快照 + imperative useFrame）, 分子层/边层/事件层接口完全兼容
 - 已知限制: agent-browser 为 SwiftShader 软渲染（自动流畅模式）, 真实 GPU 下 transmission/虹彩效果更佳; VLM 建议后续可加体积次表面散射（需体积渲染 pass, 成本高）
 - 下阶段建议: ① 分子层升级 PBR 材质响应环境光 ② 线粒体嵴实时形变动画 ③ 切面模式（ClipPlane 展示内部） ④ 报告导出嵌入 3D 截图
+
+---
+Task ID: 14
+Agent: 主协调 Agent (Z.ai Code)
+Task: QA 巡检 + 3 个新功能（教学引导 3 通路扩充 / 通路对比模式 / 事件脉冲自适应）+ 突变同族映射修复
+
+Work Log:
+- [QA 巡检] 项目稳定: dev.log 正常、lint/tsc 零错误、3D 渲染/播放(T+7.5s)/转录组热图(7 基因)/事件流(200+注释)/PDF 导出(~/Downloads 3 份 284KB 有效 PDF) 全部通过 → 转入新功能开发
+- [新功能 A: 教学引导 3 通路扩充] guided-tour.tsx CURATED_TOURS 新增:
+  · PI3K-Akt (hsa04151): IGF1→IGF1R→PIK3CA→PIP3(cpd:C05981)→PDPK1→AKT1→TSC2→RHEB→MTOR→RPS6KB1→EIF4EBP1 共 11 站（"细胞的生长开关"叙事: 双磷酸化→代谢/翻译）
+  · JAK-STAT (hsa04630): IL2→IL2RA→JAK1→STAT5A→MYC→BCL2L1→SOCS1 负反馈环 9 站（同分子复现站自动去重 → 7 站, titleAt Map 保留策划标题）
+  · cAMP (hsa04024): EPI→ADRB2→GNAS→ADCY1→cAMP(cpd:C00575)→PRKACA→CREB1→FOS→RAPGEF3→RAP1A 共 10 站（PKA/EPAC 双分支叙事）
+  · 全部复用既有 CURATED_EVENTS 残基级注释（IGF1R>PIK3CA/EPI>ADRB2/PRKACA>CREB1 等）
+  · QA: PI3K 2/11 站运行中、JAK-STAT 1/7、cAMP 2/10 逐站验证 ✓
+- [新功能 B: 通路对比模式] —— worklog 遗留建议 #1 落地:
+  · src/store/compare-store.ts: 独立 zustand 双臂并行模拟引擎（A=对照 B=实验; 共享 PathwayGraph/配体注入/tick 循环; mutationsFor 逐臂注入突变; phaseReachedAt 记录阶段首达 tick）
+  · src/components/lab/compare-view.tsx: 全屏覆盖层 = 双迷你细胞 SVG 臂视图（共享 layoutCellView 布局保证视觉对齐, 活性着色/M/KO/P 徽标/边流动）+ 分析栏（臂细胞系下拉/总结卡 4 张: 自主激活分子数+平均活性差+转录应答提前+事件总数/分子差异 Top14 双向条形图+激活时差标注+"⚠ 组成性活化"警告/实验臂事件流 tab）
+  · src/components/lab/view-shared.ts: 从 virtual-cell.tsx 抽出 KIND_COLORS/edgeColor/edgeMarker/truncateLabel/midpointOf 共享
+  · workspace.tsx 视图头新增"对照实验"入口（GitCompare 图标, 覆盖层模式不干扰主实验台状态）
+  · 科学设计: 单变量实验（同通路/同配体剂量/同引擎参数, 唯一变量=遗传背景）
+- [关键 bug 修复: 突变同族等价映射] 对照模式首测发现癌细胞臂无差异(0%) → 根因: MAPK 核心子图只有 HRAS 节点, 癌细胞 KRAS G12D 突变无节点可挂（主实验台同样受此影响）
+  · 新建 src/lib/simulation/mutation-equiv.ts: MUTATION_EQUIV 同族表（KRAS↔HRAS/NRAS、BRAF↔RAF1、PIK3CA 族、PTEN→PI3CA、TP53 族、PIK3R1→PIK3CA）+ resolveMutations（精确 id → label → 同族回退, note 保留映射说明维持科学透明）
+  · 生物学依据: 突变位点(G12/V600E)催化机制在同族成员间保守, 等位效应可在经典成员上忠实演示
+  · lab-store.loadGraph 与 compare-store 均接入 resolveMutations
+  · 修复后 QA: 癌细胞臂 HRAS +100%→MAP2K1/2 +97%→MAPK1 +95%→FOS +93%/MYC +90% 完整级联传导; 总结卡 自主激活 18 分子/+51% 平均差; VLM 9/10 确认双臂差异视觉清晰
+- [新功能 C: 事件脉冲自适应] event-pulses.tsx: detectLowEnd()（与主视图同款启发式）→ 低端 6+4 粒子池（原 14+10）/几何降分段(球 8×6/锥 6)/孵化上限 2/帧; useMemo 内联修 lint
+- [全量回归] lint 零错误 / tsc src 零错误 / 全新会话 0 console error / 对照模式开→运行 30s→差异数据→退出→主实验台无损 / 教学引导 4 通路逐站 / VLM 对照模式 9/10
+- [GitHub 推送] commit + push 到 Jing0715-fer/virtual-cell-lab
+
+Stage Summary:
+- 项目状态: 3D 沉浸虚拟细胞平台全功能矩阵（13 通路/7 细胞系/3D+2D+KEGG 三视图/教学引导 4 通路手工策划/药理扰动/转录组热图/PDF 报告/AI 助手/对照实验模式）
+- 本轮产出: 教学引导 +3 通路(共 4)、通路对比模式(双臂并行引擎+分析面板)、突变同族等价映射(核心科学修复)、事件脉冲自适应
+- 关键决策: 对照模式用独立 store 而非复用 lab-store（避免污染主实验态）; 突变映射放 lib 层供双 store 共用
+- 未解决问题/风险:
+  1. 对照模式 transcriptionLead（阶段④首达时差）显示"—"（两臂都未到阶段 4 时为 null, 属正常但长模拟后应出值——已验证 T+33s 未达, 因癌臂独立到达而对照臂未注入足够时间）
+  2. 对比模式迷你视图无缩放平移（设计取舍: 覆盖层保持轻量）
+  3. KEGG 图谱视图 scaffold 边不显示（旧已知, 低优先级）
+- 下一阶段建议:
+  1. 对照模式增加 3D 视图选项（双 R3F Canvas 并排）
+  2. 报告导出 PDF 增加对照实验页（复用 compareSummary + 差异表）
+  3. TGF-β/Wnt/Notch 教学级联策划（CURATED_EVENTS 已有素材）
+  4. 转录组热图导出 CSV
