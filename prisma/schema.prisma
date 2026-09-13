@@ -1,0 +1,18 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// KEGG 通路图解析缓存（避免重复请求 KEGG REST API）
+model PathwayCache {
+  id        String   @id // KEGG pathway id，如 "hsa04010"
+  name      String // 官方英文名
+  graphJson String // 完整 PathwayGraph JSON（含 nodes/relations/core）
+  source    String // "kegg-live"
+  fetchedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
