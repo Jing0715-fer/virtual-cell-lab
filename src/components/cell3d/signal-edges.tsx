@@ -33,10 +33,17 @@ function EdgeLine({ edge, sim }: EdgeProps) {
   useFrame(() => {
     const flux = Math.abs(sim.current.signalFlux[key] ?? 0);
     const focus = sim.current.focus;
+    const tourNode = sim.current.tourNode;
     const mat = lineRef.current?.material as THREE.Material | undefined;
     if (mat) {
-      const base = focus ? 0.05 : 0.16;
-      mat.opacity = flux > 0.02 ? Math.min(0.92, base + flux * 1.15) : base;
+      if (tourNode) {
+        // 教学模式: 仅聚焦分子邻接边高亮，其余压暗
+        const isTourEdge = edge.source === tourNode || edge.target === tourNode;
+        mat.opacity = isTourEdge ? 0.9 : 0.03;
+      } else {
+        const base = focus ? 0.05 : 0.16;
+        mat.opacity = flux > 0.02 ? Math.min(0.92, base + flux * 1.15) : base;
+      }
     }
   });
 
@@ -68,6 +75,7 @@ export function FlowParticles({ edges, sim }: { edges: Edge3D[]; sim: { current:
     const inst = instRef.current;
     if (!inst) return;
     const t = state.clock.elapsedTime;
+    const tourNode = sim.current.tourNode;
     let idx = 0;
     for (let i = 0; i < edges.length; i++) {
       const e = edges[i];
@@ -76,6 +84,7 @@ export function FlowParticles({ edges, sim }: { edges: Edge3D[]; sim: { current:
       const speed = 2.2 + Math.min(3.4, flux * 5.2); // 世界速度 (单位/s)
       const pts = e.points;
       const n = pts.length - 1;
+      const isTourEdge = !tourNode || e.source === tourNode || e.target === tourNode;
       for (let j = 0; j < PER; j++) {
         const tt = (t * speed / Math.max(2.5, e.length) + j / PER + (i % 7) * 0.13) % 1;
         const fi = tt * n;
@@ -89,7 +98,7 @@ export function FlowParticles({ edges, sim }: { edges: Edge3D[]; sim: { current:
           a.y + (b.y - a.y) * fr,
           a.z + (b.z - a.z) * fr,
         );
-        const active = flux > 0.04;
+        const active = flux > 0.04 && isTourEdge;
         const s = active ? 0.075 + Math.min(0.06, flux * 0.09) : 0.0001;
         dummy.scale.setScalar(s);
         dummy.updateMatrix();

@@ -48,6 +48,10 @@ export interface SimSnapshot {
   injected: Record<string, boolean>;
   inhibition: Record<string, number>;
   focus: boolean;
+  /** 教学引导: 当前聚焦分子 id（null = 未开启） */
+  tourNode: string | null;
+  /** 教学引导: 邻居分子 id 集合（保持可见） */
+  tourNeighbors: Set<string> | null;
 }
 
 interface MoleculeProps {
@@ -133,20 +137,32 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
     const a = st?.activity ?? 0;
     const ph = st?.phospho ?? 0;
     const focus = sim.current.focus;
-    const vis = focus ? (a > 0.12 || selected ? 1 : 0.22) : 1;
+    const tourNode = sim.current.tourNode;
+    const isTourTarget = !!tourNode && node.id === tourNode;
+    const isTourNeighbor = !!tourNode && !!sim.current.tourNeighbors?.has(node.id);
+    const vis = tourNode
+      ? isTourTarget || isTourNeighbor
+        ? 1
+        : 0.16
+      : focus
+        ? a > 0.12 || selected
+          ? 1
+          : 0.22
+        : 1;
 
     // 配体布朗漂移
     if (groupRef.current && node.tier === 0) {
       groupRef.current.position.y = node.pos.y + Math.sin(t * 0.8 + phase) * 0.16;
       groupRef.current.position.x = node.pos.x + Math.cos(t * 0.5 + phase * 2) * 0.1;
     }
-    // 发光强度 = 活性
-    coreMat.emissiveIntensity = 0.35 + a * 2.4;
+    // 发光强度 = 活性（教学目标额外脉冲）
+    coreMat.emissiveIntensity =
+      0.35 + a * 2.4 + (isTourTarget ? 1.5 + 0.55 * Math.sin(t * 6) : 0);
     coreMat.opacity = 0.96 * Math.max(0.35, vis);
-    // 光晕呼吸
-    haloMat.opacity = a * 0.4 * vis;
+    // 光晕呼吸（教学目标持续可见）
+    haloMat.opacity = Math.max(a * 0.4, isTourTarget ? 0.5 : 0) * vis;
     if (haloRef.current) {
-      const pulse = 1 + a * 0.25 * Math.sin(t * 3 + phase);
+      const pulse = 1 + Math.max(a * 0.25, isTourTarget ? 0.3 : 0) * Math.sin(t * 3 + phase);
       haloRef.current.scale.setScalar(pulse);
     }
     // 磷酸化环
@@ -169,7 +185,7 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
     // 标签（DOM imperative）
     const el = labelRef.current;
     if (el) {
-      const bright = a > 0.25 || selected;
+      const bright = a > 0.25 || selected || isTourTarget;
       el.classList.toggle('is-active', bright);
       el.classList.toggle('is-phospho', ph > 0.25);
       el.classList.toggle('is-inhibited', inh > 0.25);

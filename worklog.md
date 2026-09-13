@@ -128,3 +128,46 @@ Stage Summary:
   4. 转录动画：核内 TF→靶基因表达后 mRNA 出核粒子
   5. 教学引导模式：分步高亮经典级联（EGF→EGFR→RAS→RAF→MEK→ERK→ELK1→FOS）
   6. WebGPU/LOD 优化与低端设备降级（粒子数自适应）
+
+---
+Task ID: 11（药理扰动模块，由上一轮 cron 巡检代理实现，未记录于此——补录）
+Agent: cron 巡检代理（推断）
+Task: 激酶抑制剂药理扰动实验
+Work Log（补录，依据现存代码反推）:
+- src/data/inhibitors.ts: 18 种药物（曲美替尼/厄洛替尼/维罗非尼/阿培利司/雷帕霉素/维奈克拉/鲁索替尼等），机制精确到结构域残基级
+- engine.ts 增加 inhibition 门控（上游磷酸化照常累积、催化输出钳制）
+- lab-store.ts 增加 inhibitors/drugLevels/inhibition 状态与药代动力学（起效 ramp / 洗脱清除）
+- pharmacology.tsx 药理面板（按通路核心子图智能筛选药物、投药/洗脱、靶点活性监控条）
+- 3D molecules.tsx 增加药物抑制环（紫色 ⊘ 徽标 + is-inhibited 标签类）
+
+---
+Task ID: 12
+Agent: 主协调 Agent (Z.ai Code)
+Task: QA 巡检 + 2 个 bug 修复 + 3 个新功能（Bloom 后处理 / 教学引导模式 / mRNA 出核动画）
+
+Work Log:
+- [QA] agent-browser 端到端巡检: 页面加载、3D 渲染（VLM 确认细胞球体/发光分子/标签）、模拟播放（T+7.5s 自动注射 EGF）、药理面板（曲美替尼投药→治疗浓度→靶点输出钳制）、分子点击→检测器档案（FOS 选中成功）、2D 切面视图、AI 助手（残基级回答）、无 console error、lint/tsc 零错误
+- [QA 方法论发现] 早期"点击分子失败"为测试坐标受页面滚动/相机拖拽漂移影响，非应用 bug；用 scrollIntoView + hover 扫描法验证点击功能正常
+- [BUG A 修复] KEGG 图谱视图垂直 map 条目（Cell cycle 34×271 竖长参考框）fontSize 用高度计算导致巨幅"水印"文字遮挡图谱 → pathway-map-view.tsx: 垂直条目（h/w≥2.2）rotate(-90) 旋转文字 + fontSize 以宽度为准 + 按 label 长度钳制；TITLE 条目净化为无框图谱标题（去 "TITLE:" 前缀）；map 条目虚线青绿框样式 + 点击跳转关联通路（收录范围内 selectPathway，CATALOG_IDS 校验）
+- [BUG B 修复] 3D 相机预设（全景/核内/质膜近景）只恢复距离与目标不恢复观察方位——用户拖歪视角后点"全景"仍歪斜 → CameraRig desired.dir 标准方位向量 + 方位阻尼插值（overview (0,0.33,0.94) / nucleus (0.35,0.25,0.9) / membrane (0.15,0.28,0.94)；follow/free/tour 保留用户视角）；QA 验证：拖歪后点全景 31/32 标签回视野、VLM 确认标准构图恢复
+- [新功能 A: Bloom 后处理] 安装 @react-three/postprocessing@3.1.1 + postprocessing@6.39.5 + fiber 升级 9.3.0→9.7.0（满足 peer >=9.7，drei 10.7.6 兼容 ^9.0.0）→ EffectComposer（multisampling 4）+ Bloom（mipmapBlur, intensity 1.25, luminanceThreshold 0.52）+ Vignette（offset 0.22, darkness 0.52）；HUD 新增"辉光渲染"开关（默认开）；VLM 确认柔和光晕扩散 + 边缘暗角聚焦效果
+- [新功能 B: 教学引导模式] src/lib/simulation/guided-tour.ts（MAPK 手工策划 10 站级联 EGF→EGFR→GRB2→SOS1→HRAS→RAF1→MAP2K1→MAPK1→ELK1→FOS，每站教学标题；其余通路自动推导：配体起点贪心游走，优先 CURATED_EVENTS 残基级注释边 + tier 递进，含 binding 反向边双向处理，≤11 站）→ virtual-cell-3d.tsx: CamMode 新增 'tour'（目标分子 dist 7.8 阻尼追踪）、SimSnapshot 新增 tourNode/tourNeighbors（聚焦分子发光脉冲 +1.5 emissive、邻接边 0.9 高亮、其余 0.03 压暗、粒子流仅走邻接边）、底部教学卡（站点标题/级联⟶残基注释/分子功能注释/进度点跳转/自动 7s 推进/上一站下一站导航/末站导出提示）、进入教学自动暂停模拟+关自动环视、每站 selectNode 联动右栏检测器；HudToggle 支持 highlight 强调色 + disabled
+- [新功能 C: mRNA 转录出核动画] src/components/cell3d/mrna-flow.tsx（~150 行）: 订阅事件流 kind='expression' 事件 → 8 条 mRNA 粒子池孵化；三段路径（基因位点 smoothstep→核孔穿越点(核被膜外缘径向)→胞质 ER 区带终点）；琥珀色胶囊体（emissive 1.35）+ 布朗游动 + 出核瞬间放大脉冲 + 终点淡出；事件 id 去重（Set 池化防泄漏）；图例新增"mRNA 出核"条目；VLM 确认 3-4 个琥珀粒子从核边界移向胞质
+- [React 19 lint 适配] react-hooks/set-state-in-effect 规则: 通路切换重置 tourIdx 改为渲染期间状态调整模式（lastTourKey 比对）; 进入/退出教学的 setState 移入 openTour 事件处理器
+- QA 全量回归: Bloom/Vignette VLM 确认 ✓、教学卡 + 分子高亮 + 相机聚焦 + 检测器联动 + 自动推进 VLM 确认 ✓、mRNA 出核粒子 VLM 确认 ✓、图谱水印消除/竖排条目/虚线关联框 VLM 确认 ✓、相机方位恢复 ✓、420px 移动端教学卡无溢出 ✓、AI 助手 POST 200 残基级回答 ✓、lint 零错误 / tsc 自有代码零错误 / dev.log 无异常
+
+Stage Summary:
+- 项目当前状态: 3D 沉浸式虚拟细胞平台（13 KEGG 通路 + 7 细胞系 + 分子级模拟引擎 + 药理扰动 + 三视图 + AI 助手）+ Bloom 质感 + 教学引导 + mRNA 出核动画，全部 QA 通过，稳定可交付
+- 本轮产出: 修复 2 个 bug（图谱垂直条目水印、相机预设不回正）+ 3 个新功能（Bloom 后处理辉光、教学引导模式 10 站级联讲解、mRNA 转录出核粒子动画）
+- 依赖变更: @react-three/fiber 9.3.0→9.7.0、新增 @react-three/postprocessing@3.1.1（含 postprocessing@6.39.5）
+- 未解决问题/风险（供下一阶段）:
+  1. 教学引导仅 MAPK 手工策划（含教学标题），其余 12 条通路为自动推导级联（注释质量依赖 CURATED_EVENTS 覆盖度，cAMP/Ca/JAK-STAT/PI3K 覆盖较好，Wnt/Notch/TGF-β 等覆盖较薄）
+  2. Bloom 在低端设备可能增加 GPU 负担（已默认开启，可考虑按设备性能自适应降级 dpr/关闭 Bloom）
+  3. worklog 曾出现一轮 cron 代理工作未记录（Task 11 补录）——后续代理务必及时写日志
+  4. KEGG 图谱视图 scaffold 边不显示（旧已知问题，低优先级）
+- 下一阶段建议优先事项:
+  1. 信号事件脉冲特效（事件流驱动对应信号边爆发高亮——worklog 遗留建议 2）
+  2. 更多通路的教学级联手工策划（PI3K-Akt / JAK-STAT / cAMP 优先，已有丰富 CURATED_EVENTS 素材）
+  3. 实验报告导出（PDF: 事件流 + 活性曲线 + 分子清单）
+  4. 转录组响应热图（tier 6 靶基因 × 时间）
+  5. 通路对比模式（正常 vs 癌细胞同通路并排）

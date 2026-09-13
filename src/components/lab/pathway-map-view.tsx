@@ -3,11 +3,16 @@
 /**
  * KEGG 通路图谱视图 —— 使用 KGML 原始坐标渲染完整通路拓扑
  * 与虚拟细胞视图共享模拟状态（同一信号引擎，双视图联动）
+ * 垂直参考条目（如 Cell cycle）旋转文字渲染；TITLE 条目净化为图谱标题；
+ * 关联通路条目可点击跳转（收录范围内）或打开 KEGG 官方页
  */
 import { useMemo, useRef, useState, useCallback, useEffect } from 'react';
 import type { EdgeKind } from '@/types/kegg';
 import { useLabStore } from '@/store/lab-store';
+import { PATHWAY_CATALOG } from '@/data/pathway-catalog';
 import { CANVAS } from '@/lib/simulation/layout';
+
+const CATALOG_IDS = new Set(PATHWAY_CATALOG.map((p) => p.id));
 
 function edgeColor(kind: EdgeKind | undefined): string {
   if (!kind) return '#34d399';
@@ -26,6 +31,8 @@ interface PlacedEntry {
   y: number;
   w: number;
   h: number;
+  /** 关联通路 id（type=map 且 keggIds 携带 path:hsaXXXX 时存在） */
+  linkedPathway?: string;
 }
 
 interface PlacedRel {
@@ -42,6 +49,7 @@ export function PathwayMapView() {
   const signalFlux = useLabStore((s) => s.signalFlux);
   const selectedNode = useLabStore((s) => s.selectedNode);
   const selectNode = useLabStore((s) => s.selectNode);
+  const selectPathway = useLabStore((s) => s.selectPathway);
 
   const [vb, setVb] = useState({ x: 0, y: 0, w: CANVAS.w, h: CANVAS.h });
   const svgRef = useRef<SVGSVGElement>(null);
@@ -68,10 +76,15 @@ export function PathwayMapView() {
     const t = transform;
     const byId = new Map<number, PlacedEntry>();
     const list: PlacedEntry[] = graph.nodes.map((n) => {
+      const linked =
+        n.type === 'map' && n.keggIds[0]?.startsWith('path:')
+          ? n.keggIds[0].slice(5)
+          : undefined;
       const e: PlacedEntry = {
         id: n.entryId, label: n.label, type: n.type,
         x: n.x * t.scale + t.ox, y: n.y * t.scale + t.oy,
         w: Math.max(14, n.w * t.scale), h: Math.max(9, n.h * t.scale),
+        linkedPathway: linked,
       };
       byId.set(n.entryId, e);
       return e;
@@ -200,24 +213,59 @@ export function PathwayMapView() {
             const st = coreId ? nodeStates[coreId] : undefined;
             const active = (st?.activity ?? 0) > 0.45;
             const isCompound = e.type === 'compound';
+            const isTitle = e.type === 'map' && e.label.startsWith('TITLE:');
+            const isLinkedMap = e.type === 'map' && !isTitle;
+            const vertical = !isTitle && e.h / Math.max(1, e.w) >= 2.2;
             const fill = active ? (isCompound ? 'rgba(250,204,21,0.35)' : 'rgba(52,211,153,0.35)') : isCompound ? 'rgba(250,204,21,0.1)' : 'rgba(30,41,59,0.85)';
             const stroke = active ? (isCompound ? '#facc15' : '#34d399') : isCompound ? '#a16207' : '#334155';
             const selected = coreId && selectedNode === coreId;
+
+            // KEGG 图谱标题（原位净化渲染，无框）
+            if (isTitle) {
+              return (
+                <text
+                  key={e.id}
+                  x={e.x} y={e.y}
+                  textAnchor="start" dominantBaseline="middle"
+                  fontSize={Math.max(10, e.h * 0.6)}
+                  fill="rgba(167,243,208,0.5)"
+                  style={{ letterSpacing: '0.12em', userSelect: 'none' }}
+                >{e.label.slice(6)}</text>
+              );
+            }
+
+            const label = e.label.length > 12 ? e.label.slice(0, 11) + '…' : e.label;
+            const fontSize = vertical
+              ? Math.max(6, Math.min(e.w * 0.52, e.h / Math.max(4, label.length) * 1.7))
+              : Math.max(6.5, Math.min(e.h * 0.62, e.w / Math.max(4.5, label.length * 0.72)));
+
             return (
-              <g key={e.id} className="cursor-pointer"
-                onClick={(ev) => { ev.stopPropagation(); if (coreId) selectNode(coreId); }}
+              <g key={e.id}
+                className={coreId || (isLinkedMap && e.linkedPathway) ? 'cursor-pointer' : undefined}
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  if (coreId) { selectNode(coreId); return; }
+                  if (isLinkedMap && e.linkedPathway && CATALOG_IDS.has(e.linkedPathway)) {
+                    selectPathway(e.linkedPathway);
+                  }
+                }}
                 style={active ? { filter: 'drop-shadow(0 0 5px rgba(52,211,153,0.7))' } : undefined}>
                 <rect
                   x={e.x - e.w / 2} y={e.y - e.h / 2} width={e.w} height={e.h}
                   rx={isCompound ? Math.min(e.w, e.h) / 2 : 3}
-                  fill={fill} stroke={selected ? '#f0fdfa' : stroke}
-                  strokeWidth={selected ? 1.6 : active ? 1.6 : 0.9}
+                  fill={isLinkedMap ? 'rgba(13,148,136,0.10)' : fill}
+                  stroke={selected ? '#f0fdfa' : isLinkedMap ? '#0d9488' : stroke}
+                  strokeWidth={selected ? 1.6 : isLinkedMap ? 1 : active ? 1.6 : 0.9}
+                  strokeDasharray={isLinkedMap ? '4 3' : undefined}
                 />
                 <text
-                  x={e.x} y={e.y + 3.2} textAnchor="middle" fontSize={Math.max(6.5, e.h * 0.62)}
-                  fill={active ? '#a7f3d0' : '#64748b'}
-                  fontWeight={active ? 600 : 400}
-                >{e.label.length > 12 ? e.label.slice(0, 11) + '…' : e.label}</text>
+                  x={e.x} y={e.y + (vertical ? 0 : 3.2)}
+                  textAnchor="middle" dominantBaseline={vertical ? 'middle' : undefined}
+                  fontSize={fontSize}
+                  fill={isLinkedMap ? '#5eead4' : active ? '#a7f3d0' : '#64748b'}
+                  fontWeight={active || isLinkedMap ? 600 : 400}
+                  transform={vertical ? `rotate(-90 ${e.x} ${e.y})` : undefined}
+                >{label}</text>
               </g>
             );
           })}
