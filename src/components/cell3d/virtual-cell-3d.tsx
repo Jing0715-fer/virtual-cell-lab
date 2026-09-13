@@ -12,10 +12,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType, RefObject } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { setSceneSnapshot } from '@/lib/simulation/scene-capture';
 import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, Noise, Vignette } from '@react-three/postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers } from 'lucide-react';
+import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
 import { layout3D, type Vec3 } from '@/lib/simulation/layout3d';
@@ -46,9 +47,9 @@ function detectLowEndGpu(): boolean {
   }
 }
 
-/** 切面控制器: 全局裁剪平面剖切细胞前半部，露出内部细胞器与核内分子 */
+/** 切面控制器: 全局裁剪平面剖切细胞前半部，露出内部细胞器与核内分子（深度可调） */
 /* eslint-disable react-hooks/immutability -- renderer.clippingPlanes 为 three.js 全局渲染器命令式 API（R3F 标准用法） */
-function SectionClipController({ enabled, ringR }: { enabled: boolean; ringR: number }) {
+function SectionClipController({ enabled, ringR, depth }: { enabled: boolean; ringR: number; depth: number }) {
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
   // 剖面法向: 稍微俯视的前向切割（与默认相机方位一致，翻开“细胞剖面”）
@@ -58,6 +59,14 @@ function SectionClipController({ enabled, ringR }: { enabled: boolean; ringR: nu
   );
   const origSides = useRef<Map<THREE.Material, THREE.Side>>(new Map());
   const ringRef = useRef<THREE.Group | null>(null);
+
+  // 剖面深度（0=刚触及表面 1=深剖近后半）：平面常数 10 → -4（默认 0.65 ≈ 0.9，接近原固定值）
+  useEffect(() => {
+    plane.constant = 10 - depth * 14;
+    if (ringRef.current) {
+      ringRef.current.position.copy(plane.normal.clone().multiplyScalar(-plane.constant));
+    }
+  }, [depth, plane, enabled]);
 
   useEffect(() => {
     const restore = () => {
@@ -98,7 +107,7 @@ function SectionClipController({ enabled, ringR }: { enabled: boolean; ringR: nu
   }, [plane]);
 
   return enabled ? (
-    <group ref={ringRef} quaternion={ringQuat} position={plane.normal.clone().multiplyScalar(-plane.constant)}>
+    <group ref={ringRef} quaternion={ringQuat}>
       <mesh>
         <ringGeometry args={[ringR - 0.12, ringR, 96]} />
         <meshBasicMaterial color="#5eead4" transparent opacity={0.22} side={THREE.DoubleSide} fog={false} />
@@ -242,6 +251,22 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, sim }: {
   );
 }
 
+/** 场景快照采集器（报告导出嵌入用，4s 节流 JPEG） */
+function SceneCapture() {
+  const lastRef = useRef(0);
+  useFrame(({ gl }) => {
+    const now = performance.now();
+    if (now - lastRef.current < 4000) return;
+    lastRef.current = now;
+    try {
+      setSceneSnapshot(gl.domElement.toDataURL('image/jpeg', 0.82));
+    } catch {
+      /* WebGL 画布不可读时跳过（如上下文丢失） */
+    }
+  });
+  return null;
+}
+
 export function VirtualCell3D() {
   const graph = useLabStore((s) => s.graph);
   const cellId = useLabStore((s) => s.cellId);
@@ -265,8 +290,9 @@ export function VirtualCell3D() {
   const [tourAuto, setTourAuto] = useState(true);
   // 流畅模式: 低端设备自动开启（低分辨率渲染 + 关闭 MSAA，保留辉光视觉特征）
   const [perfMode, setPerfMode] = useState(false);
-  // 切面模式: 剖切细胞前半部露出内部细胞器（全局裁剪平面）
+  // 切面模式: 剖切细胞前半部露出内部细胞器（全局裁剪平面）+ 剖面深度滑杆
   const [clipView, setClipView] = useState(false);
+  const [clipDepth, setClipDepth] = useState(0.65);
 
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
@@ -385,7 +411,7 @@ export function VirtualCell3D() {
         <Canvas
           camera={{ fov: 42, near: 0.1, far: 300, position: [0, 9, 28] }}
           dpr={perfMode ? [0.7, 1] : [1, 1.75]}
-          gl={{ antialias: !perfMode, alpha: true }}
+          gl={{ antialias: !perfMode, alpha: true, preserveDrawingBuffer: true }}
           onPointerMissed={() => selectNode(null)}
         >
           <ambientLight intensity={0.4} />
@@ -407,7 +433,8 @@ export function VirtualCell3D() {
             <Lightformer intensity={0.7} color="#0e5f56" position={[0, -12, 0]} scale={[14, 14, 1]} rotation-x={Math.PI / 2} />
           </Environment>
           <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} sim={sim} />
-          <SectionClipController enabled={clipView} ringR={morph === 'tcell' ? 9.6 : 10.8} />
+          <SceneCapture />
+          <SectionClipController enabled={clipView} ringR={morph === 'tcell' ? 9.6 : 10.8} depth={clipDepth} />
           <CameraRig mode={camMode} layout={layout} spec={layoutSpec} controlsRef={controlsRef} tourTarget={tourTarget} />
           <OrbitControls
             ref={controlsRef}
@@ -466,6 +493,23 @@ export function VirtualCell3D() {
         <HudToggle active={focus} onClick={() => setFocus(!focus)} icon={Focus} label="专注模式" />
         <HudToggle active={clipView} onClick={() => setClipView(!clipView)} icon={Layers} label="切面视图" highlight={false} />
         <HudToggle active={autoRotate} onClick={() => setAutoRotate(!autoRotate)} icon={RotateCw} label="自动环视" />
+        {clipView && (
+          <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-teal-500/25 bg-slate-950/75 px-2.5 py-1.5 backdrop-blur-md">
+            <Scissors className="h-3 w-3 shrink-0 text-teal-400" />
+            <span className="shrink-0 text-[9px] text-slate-400">剖面深度</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={Math.round(clipDepth * 100)}
+              onChange={(e) => setClipDepth(Number(e.target.value) / 100)}
+              className="h-1 w-24 cursor-pointer accent-teal-400"
+              aria-label="剖面深度"
+            />
+            <span className="w-7 text-right font-mono text-[9px] text-teal-300">{Math.round(clipDepth * 100)}%</span>
+          </div>
+        )}
       </div>
 
       {/* 右下: 相机预设 */}

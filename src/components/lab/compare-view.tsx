@@ -232,10 +232,40 @@ export function CompareView() {
           </button>
         </div>
 
-        {/* 配体选择 */}
+        {/* 配体选择（无有效配体通路回退为直接刺激入口） */}
         <div className="flex items-center gap-1">
-          <span className="text-[9px] text-slate-500">共同刺激:</span>
-          {graph.core.nodes.filter((n) => n.tier === 0).map((n) => (
+          <span className="text-[9px] text-slate-500">
+            {graph.core.edges.some((e) => graph.core.nodes.some((n) => n.tier === 0 && n.id === e.source)) ? '共同刺激:' : '直接刺激:'}
+          </span>
+          {(() => {
+            const hasProductiveLigand = graph.core.edges.some((e) =>
+              graph.core.nodes.some((n) => n.tier === 0 && n.id === e.source),
+            );
+            if (hasProductiveLigand) {
+              return graph.core.nodes.filter((n) => n.tier === 0).map((n) => ({ n, surface: true }));
+            }
+            const incoming = new Set(graph.core.edges.map((e) => e.target));
+            const receptors = graph.core.nodes.filter(
+              (n) => n.tier === 1 && graph.core.edges.some((e) => e.source === n.id),
+            );
+            const stressSources = graph.core.nodes
+              .filter(
+                (n) =>
+                  !incoming.has(n.id) &&
+                  (n.kind === 'kinase' || n.kind === 'gtpase') &&
+                  graph.core.edges.filter((e) => e.source === n.id).length >= 2,
+              )
+              .sort(
+                (a, b) =>
+                  graph.core.edges.filter((e) => e.source === b.id).length -
+                  graph.core.edges.filter((e) => e.source === a.id).length,
+              )
+              .slice(0, 4);
+            return [...receptors, ...stressSources].map((n) => ({
+              n,
+              surface: n.kind === 'receptor' || n.kind === 'channel',
+            }));
+          })().map(({ n, surface }) => (
             <button
               key={n.id}
               onClick={() => useCompareStore.getState().toggleLigand(n.id)}
@@ -244,6 +274,11 @@ export function CompareView() {
                   ? 'border-amber-500/50 bg-amber-500/20 text-amber-300'
                   : 'border-white/10 text-slate-500 hover:text-slate-300'
               }`}
+              title={
+                surface
+                  ? `${n.label} —— 受体直接刺激（等效配体结合后构象激活）`
+                  : `${n.label} —— 应激刺激入口（等效上游生理激活）`
+              }
             >
               {n.label}
               {sharedLigands[0] === n.label ? ' ★' : ''}

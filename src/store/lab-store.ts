@@ -156,17 +156,59 @@ export const useLabStore = create<LabStore>((set, get) => ({
         downstream.get(e.source)!.push(e.target);
       }
       const responsive = CELL_TYPE_MAP.get(cellId)?.responsiveLigands ?? [];
+      // 正向边种类（激活/磷酸化/结合等）—— 配体→受体为抑制性边（如 Notch 的 JAG1 顺式抑制）时不作为刺激入口
+      const POSITIVE_KINDS = new Set(['activation', 'phosphorylation', 'expression', 'binding', 'indirect', 'state-change', 'dissociation', 'missing']);
+      const ligandEdges = (l: { id: string }) => graph.core.edges.filter((e) => e.source === l.id);
       const withReceptor = ligands.filter(
-        (l) => (downstream.get(l.id) ?? []).some((t) => tierById.get(t) === 1),
+        (l) => ligandEdges(l).some((e) => tierById.get(e.target) === 1 && POSITIVE_KINDS.has(e.kind)),
       );
-      const productive = ligands.filter((l) => (downstream.get(l.id) ?? []).length > 0);
+      const productive = ligands.filter(
+        (l) => ligandEdges(l).some((e) => POSITIVE_KINDS.has(e.kind)),
+      );
+      // 无有效配体时依次回退：受体/通道直接刺激 → 源节点应激刺激（胞内激酶入口，如 ATM/AKT1）
+      const incoming = new Set(graph.core.edges.map((e) => e.target));
+      const POSITIVE_KINDS_ARR = ['activation', 'phosphorylation', 'expression', 'binding', 'indirect', 'state-change', 'dissociation', 'missing'] as const;
+      const posDownstream = new Map<string, string[]>();
+      for (const e of graph.core.edges) {
+        if (!POSITIVE_KINDS_ARR.includes(e.kind as (typeof POSITIVE_KINDS_ARR)[number])) continue;
+        if (!posDownstream.has(e.source)) posDownstream.set(e.source, []);
+        posDownstream.get(e.source)!.push(e.target);
+      }
+      // 正向可达节点数（BFS）—— 排序应激入口的级联潜力（如 AKT1 > MAPK1）
+      const positiveReach = (startId: string): number => {
+        const seen = new Set([startId]);
+        const queue = [startId];
+        while (queue.length) {
+          const cur = queue.shift()!;
+          for (const t of posDownstream.get(cur) ?? []) {
+            if (!seen.has(t)) {
+              seen.add(t);
+              queue.push(t);
+            }
+          }
+        }
+        return seen.size - 1;
+      };
+      const stimulableReceptors = graph.core.nodes.filter(
+        (n) => n.tier === 1 && (downstream.get(n.id) ?? []).length > 0,
+      );
+      const stressSources = graph.core.nodes
+        .filter(
+          (n) =>
+            !incoming.has(n.id) &&
+            (n.kind === 'kinase' || n.kind === 'gtpase') &&
+            (downstream.get(n.id) ?? []).length >= 2,
+        )
+        .sort((a, b) => positiveReach(b.id) - positiveReach(a.id));
       const preferred =
         withReceptor.find((l) => responsive.includes(l.label) || responsive.includes(l.id)) ??
         withReceptor[0] ??
         productive.find((l) => responsive.includes(l.label) || responsive.includes(l.id)) ??
         productive[0] ??
-        ligands[0];
+        (stimulableReceptors.find((n) => n.kind === 'receptor') ?? stimulableReceptors[0]) ??
+        stressSources[0];
       if (preferred) {
+        const isStim = preferred.tier !== 0;
         set({
           injected: { [preferred.id]: true },
           autoInjected: true,
@@ -177,7 +219,9 @@ export const useLabStore = create<LabStore>((set, get) => ({
               id: `auto-${Date.now()}`, tick, simTime: `T+${(tick * 0.5).toFixed(1)}s`,
               kind: 'binding',
               nodeId: preferred.id,
-              text: `自动注射外源配体 ${preferred.label}${preferred.synthetic ? '（合成激动剂）' : ''}至细胞外培养基，等待与受体结合。`,
+              text: isStim
+                ? `本通路无有效配体节点 —— 直接刺激 ${preferred.label}（等效生理刺激激活，信号由该入口进入级联）。`
+                : `自动注射外源配体 ${preferred.label}${preferred.synthetic ? '（合成激动剂）' : ''}至细胞外培养基，等待与受体结合。`,
             },
           ],
         });

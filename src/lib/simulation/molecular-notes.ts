@@ -214,6 +214,31 @@ export const NODE_NOTES: Record<string, string> = {
   PPARGC1A: 'PGC-1α，转录共激活子，AMPK 磷酸化后驱动线粒体生物合成程序。',
   SREBF1: 'SREBP-1c，脂质合成转录因子，受 mTORC1-AMPK 轴调控。',
   NTRK2: 'TrkB，BDNF 受体酪氨酸激酶，激活 PI3K-Akt/Ras-MAPK/PLCγ 三路信号。',
+
+  // ---- mTOR / AMPK 通路补充 ----
+  TSC1: 'Hamartin，TSC1/2 复合体的稳定亚基；与 TSC2（GAP）组成异二聚体，作为小 G 蛋白 Rheb 的负调控闸。',
+  RPS6: '核糖体小亚基蛋白 S6，S6K1 磷酸化 Ser235/236/Ser240/244 后优先翻译 5′TOP mRNA（翻译机器组件）。',
+  EIF4E: '真核翻译起始因子 4E，直接结合 mRNA 5′ 帽结构（m7GTP）——帽依赖翻译的限速步骤，受 4E-BP1 封锁。',
+
+  // ---- NF-κB 通路补充 ----
+  TLR4: 'Toll 样受体 4，LPS/内毒素模式识别受体；与 MD-2/CD14 组装后二聚化，启动 MyD88 与 TRIF 双臂 innate 免疫信号。',
+  IRAK1: 'IL-1 受体相关激酶 1，受体近端 Ser/Thr 激酶；死亡域互作后自磷酸化激活，继而招募并激活 TRAF6。',
+  MAP3K7: 'TAK1（TGF-β 激活性激酶 1），泛素支架激活的 MAP3K；磷酸化 MKK3/6/7 与 IKKβ，是 NF-κB/p38/JNK 三路枢纽。',
+  BCL2L1: 'Bcl-xL，抗凋亡 BCL-2 家族成员；隔离 tBid/Bax 等BH3 促凋亡蛋白，维持线粒体外膜完整性（NF-κB 靶基因）。',
+
+  // ---- 凋亡通路补充 ----
+  PARP1: '聚 ADP 核糖聚合酶 1，DNA 修复传感器；被 Caspase-3 在 DEVD216 位点切割（24/89 kDa 片段）——凋亡的经典生物标记。',
+
+  // ---- p53 通路补充 ----
+  PMAIP1: 'NOXA（PMA 诱导蛋白 1），BH3-only 促凋亡蛋白；仅结合 Mcl-1/Bfl-1 释放 Bak，是 p53 应答的“执行臂”基因。',
+  SESN1: 'Sestrin-1，p53 靶基因编码的代谢检查点蛋白；结合并抑制 p62/GATOR2 → 激活 AMPK，介导 p53-AMPK 代谢轴。',
+
+  // ---- AMPK 通路补充 ----
+  ADRA1A: 'α1A 肾上腺素能受体，Gq 耦联 GPCR；去甲肾上腺素 → PLCβ → IP3 → Ca²⁺ 升高，经由 CaMKKβ 交叉激活 AMPK。',
+
+  // ---- Ca²⁺ 通路补充 ----
+  ACh: '乙酰胆碱，胆碱能神经递质；毒蕈碱性受体（Gq）→ PLCβ → IP3 → Ca²⁺ 释放（平滑肌收缩/腺体分泌/心肌节律）。',
+  C00076: 'Ca²⁺（游离钙离子），浓度梯度约 10⁴ 倍（ER ~1 mM vs 胞质 ~100 nM）；作为第二信使以“钙火花”形式传播。',
 };
 
 /**
@@ -391,6 +416,44 @@ export const CURATED_EVENTS: Record<string, string> = {
   'CAMK2A>PRKAA1': 'CaMKKβ 以钙依赖方式磷酸化 AMPK Thr172（钙信号-能量交叉），独立于 LKB1。',
   'PRKAA1>ULK1': 'AMPK 磷酸化 ULK1 Ser317/Ser777 激活自噬启动（同时 mTORC1 的 Ser758 抑制被解除）。',
   'MTOR>ULK1': 'mTORC1 磷酸化 ULK1 Ser758，阻断其与 AMPK 的互作——营养丰富时自噬抑制。',
+
+  // ---- mTOR 教学级联（hsa04150）----
+  'AKT1>TSC1': 'Akt 磷酸化 TSC2（复合体 GAP 亚基）Ser939/Thr1462，TSC1/2 从溶酶体膜脱离——Rheb 的负调控闸解除。',
+  'TSC1>RHEB': 'TSC1/2 复合体的 TSC2 亚基作为 GAP，催化 Rheb-GTP → Rheb-GDP（保持“关”态；失活后 Rheb 重新装载 GTP）。',
+  'RPS6KB1>RPS6': 'S6K1 磷酸化 RPS6 Ser235/Ser236（对 5′TOP mRNA 翻译的“核糖体密码”），Ser240/244 随后加强。',
+  'RPS6>EIF4EBP1': 'mTORC1 的第二条翻译臂：与 S6K 并行，直接多位点磷酸化 4E-BP1（Thr37/46 → Ser65/Thr70）。',
+  'EIF4EBP1>EIF4E': '磷酸化的 4E-BP1 从 eIF4E 的 acidic face 解离（先 Thr37/46 引导后 Ser65 触发），eIF4E 释放 5′ 帽结合位点。',
+  'EIF4E>ULK1': '第三条输出臂：mTORC1 通过 ULK1 复合体控制自噬闸门——营养丰富时磷酸化抑制，饥饿时交给 AMPK 激活。',
+
+  // ---- NF-κB 教学级联（hsa04064）----
+  'TLR4>MYD88': 'TLR4 二聚体的 TIR 域与 MyD88 C 端 TIR 域同源互作，经由 IRAK4 桥接将接头定位至受体胞内面。',
+  'IRAK1>TRAF6': '自磷酸化的 IRAK1 变构释放死亡域，招募 TRAF6——泛素 E3 连接酶支架启动 K63 链自泛素化。',
+  'RELA>BCL2L1': 'p65/p50 二聚体结合 BCL2L1 启动子 κB 位点（5′-GGRNNYYCC-3′），存活程序转录开启。',
+  'BCL2L1>TNFAIP3': '同一 κB 位点家族也诱导 A20（TNFAIP3）——它将拆除本次信号本身的 K63 泛素链（延迟负反馈）。',
+
+  // ---- 凋亡教学级联（hsa04210）----
+  'CASP3>PARP1': 'Caspase-3 在 PARP1 的 DEVD216 位点切割出 24/89 kDa 片段——DNA 修复停摆，核骨架与基因组拆解开始。',
+
+  // ---- p53 教学级联（hsa04115）----
+  'ATM>CHEK2': 'ATM 磷酸化 CHK2 Thr68（SQ/TQ 基序），二聚体交叉自磷酸化后完全激活——检查点中继启动。',
+  'CDKN1A>BBC3': 'p21（阻滞）之外，p53 同时转录 PUMA——若损伤不可修复，细胞走向“退出”分支。',
+  'BBC3>PMAIP1': 'PUMA 与 NOXA 双 BH3 基因协同：PUMA 释放 Bax/Bak，NOXA 降解 Mcl-1——线粒体外膜 permeabilization 双保险。',
+  'PMAIP1>SESN1': '第三分支：Sestrin 代谢检查点——p53 经 SESN1-GATOR2-AMPK 轴将“停止增殖”与“代谢降档”绑定。',
+  'SESN1>MDM2': '应激解除后，p53 的靶基因 MDM2（E3 泛素连接酶）反噬 p53——泛素化降解，信号回到基线。',
+
+  // ---- AMPK 教学级联（hsa04152）----
+  'ADRA1A>CAMKK2': 'α1-AR-Gq → PLCβ → IP3 → Ca²⁺ 微域升高 → Ca²⁺/CaM 变构激活 CaMKKβ（钙信号交叉进入能量轴）。',
+  'ACACA>TSC2': '关闭脂质合成后，AMPK 进一步磷酸化 TSC2 Ser1345 强化 GAP 活性——双保险关闭 mTOR 合成代谢。',
+  'TSC2>RHEB': 'TSC2 GAP 催化 Rheb-GTP 水解；AMPK 强化后的 TSC1/2 将 Rheb 钓在 GDP 态——生长开关“断电”。',
+  'ULK1>PPARGC1A': '自噬回收原料的同时，AMPK 直接磷酸化 PGC-1α（能量应激的双重准备：回收 + 重建产能）。',
+
+  // ---- Ca²⁺ 教学级联（hsa04020）----
+  'ACh>PLCB1': 'ACh 结合毒蕈碱性受体 → Gq 变构交换 GTP → Gαq 结合 PLCβ（替代性：受体-效应酶直接耦合）。',
+  'PLCB1>ITPR1': 'PLCβ 水解 PIP2 生成 IP3 + DAG；IP3 扩散至 ER 膜结合 IP3R 胞外调节域（N 端 suppressor 域并合）。',
+  'ITPR1>C00076': 'IP3 结合触发 IP3R 四聚体通道开放：ER 钙库（~1 mM）顺梯度涌出，局部胞质钙升高 10-50 倍。',
+  'C00076>RYR2': 'Ca²⁺ 直接结合 RyR2 胞质侧 E-F 手位点 → CICR（钙诱导钙释放）：信号以“钙火花”形式放大传播。',
+  'CAMK2A>PPP3CA': '钙调蛋白将信号分拣：高频钙振荡 → CaMKII（频率解码）；持续低频 → Calcineurin（持续时间解码）。',
+  'NFATC1>ATP2A2': '信号复位：SERCA 以 2 Ca²⁺/ATP 将钙泵回 ER，胞质钙回落至 ~100 nM——NFAT 信号窗口关闭。',
 };
 
 /** 查找策划事件（支持 source/target 任一方向的别名归一化在引擎层完成） */

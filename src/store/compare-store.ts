@@ -157,15 +157,40 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
       const ligandNode = shared.length
         ? graph.core.nodes.find((n) => n.tier === 0 && (n.label === shared[0] || n.id === shared[0]))
         : graph.core.nodes.find((n) => n.tier === 0);
-      if (ligandNode) {
+      // 无效配体（无下游连接，如 mTOR 的 WNT2 孤立节点）不注入
+      const productiveLigand =
+        ligandNode && graph.core.edges.some((e) => e.source === ligandNode.id) ? ligandNode : undefined;
+      // 无配体通路回退：受体/通道直接刺激 → 源节点应激激酶（如 ATM/AKT1）
+      const incoming = new Set(graph.core.edges.map((e) => e.target));
+      const fallback =
+        productiveLigand ??
+        graph.core.nodes.find(
+          (n) => n.tier === 1 && graph.core.edges.some((e) => e.source === n.id),
+        ) ??
+        graph.core.nodes
+          .filter(
+            (n) =>
+              !incoming.has(n.id) &&
+              (n.kind === 'kinase' || n.kind === 'gtpase') &&
+              graph.core.edges.filter((e) => e.source === n.id).length >= 2,
+          )
+          .sort(
+            (a, b) =>
+              graph.core.edges.filter((e) => e.source === b.id).length -
+              graph.core.edges.filter((e) => e.source === a.id).length,
+          )[0];
+      if (fallback) {
         const noteA = get().armA!;
         const noteB = get().armB!;
+        const isStim = fallback.kind !== 'ligand';
         const injectEv = (suffix: string): SimEvent => ({
-          id: `c${suffix}-${Date.now()}`, tick, simTime: `T+${(tick * 0.5).toFixed(1)}s`, kind: 'binding', nodeId: ligandNode.id,
-          text: `同步注射 ${ligandNode.label} —— A/B 两臂同时接受相同剂量刺激。`,
+          id: `c${suffix}-${Date.now()}`, tick, simTime: `T+${(tick * 0.5).toFixed(1)}s`, kind: 'binding', nodeId: fallback.id,
+          text: isStim
+            ? `本通路无有效配体节点 —— 直接刺激 ${fallback.label}（两臂同步，等效生理刺激激活）。`
+            : `同步注射 ${fallback.label} —— A/B 两臂同时接受相同剂量刺激。`,
         });
         set({
-          injected: { [ligandNode.id]: true },
+          injected: { [fallback.id]: true },
           running: true,
           armA: { ...noteA, events: [...noteA.events, injectEv('a')].slice(-MAX_EVENTS) },
           armB: { ...noteB, events: [...noteB.events, injectEv('b')].slice(-MAX_EVENTS) },

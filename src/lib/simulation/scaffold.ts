@@ -20,9 +20,28 @@ export const SCAFFOLD_EDGES: Record<string, ScaffoldSpec[]> = {
   ],
   hsa04630: [
     { source: 'STAT5A', target: 'SOCS1', kind: 'expression' },
+    // JAK1 与 IL-2 受体链胞内区预结合（box1/box2 基序）—— 受体二聚 → JAK1 交叉自磷酸化
+    { source: 'IL2RA', target: 'JAK1', kind: 'activation' },
+    // JAK1 磷酸化 STAT5A Tyr694 → SH2 交叉结合二聚化 → 入核（KGML 绘制丢失）
+    { source: 'JAK1', target: 'STAT5A', kind: 'phosphorylation' },
   ],
   hsa04024: [
     { source: 'CREB1', target: 'FOS', kind: 'expression' },
+    // β2-肾上腺素能受体（合成配体 EPI 的靶受体）与 Gs 蛋白耦联 —— 子图仅保留了 ADRB1→GNAS 同源边
+    { source: 'ADRB2', target: 'GNAS', kind: 'activation' },
+  ],
+  hsa04151: [
+    // IGF1R 自磷酸化 → IRS 接头停靠 → PI3K p85 SH2 募集（KEGG 经匿名复合体节点绘制，提取时丢失）
+    { source: 'IGF1R', target: 'PIK3CA', kind: 'activation' },
+  ],
+  hsa04310: [
+    // Frizzled 招募 Dishevelled（KEGG 以 indirect 关系绘制；重复 entry 提取后部分 FZD1 实例缺失出边）
+    { source: 'FZD1', target: 'DVL1', kind: 'indirect' },
+  ],
+  hsa04350: [
+    // TGF-β 家族经典激活：II 型受体（组成性激酶）磷酸化 I 型受体 GS 域（KEGG 绘制丢失）
+    { source: 'TGFBR2', target: 'TGFBR1', kind: 'phosphorylation' },
+    { source: 'ACVR2A', target: 'ACVR1', kind: 'phosphorylation' },
   ],
 };
 

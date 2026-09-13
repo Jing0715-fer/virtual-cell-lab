@@ -38,6 +38,12 @@ interface CuratedChain {
  * TGF-β: 配体 → 双受体接力磷酸化 → R-Smad/Co-Smad 入核 → 靶基因 + I-Smad 负反馈 + 受体降解
  * Wnt: 配体 → Fz/LRP 共受体 → DVL 信号体 → 破坏复合体解体 → β-cat 入核 → 增殖基因 + DKK1 拮抗闭环
  * Notch: 配体牵拉 → S2/S3 顺序切割 → NICD 入核 → CSL 开关 + MAML 共激活 → HES/HEY + Fringe 微调
+ * mTOR: 生长输入汇合 → TSC/RHEB 开关 → mTORC1 三条输出臂（S6K/4E-BP1/ULK1）→ AMPK 能量刹车反馈
+ * NF-κB: LPS 识别 → MyD88/IRAK/TRAF6 泛素支架 → TAK1→IKK → IκBα 降解 → p65 入核 → A20 负反馈
+ * Apoptosis: FasL → 死亡受体 → Caspase-8 → tBid 汇合线粒体臂 → 凋亡小体 → 执行级联 → PARP 拆解终点
+ * p53: ATM→CHK2 → p53 三分支（p21 阻滞/PUMA-NOXA 凋亡/Sestrin 代谢）→ MDM2 负反馈环
+ * AMPK: α1-AR→CaMKKβ → AMPK Thr172 → ACC 脂肪酸氧化 → TSC2/RHEB/mTOR 关闭 → ULK1 自噬 → PGC-1α 生成
+ * Ca²⁺: ACh → PLCβ→IP3R → Ca²⁺ 释放 → RyR2 CICR 放大 → CaM 分拣（CaMKII/Calcineurin）→ NFAT 入核 → SERCA 复位
  */
 const CURATED_TOURS: Record<string, CuratedChain> = {
   hsa04010: {
@@ -143,6 +149,94 @@ const CURATED_TOURS: Record<string, CuratedChain> = {
       '通路微调 · Fringe 糖基化',
     ],
   },
+  hsa04150: {
+    chain: ['AKT1', 'TSC1', 'RHEB', 'MTOR', 'RPS6KB1', 'RPS6', 'EIF4EBP1', 'EIF4E', 'ULK1', 'PRKAA1'],
+    titles: [
+      '生长输入 · Akt 汇合点',
+      'TSC1/2 · GAP 负调控闸',
+      'Rheb · GTP 装载开关',
+      'mTORC1 · 营养与生长中枢',
+      'S6K1 · 翻译机器臂',
+      'RPS6 · 核糖体生物发生',
+      '4E-BP1 · 翻译抑制解除',
+      'eIF4E · 帽依赖翻译启动',
+      'ULK1 · 自噬闸门',
+      'AMPK · 能量刹车反馈',
+    ],
+  },
+  hsa04064: {
+    chain: ['TLR4', 'MYD88', 'IRAK1', 'TRAF6', 'MAP3K7', 'IKBKB', 'NFKBIA', 'RELA', 'BCL2L1', 'TNFAIP3'],
+    titles: [
+      '模式识别 · LPS 受体四聚',
+      'MyD88 · TIR 接头募集',
+      'IRAK1 · 受体近端激酶',
+      'TRAF6 · K63 泛素支架',
+      'TAK1 · MAP3K7 磷酸化',
+      'IKKβ · IκB 激酶催化亚基',
+      'IκBα · 磷酸化-降解',
+      'p65 · NF-κB 核转位',
+      'Bcl-xL · 存活程序基因',
+      'A20 · 负反馈信号关闭',
+    ],
+  },
+  hsa04210: {
+    chain: ['FASLG', 'FAS', 'FADD', 'CASP8', 'BID', 'BAX', 'CYCS', 'APAF1', 'CASP9', 'CASP3', 'PARP1'],
+    titles: [
+      '死亡信号 · FasL 呈递',
+      'Fas · 死亡受体三聚',
+      'FADD · 死亡域接头',
+      'Caspase-8 · 起始胱天蛋白酶',
+      'tBid · 线粒体穿针引线',
+      'Bax · 外膜孔道成形',
+      '细胞色素 c · 线粒体释放',
+      'Apaf-1 · 凋亡小体组装',
+      'Caspase-9 · 执行级联点火',
+      'Caspase-3 · 主要执行蛋白酶',
+      'PARP · 细胞拆解终点',
+    ],
+  },
+  hsa04115: {
+    chain: ['ATM', 'CHEK2', 'TP53', 'CDKN1A', 'BBC3', 'PMAIP1', 'SESN1', 'MDM2'],
+    titles: [
+      '损伤感受 · ATM 激酶',
+      'CHK2 · 检查点中继',
+      'p53 · 基因组卫士',
+      'p21 · G1/S 阻滞',
+      'PUMA · 凋亡准备',
+      'NOXA · 凋亡执行',
+      'Sestrin · 代谢检查点',
+      'MDM2 · 负反馈环',
+    ],
+  },
+  hsa04152: {
+    chain: ['ADRA1A', 'CAMKK2', 'PRKAA1', 'ACACA', 'TSC2', 'RHEB', 'MTOR', 'ULK1', 'PPARGC1A'],
+    titles: [
+      '应激输入 · α1 肾上腺素能',
+      'CaMKKβ · 钙敏感激活激酶',
+      'AMPK · 能量电荷传感器',
+      'ACC · 脂肪酸氧化闸门',
+      'TSC2 · 生长抑制加固',
+      'Rheb · 处于钳制之下',
+      'mTOR · 合成代谢关闭',
+      'ULK1 · 自噬启动',
+      'PGC-1α · 线粒体生成程序',
+    ],
+  },
+  hsa04020: {
+    chain: ['ACh', 'PLCB1', 'ITPR1', 'cpd:C00076', 'RYR2', 'CALM1', 'CAMK2A', 'PPP3CA', 'NFATC1', 'ATP2A2'],
+    titles: [
+      '信号起点 · 乙酰胆碱',
+      'PLCβ · PIP2 水解',
+      'IP3R · 钙释放通道',
+      'Ca²⁺ · 通用第二信使',
+      'RyR2 · 钙诱导钙释放',
+      '钙调蛋白 · Ca²⁺ 感受器',
+      'CaMKII · 记忆激酶',
+      '钙调磷酸酶 · 去磷酸化门',
+      'NFAT · 核转位终点',
+      'SERCA · 信号复位泵',
+    ],
+  },
 };
 
 /** 手工策划链的补充文案（引导语，教育性 framing） */
@@ -161,6 +255,18 @@ const CURATED_INTROS: Record<string, string> = {
     '胚胎发育的核心开关：Wnt 如何在 10 站内“解散”破坏复合体、让 β-catenin 免于降解入核开启增殖程序——最后一站 DKK1 演示通路自带的外部关闭机制。',
   hsa04330:
     '不需要第二信使的捷径：Notch 信号经“配体牵拉 + 三次蛋白酶切割”直接释放转录因子入核——10 站看懂发育生物学最直接的细胞对话，末站揭示 Fringe 糖基化如何微调配体选择性。',
+  hsa04150:
+    '生长的中央账本：mTORC1 如何在 10 站内将生长因子信号兑换成核糖体、翻译与自噬的决策——最后一站 AMPK 演示能量匮乏时整套程序如何被叫停。',
+  hsa04064:
+    '炎症的总开关：LPS 识别如何在 10 站内点亮 NF-κB——从受体四聚到 IκBα 降解再到核内基因程序，末站 A20 揭示通路如何自我关闭（K63 泛素链全程参与）。',
+  hsa04210:
+    '细胞的程序性死亡：FasL 一次结合如何在 11 站内从死亡受体抵达线粒体、装配凋亡小体、并最终拆解整个细胞——外源与内源凋亡途径在 tBid 站汇合。',
+  hsa04115:
+    '基因组的最后防线：DNA 双链断裂如何在 8 站内唤醒 p53——三条分支基因（阻滞/凋亡/代谢）与 MDM2 负反馈构成完整的应激决策网络。',
+  hsa04152:
+    '细胞的能量仪表盘：AMPK 如何感知 AMP:ATP 比值并关闭一切耗能程序——9 站走完从钙信号到脂肪酸氧化、自噬与线粒体生成的完整节能动员。',
+  hsa04020:
+    '最迅速的第二信使：乙酰胆碱如何在 10 站内引发钙离子火花——从 ER 释放到 CICR 放大、经钙调蛋白分拣给激酶与磷酸酶，最终由 SERCA 泵回 ER 复位（全程毫秒级）。',
 };
 
 const EDGE_BIDIRECTIONAL = new Set(['binding', 'association']);

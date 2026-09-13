@@ -13,6 +13,8 @@ import { useState } from 'react';
 import { FileDown, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
 import { useCompareStore, moleculeDeltas, compareSummary } from '@/store/compare-store';
+import { getSceneSnapshot, snapshotAgeMs } from '@/lib/simulation/scene-capture';
+import type { ActivitySample } from '@/lib/simulation/engine';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
 import { INHIBITORS } from '@/data/inhibitors';
 import type { CoreNode, PathwayGraph } from '@/types/kegg';
@@ -241,6 +243,163 @@ interface ReportData {
 }
 
 // ---------- 导出主流程 ----------
+/** 加载 dataURL 图片为 HTMLImageElement */
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+/** 转录组热图色标（与应用内 transcriptomic-heatmap 一致） */
+function heatColor(v: number): string {
+  const c = Math.max(0, Math.min(1, v));
+  if (c < 0.04) return '#0a1a20';
+  if (c < 0.25) return '#0d3a33';
+  if (c < 0.45) return '#14b8a6';
+  if (c < 0.65) return '#2dd4bf';
+  if (c < 0.8) return '#fbbf24';
+  return '#fb7185';
+}
+
+interface HeatRowPdf {
+  label: string;
+  values: number[];
+  peak: number;
+  peakTick: number;
+}
+
+/** 构建热图行（核内靶基因按 label 合并重复 entry，取平行分支 max —— 与应用内语义一致） */
+function buildHeatRows(graph: PathwayGraph, history: ActivitySample[], maxCols: number): HeatRowPdf[] {
+  if (history.length < 2) return [];
+  const step = Math.max(1, Math.floor(history.length / maxCols));
+  const cols = history.filter((_, i) => i % step === 0 || i === history.length - 1);
+  const geneNodes = graph.core.nodes.filter((n) => n.compartment === 'nucleus' && n.kind === 'gene');
+  const tfNodes = graph.core.nodes.filter((n) => n.compartment === 'nucleus' && n.kind === 'tf');
+  const source = geneNodes.length >= 3 ? geneNodes : [...geneNodes, ...tfNodes];
+  const byLabel = new Map<string, typeof source>();
+  for (const n of source) {
+    if (!byLabel.has(n.label)) byLabel.set(n.label, []);
+    byLabel.get(n.label)!.push(n);
+  }
+  const rows: HeatRowPdf[] = [];
+  for (const [label, nodes] of byLabel) {
+    const values = cols.map((h) => Math.max(...nodes.map((n) => h.values[n.id] ?? 0)));
+    const peak = Math.max(...values, 0);
+    const peakIdx = values.indexOf(peak);
+    rows.push({ label, values, peak, peakTick: cols[peakIdx]?.tick ?? 0 });
+  }
+  return rows.sort((a, b) => b.peak - a.peak);
+}
+
+/** 绘制转录组响应热图页 → 返回是否成页 */
+function drawHeatmapPage(
+  ctx: CanvasRenderingContext2D,
+  rows: HeatRowPdf[],
+  graph: PathwayGraph,
+  history: ActivitySample[],
+  cellName: string,
+): boolean {
+  if (rows.length === 0) return false;
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, PAGE_W, PAGE_H);
+  let y = sectionTitle(ctx, PAD, '转录组响应谱', 'TRANSCRIPTOMIC RESPONSE');
+  setFont(ctx, 9, '400', false, INK_FAINT);
+  ctx.fillText(
+    `${graph.meta.nameZh} · ${cellName} · 靶基因活性 × 模拟时间（采样 ${(history.length - 1) * 0.5 | 0} s · 峰值时刻 ▲）`,
+    PAD, y,
+  );
+  y += 16;
+
+  // 统计卡
+  const significant = rows.filter((r) => r.peak > 0.3).length;
+  const cards: [string, string][] = [
+    [String(rows.length), '靶基因'],
+    [String(significant), '显著响应(峰>30%)'],
+    [`T+${(((history[history.length - 1]?.tick ?? 0)) * 0.5).toFixed(1)}s`, '采样终点'],
+  ];
+  const cardW = (CONTENT_W - 20) / 3;
+  cards.forEach(([num, label], i) => {
+    const x = PAD + i * (cardW + 10);
+    ctx.fillStyle = '#fffbeb'; ctx.strokeStyle = '#fde68a';
+    roundRect(ctx, x, y, cardW, 42, 8); ctx.fill(); ctx.stroke();
+    setFont(ctx, 15, '800', true, '#b45309');
+    ctx.fillText(num, x + 10, y + 22);
+    setFont(ctx, 8.5, '400', false, INK_FAINT);
+    ctx.fillText(label, x + 10, y + 35);
+  });
+  y += 56;
+
+  // 热图网格
+  const labelW = 96;
+  const gridW = CONTENT_W - labelW - 12;
+  const rowH = Math.min(24, Math.max(14, (PAGE_H - y - 120) / rows.length));
+  const colCount = rows[0]?.values.length ?? 0;
+  const cellW = colCount > 0 ? gridW / colCount : gridW;
+  // 网格背景框
+  ctx.fillStyle = '#f8fafc'; ctx.strokeStyle = LINE;
+  roundRect(ctx, PAD + labelW + 12, y, gridW, rows.length * rowH, 4); ctx.fill();
+  rows.forEach((r, ri) => {
+    const ry = y + ri * rowH;
+    setFont(ctx, 9.5, ri === 0 ? '600' : '500', true, ri === 0 ? '#92400e' : INK);
+    ctx.fillText(r.label, PAD, ry + rowH * 0.5 + 3);
+    r.values.forEach((v, ci) => {
+      ctx.fillStyle = heatColor(v);
+      ctx.fillRect(PAD + labelW + 12 + ci * cellW, ry + 1, Math.max(1, cellW - 0.6), rowH - 2);
+    });
+    // 峰值标记 ▲
+    const peakIdx = r.values.indexOf(r.peak);
+    if (r.peak > 0.3 && peakIdx >= 0) {
+      setFont(ctx, 8, '700', true, '#fff');
+      ctx.fillText('▲', PAD + labelW + 12 + peakIdx * cellW + cellW / 2 - 3, ry + rowH - 3);
+    }
+  });
+  y += rows.length * rowH + 8;
+
+  // 时间轴
+  const tEnd = (history[history.length - 1]?.tick ?? 0) * 0.5;
+  setFont(ctx, 8, '400', true, INK_FAINT);
+  ctx.fillText('0s', PAD + labelW + 12, y + 10);
+  const midTxt = `${(tEnd / 2).toFixed(0)}s`;
+  ctx.fillText(midTxt, PAD + labelW + 12 + gridW / 2 - ctx.measureText(midTxt).width / 2, y + 10);
+  const endTxt = `${tEnd.toFixed(0)}s`;
+  ctx.fillText(endTxt, PAD + labelW + 12 + gridW - ctx.measureText(endTxt).width, y + 10);
+  y += 22;
+
+  // 峰值响应排行
+  y = sectionTitle(ctx, y, '峰值响应排行', 'PEAK RANKING');
+  const top = rows.slice(0, Math.min(8, rows.length));
+  top.forEach((r, i) => {
+    const ry = y + i * 20;
+    setFont(ctx, 10, '500', true, INK);
+    ctx.fillText(r.label, PAD, ry + 10);
+    const barX = PAD + 110;
+    const barW = CONTENT_W - barX - 150;
+    ctx.fillStyle = '#f1f5f9';
+    roundRect(ctx, barX, ry + 2, barW, 10, 3); ctx.fill();
+    ctx.fillStyle = heatColor(r.peak);
+    roundRect(ctx, barX, ry + 2, Math.max(2, barW * r.peak), 10, 3); ctx.fill();
+    setFont(ctx, 8.5, '400', true, INK_SOFT);
+    ctx.fillText(`峰 ${(r.peak * 100).toFixed(0)}% · T+${(r.peakTick * 0.5).toFixed(1)}s`, barX + barW + 8, ry + 11);
+  });
+  y += top.length * 20 + 10;
+
+  // 色标说明
+  const gradX = PAD;
+  const gradW = 200;
+  const stops = ['#0a1a20', '#0d3a33', '#14b8a6', '#2dd4bf', '#fbbf24', '#fb7185'];
+  const g = ctx.createLinearGradient(gradX, 0, gradX + gradW, 0);
+  stops.forEach((c, i) => g.addColorStop(i / (stops.length - 1), c));
+  ctx.fillStyle = g;
+  roundRect(ctx, gradX, y, gradW, 8, 2); ctx.fill();
+  setFont(ctx, 8, '400', true, INK_FAINT);
+  ctx.fillText('低', gradX + gradW + 8, y + 8);
+  ctx.fillText('转录响应强度', gradX + gradW + 26, y + 8);
+  ctx.fillText('高', gradX - 14, y + 8);
+  return true;
+}
+
 export function ReportExportButton() {
   const [state, setState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle');
   const graph = useLabStore((s) => s.graph);
@@ -319,6 +478,31 @@ export function ReportExportButton() {
       cascadeLines.forEach((ln, i) => ctx.fillText(ln, PAD + 12, y + 20 + i * 13));
       y += 32 + (cascadeLines.length - 1) * 13 + 4;
 
+      // 3D 细胞快照（导出时采集的最近场景）
+      const snap = getSceneSnapshot();
+      if (snap) {
+        try {
+          const img = await loadImage(snap);
+          const secH = 208;
+          y = sectionTitle(ctx, y, '3D 虚拟细胞快照', 'LIVE SCENE SNAPSHOT');
+          ctx.fillStyle = '#f8fafc'; ctx.strokeStyle = LINE;
+          roundRect(ctx, PAD, y, CONTENT_W, secH, 10); ctx.fill(); ctx.stroke();
+          const inner = 8;
+          const availW = CONTENT_W - inner * 2;
+          const availH = secH - inner * 2 - 16;
+          const ratio = Math.min(availW / img.width, availH / img.height);
+          const dw = img.width * ratio, dh = img.height * ratio;
+          ctx.drawImage(img, PAD + (CONTENT_W - dw) / 2, y + inner, dw, dh);
+          const ageS = Math.round(snapshotAgeMs() / 1000);
+          setFont(ctx, 8, '400', true, INK_FAINT);
+          const cap = `导出前 ${ageS}s · 3D 沉浸视图实际渲染帧（实验台回放可重现同一画面）`;
+          ctx.fillText(cap, PAD + inner, y + secH - 5);
+          y += secH + 12;
+        } catch {
+          /* 快照解码失败时跳过该节 */
+        }
+      }
+
       // 摘要统计卡
       y = sectionTitle(ctx, y, '结果摘要', 'SUMMARY');
       const cards: [string, string][] = [
@@ -357,7 +541,21 @@ export function ReportExportButton() {
 
       const pages: HTMLCanvasElement[] = [c1];
 
-      // ============ 第 2 页起: 分子档案 + 药理 + 事件流 ============
+      // ============ 第 2 页: 转录组响应热图（有核内数据时） ============
+      const heatRows = buildHeatRows(graph, s.activityHistory, 48);
+      if (heatRows.length > 0) {
+        const ch = document.createElement('canvas');
+        ch.width = PAGE_W * SCALE; ch.height = PAGE_H * SCALE;
+        const ctxH = ch.getContext('2d');
+        if (ctxH) {
+          ctxH.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+          if (drawHeatmapPage(ctxH, heatRows, graph, s.activityHistory, cell?.name ?? '—')) {
+            pages.push(ch);
+          }
+        }
+      }
+
+      // ============ 第 3 页起: 分子档案 + 药理 + 事件流 ============
       const c2 = document.createElement('canvas');
       c2.width = PAGE_W * SCALE; c2.height = PAGE_H * SCALE;
       const ctx2 = c2.getContext('2d');

@@ -54,6 +54,63 @@ const OFF_RATE = 0.16; // 衰减速率
 const LIGAND_RATE = 2.0;
 const PHOSPHO_DECAY = 0.05;
 const EXPRESSION_DELAY_TICKS = 6; // 转录翻译延迟（tick）
+const BRAKE_BASAL = 0.65; // 组成性刹车静息活性（如 TSC1/2 GAP、存续蛋白）
+const INTRINSIC_DRIVE = 1.0; // 内在活性驱动力（如 Rheb 自身 GDP→GTP 交换）
+
+const NEG_KINDS = new Set<EdgeKind>(['inhibition', 'repression', 'dephosphorylation']);
+
+/**
+ * 配对基序：组成性“刹车” → 内在活性小 G 蛋白（如 TSC1/2 GAP → Rheb）
+ * 静息态：刹车活性 0.65 压制 gtpase 靶点（纯抑制输入 + 内在核苷酸交换活性）
+ * 刹车被抑制物（Akt/AMPK）压制后 → 靶点自主活化 —— 双负结构（抑制物的抑制物）得以传导
+ * 仅初始化此类配对（避免影响 CFLAR-BCL2 等其他全抑制出边节点的既有动力学）
+ */
+function pairedBrakeMotifs(graph: EngineGraph): { brakes: Set<string>; driven: Set<string> } {
+  const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
+  const outgoing = new Map<string, CoreEdge[]>();
+  const incoming = new Map<string, CoreEdge[]>();
+  for (const e of graph.edges) {
+    if (!outgoing.has(e.source)) outgoing.set(e.source, []);
+    outgoing.get(e.source)!.push(e);
+    if (!incoming.has(e.target)) incoming.set(e.target, []);
+    incoming.get(e.target)!.push(e);
+  }
+  const induced = new Set<string>(); // 诱导型反馈抑制子（表达入边，静息态低）
+  for (const e of graph.edges) {
+    if (e.kind === 'expression' || e.kind === 'repression') induced.add(e.target);
+  }
+  const brakes = new Set<string>();
+  const driven = new Set<string>();
+  for (const [srcId, outs] of outgoing) {
+    const src = nodeById.get(srcId);
+    if (!src) continue;
+    if (!outs.every((e) => NEG_KINDS.has(e.kind))) continue; // 全抑制性出边
+    if (induced.has(srcId)) continue; // 诱导型（如 SOCS/A20）不初始化
+    if (src.kind === 'phosphatase' || src.kind === 'tf' || src.kind === 'gene' || src.kind === 'ligand') continue;
+    // 靶点须为纯抑制输入的 gtpase（内在活性 + GAP 刹车基序）
+    for (const e of outs) {
+      const t = nodeById.get(e.target);
+      if (!t || t.kind !== 'gtpase') continue;
+      const ins = incoming.get(t.id) ?? [];
+      if (ins.length === 0) continue;
+      if (!ins.every((ie) => NEG_KINDS.has(ie.kind))) continue;
+      driven.add(t.id);
+      // 该 gtpase 的全部纯抑制输入源都作为刹车初始化（保证静息压制完整）
+      for (const ie of ins) {
+        const br = nodeById.get(ie.source);
+        if (br && !induced.has(ie.source) && br.kind !== 'phosphatase' && br.kind !== 'tf' && br.kind !== 'gene' && br.kind !== 'ligand') {
+          brakes.add(ie.source);
+        }
+      }
+    }
+  }
+  return { brakes, driven };
+}
+
+/** 导出刹车集合（computePhase 忽略组成性刹车 —— 它们是背景机制而非信号） */
+export function brakeNodeIds(graph: EngineGraph): Set<string> {
+  return pairedBrakeMotifs(graph).brakes;
+}
 
 export const KIND_ZH: Record<MoleculeKind, string> = {
   ligand: '配体', receptor: '受体', kinase: '激酶', phosphatase: '磷酸酶',
@@ -81,11 +138,17 @@ export const PHASES = [
   { id: 4, name: '转录响应', en: 'Transcription', desc: '转录因子入核，靶基因表达程序启动' },
 ] as const;
 
-/** 初始化全部节点状态 */
+/** 初始化全部节点状态（组成性刹车配对基序 → 静息活性 0.65） */
 export function initStates(graph: EngineGraph): Record<string, SimNodeState> {
+  const { brakes } = pairedBrakeMotifs(graph);
   const states: Record<string, SimNodeState> = {};
   for (const n of graph.nodes) {
-    states[n.id] = { activity: 0, phospho: 0, activated: false, activatedAtTick: null };
+    states[n.id] = {
+      activity: brakes.has(n.id) ? BRAKE_BASAL : 0,
+      phospho: 0,
+      activated: false,
+      activatedAtTick: null,
+    };
   }
   return states;
 }
@@ -157,6 +220,7 @@ export function step(ctx: StepContext): void {
   ctx.tick += 1;
   const tick = ctx.tick;
   ctx.signalFlux = {};
+  const { brakes, driven } = pairedBrakeMotifs(graph);
 
   // 突变锁定
   const mutMap = new Map(mutations.map((m) => [m.node, m]));
@@ -169,9 +233,12 @@ export function step(ctx: StepContext): void {
     }
   }
 
-  // 1. 配体活性趋向注入目标值（含合成配体）
+  // 1. 配体活性趋向注入目标值（含合成配体）；无配体通路支持直接刺激（受体/通道/源节点应激入口，等效生理刺激激活）
+  const stimulatedNodes: CoreNode[] = [];
   for (const n of graph.nodes) {
-    if (n.kind !== 'ligand') continue;
+    const isLigand = n.kind === 'ligand';
+    const isStimulated = !isLigand && !!injected[n.id];
+    if (!isLigand && !isStimulated) continue;
     const target = injected[n.id] ? 1 : 0;
     const st = states[n.id];
     if (!st) continue;
@@ -179,6 +246,22 @@ export function step(ctx: StepContext): void {
     st.activity += Math.sign(diff) * Math.min(Math.abs(diff), LIGAND_RATE * 0.1);
     if (st.activity > 0.995) st.activity = 1;
     if (st.activity < 0.005) st.activity = 0;
+    // 直接刺激的激活事件（step 3 会跳过被锁定节点）
+    if (isStimulated && !st.activated && st.activity >= ACTIVE_THRESHOLD) {
+      st.activated = true;
+      st.activatedAtTick = tick;
+      stimulatedNodes.push(n);
+    }
+  }
+  for (const n of stimulatedNodes) {
+    const isSurface = n.kind === 'receptor' || n.kind === 'channel';
+    newEvents.push({
+      id: `stim-${tick}-${n.id}`, tick, simTime: fmtTime(tick), kind: 'binding',
+      nodeId: n.id, nodeLabel: n.label,
+      text: isSurface
+        ? `${n.label} 胞外域受到直接刺激（等效配体结合），构象变化传递至胞内域——信号面暴露。`
+        : `${n.label} 受到直接应激激活（模拟上游生理刺激：如 DNA 损伤/能量应激/生长因子）——激酶构象转向活性态。`,
+    });
   }
 
   // 2. 汇集每个节点的输入信号
@@ -245,6 +328,7 @@ export function step(ctx: StepContext): void {
       continue;
     }
     if (n.kind === 'ligand') continue; // 已在配体更新中处理
+    if (injected[n.id]) continue; // 直接刺激节点：活性由刺激锁定（step 1）
 
     const pos = posIn[n.id] ?? 0;
     const neg = negIn[n.id] ?? 0;
@@ -252,6 +336,14 @@ export function step(ctx: StepContext): void {
     if (pos > 0) da += ON_RATE * pos * (1 - st.activity) * 0.1;
     if (neg > 0) da -= ON_RATE * neg * st.activity * 0.12;
     da -= OFF_RATE * st.activity * 0.1;
+    // 配对刹车基序：组成性维持（如 TSC GAP 持续表达）+ 刹车解除后的内在驱动力（如 Rheb 自身核苷酸交换）
+    if (brakes.has(n.id)) {
+      da += ON_RATE * BRAKE_BASAL * (1 - st.activity) * 0.1;
+    }
+    if (driven.has(n.id)) {
+      const drive = Math.max(0, INTRINSIC_DRIVE - neg);
+      if (drive > 0) da += ON_RATE * drive * (1 - st.activity) * 0.1;
+    }
     // 基础泄漏（突变表型：即使无输入也缓慢自发活化）
     st.activity = clamp(st.activity + da, 0, 1);
 
@@ -260,8 +352,8 @@ export function step(ctx: StepContext): void {
     if (pIn > 0) st.phospho = clamp(st.phospho + 0.2 * pIn * (1 - st.phospho) * 0.1, 0, 1);
     else st.phospho = Math.max(0, st.phospho - PHOSPHO_DECAY * 0.1);
 
-    // 激活事件检测
-    if (!st.activated && st.activity >= ACTIVE_THRESHOLD) {
+    // 激活事件检测（组成性刹车不触发 —— 其活性为背景机制而非信号激活）
+    if (!brakes.has(n.id) && !st.activated && st.activity >= ACTIVE_THRESHOLD) {
       st.activated = true;
       st.activatedAtTick = tick;
       activatedThisTick.push(n);
@@ -331,13 +423,15 @@ function genericEventText(srcLabel: string, dst: CoreNode, kind: EdgeKind): stri
   }
 }
 
-/** 计算当前信号阶段（0-4） */
+/** 计算当前信号阶段（0-4；组成性刹车不计入 —— 静息态背景机制） */
 export function computePhase(
   graph: EngineGraph,
   states: Record<string, SimNodeState>,
 ): number {
   let phase = 0;
+  const brakes = pairedBrakeMotifs(graph).brakes;
   for (const n of graph.nodes) {
+    if (brakes.has(n.id)) continue;
     const st = states[n.id];
     if (st?.activated) phase = Math.max(phase, phaseOf(n.tier));
   }

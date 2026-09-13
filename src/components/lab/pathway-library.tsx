@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 /** 具有手工策划教学级联的通路（与 guided-tour.ts CURATED_TOURS 同步） */
 const CURATED_TOUR_PATHWAYS = new Set([
   'hsa04010', 'hsa04151', 'hsa04630', 'hsa04024', 'hsa04350', 'hsa04310', 'hsa04330',
+  'hsa04150', 'hsa04064', 'hsa04210', 'hsa04115', 'hsa04152', 'hsa04020',
 ]);
 
 export function PathwayLibrary() {

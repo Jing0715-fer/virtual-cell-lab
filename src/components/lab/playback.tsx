@@ -33,6 +33,51 @@ export function PlaybackControls() {
   const ligands = graph?.core.nodes.filter((n) => n.tier === 0) ?? [];
   const activatedCount = events.filter((e) => e.kind !== 'info' && e.kind !== 'phase' && e.kind !== 'reset').length;
 
+  // 配体仅当“有效”（存在下游连接）时才显示；否则显示直接刺激入口：
+  // 受体/通道（tier 1 有下游）→ 源节点应激激酶（无上游输入且度数≥2，按正向级联潜力排序）
+  const hasProductiveLigand =
+    graph?.core.edges.some((e) => ligands.some((l) => l.id === e.source)) ?? false;
+  const stimulables =
+    !hasProductiveLigand && graph
+      ? (() => {
+          const POS_KINDS = new Set(['activation', 'phosphorylation', 'expression', 'binding', 'indirect', 'state-change', 'dissociation', 'missing']);
+          const posDown = new Map<string, string[]>();
+          for (const e of graph.core.edges) {
+            if (!POS_KINDS.has(e.kind)) continue;
+            if (!posDown.has(e.source)) posDown.set(e.source, []);
+            posDown.get(e.source)!.push(e.target);
+          }
+          const reach = (startId: string): number => {
+            const seen = new Set([startId]);
+            const queue = [startId];
+            while (queue.length) {
+              const cur = queue.shift()!;
+              for (const t of posDown.get(cur) ?? []) {
+                if (!seen.has(t)) {
+                  seen.add(t);
+                  queue.push(t);
+                }
+              }
+            }
+            return seen.size - 1;
+          };
+          const incoming = new Set(graph.core.edges.map((e) => e.target));
+          const receptors = graph.core.nodes.filter(
+            (n) => n.tier === 1 && graph.core.edges.some((e) => e.source === n.id),
+          );
+          const stressSources = graph.core.nodes
+            .filter((n) => {
+              const deg = graph.core.edges.filter((e) => e.source === n.id).length;
+              return !incoming.has(n.id) && deg >= 2 && (n.kind === 'kinase' || n.kind === 'gtpase');
+            })
+            .sort((a, b) => reach(b.id) - reach(a.id));
+          return [
+            ...receptors.map((n) => ({ n, surface: true })),
+            ...stressSources.map((n) => ({ n, surface: false })),
+          ].slice(0, 5);
+        })()
+      : [];
+
   return (
     <div className="space-y-3 border-t border-white/5 bg-slate-950/60 p-3 backdrop-blur">
       {/* 阶段进度 */}
@@ -119,31 +164,70 @@ export function PlaybackControls() {
           ))}
         </div>
 
-        {/* 配体注射 */}
+        {/* 配体注射 / 直接刺激入口 */}
         <div className="flex flex-1 flex-wrap items-center justify-end gap-1.5">
-          <Droplet className="h-3.5 w-3.5 text-amber-400/70" />
-          <span className="text-[10px] uppercase tracking-wider text-slate-500">配体注射</span>
-          {ligands.length === 0 && <span className="text-[11px] text-slate-600">本通路无配体节点</span>}
-          {ligands.map((l) => {
-            const on = !!injected[l.id];
-            return (
-              <button
-                key={l.id}
-                onClick={() => toggleLigand(l.id)}
-                disabled={cell?.mutations?.some((m) => m.node === l.id)}
-                className={cn(
-                  'rounded-full border px-2.5 py-1 font-mono text-[10.5px] transition-all',
-                  on
-                    ? 'border-amber-400/70 bg-amber-400/20 text-amber-200 shadow-[0_0_12px_rgba(251,191,36,0.35)]'
-                    : 'border-white/10 bg-white/5 text-slate-400 hover:border-amber-400/40 hover:text-amber-300',
-                )}
-                title={l.aliases[0] ?? l.label}
+          {hasProductiveLigand ? (
+            <>
+              <Droplet className="h-3.5 w-3.5 text-amber-400/70" />
+              <span className="text-[10px] uppercase tracking-wider text-slate-500">配体注射</span>
+              {ligands.map((l) => {
+                const on = !!injected[l.id];
+                return (
+                  <button
+                    key={l.id}
+                    onClick={() => toggleLigand(l.id)}
+                    disabled={cell?.mutations?.some((m) => m.node === l.id)}
+                    className={cn(
+                      'rounded-full border px-2.5 py-1 font-mono text-[10.5px] transition-all',
+                      on
+                        ? 'border-amber-400/70 bg-amber-400/20 text-amber-200 shadow-[0_0_12px_rgba(251,191,36,0.35)]'
+                        : 'border-white/10 bg-white/5 text-slate-400 hover:border-amber-400/40 hover:text-amber-300',
+                    )}
+                    title={l.aliases[0] ?? l.label}
+                  >
+                    {on ? '◉ ' : '○ '}
+                    {l.label}
+                  </button>
+                );
+              })}
+            </>
+          ) : (
+            <>
+              <Zap className="h-3.5 w-3.5 text-teal-400/70" />
+              <span
+                className="text-[10px] uppercase tracking-wider text-slate-500"
+                title="本通路无有效配体入口（如胞内应激/营养感知通路）—— 直接刺激受体或应激激酶以启动级联（等效生理刺激：LPS/辐照/能量应激/生长因子）"
               >
-                {on ? '◉ ' : '○ '}
-                {l.label}
-              </button>
-            );
-          })}
+                直接刺激
+              </span>
+              {stimulables.length === 0 && (
+                <span className="text-[11px] text-slate-600">无可用刺激入口</span>
+              )}
+              {stimulables.map(({ n: r, surface }) => {
+                const on = !!injected[r.id];
+                return (
+                  <button
+                    key={r.id}
+                    onClick={() => toggleLigand(r.id)}
+                    className={cn(
+                      'rounded-full border px-2.5 py-1 font-mono text-[10.5px] transition-all',
+                      on
+                        ? 'border-teal-400/70 bg-teal-400/20 text-teal-200 shadow-[0_0_12px_rgba(45,212,191,0.35)]'
+                        : 'border-white/10 bg-white/5 text-slate-400 hover:border-teal-400/40 hover:text-teal-300',
+                    )}
+                    title={
+                      surface
+                        ? `${r.label} —— 受体直接刺激（等效配体结合后构象激活）`
+                        : `${r.label} —— 应激刺激入口（等效上游生理激活：DNA 损伤/能量应激/生长因子）`
+                    }
+                  >
+                    {on ? '◉ ' : '○ '}
+                    {r.label}
+                  </button>
+                );
+              })}
+            </>
+          )}
         </div>
       </div>
 
