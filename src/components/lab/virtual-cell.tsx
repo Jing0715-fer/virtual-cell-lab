@@ -51,6 +51,7 @@ export function VirtualCellView() {
   const selectNode = useLabStore((s) => s.selectNode);
   const tick = useLabStore((s) => s.tick);
   const running = useLabStore((s) => s.running);
+  const inhibition = useLabStore((s) => s.inhibition);
   const mutations = CELL_TYPE_MAP.get(cellId)?.mutations ?? [];
 
   const cell = CELL_TYPE_MAP.get(cellId);
@@ -236,6 +237,8 @@ export function VirtualCellView() {
             const recentlyOn = st.activatedAtTick !== null && tick - st.activatedAtTick < 8 && running;
             const isLigand = n.kind === 'ligand';
             const isInjected = isLigand && injected[n.id];
+            const inhLevel = inhibition[n.id] ?? 0;
+            const inhibited = inhLevel > 0.05;
 
             return (
               <g
@@ -266,6 +269,16 @@ export function VirtualCellView() {
                   <rect x={-14} y={-30} width={28} height={60} rx={3} fill="rgba(45,212,191,0.22)" stroke="#2dd4bf" strokeWidth={0.7} opacity={0.9} />
                 )}
 
+                {/* 药物抑制环（紫色虚线 = 催化输出钳制） */}
+                {inhibited && (
+                  <rect
+                    x={-n.nw / 2 - 4} y={-n.nh / 2 - 4} width={n.nw + 8} height={n.nh + 8} rx={10}
+                    fill="none" stroke="#c084fc" strokeWidth={1.4} strokeDasharray="5 3" opacity={0.55 + inhLevel * 0.45}
+                  >
+                    <animate attributeName="stroke-dashoffset" from="0" to="16" dur="1.2s" repeatCount="indefinite" />
+                  </rect>
+                )}
+
                 {/* 激活脉冲环 */}
                 {recentlyOn && (
                   <rect x={-n.nw / 2} y={-n.nh / 2} width={n.nw} height={n.nh} rx={8}
@@ -294,6 +307,14 @@ export function VirtualCellView() {
                   <g opacity={Math.min(1, st.phospho * 1.2)} transform={`translate(${n.nw / 2 - 4} ${-n.nh / 2 + 2})`}>
                     <circle r={7} fill="#78350f" stroke="#fbbf24" strokeWidth={1} />
                     <text y={2.8} textAnchor="middle" fontSize={8.5} fill="#fde68a" fontWeight={700} fontFamily="var(--font-geist-mono, monospace)">P</text>
+                  </g>
+                )}
+
+                {/* 药物抑制徽标 */}
+                {inhibited && (
+                  <g opacity={Math.min(1, 0.6 + inhLevel * 0.4)} transform={`translate(${n.nw / 2 - 6} ${n.nh / 2 - 4})`}>
+                    <circle r={7.5} fill="#4c1d95" stroke="#c084fc" strokeWidth={1} />
+                    <text y={3} textAnchor="middle" fontSize={9} fill="#e9d5ff" fontWeight={700} fontFamily="var(--font-geist-mono, monospace)">⊘</text>
                   </g>
                 )}
 

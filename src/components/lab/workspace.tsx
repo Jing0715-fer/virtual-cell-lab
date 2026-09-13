@@ -7,7 +7,7 @@
 import { useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useQuery } from '@tanstack/react-query';
-import { Microscope, Map as MapIcon, FlaskConical, Boxes, Orbit } from 'lucide-react';
+import { Microscope, Map as MapIcon, FlaskConical, Boxes, Orbit, Pill } from 'lucide-react';
 import type { PathwayGraph } from '@/types/kegg';
 import { useLabStore } from '@/store/lab-store';
 import { VirtualCellView } from './virtual-cell';
@@ -16,6 +16,7 @@ import { PlaybackControls } from './playback';
 import { MoleculeInspector } from './inspector';
 import { EventTimeline } from './timeline';
 import { PathwayLibrary } from './pathway-library';
+import { PharmacologyPanel } from './pharmacology';
 import { AiAssistant } from './ai-assistant';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -196,15 +197,18 @@ export function LabWorkspace() {
       {/* 右栏 */}
       <div className="order-3 h-[560px] overflow-hidden rounded-2xl border border-white/8 bg-slate-950/50 lg:h-[760px]">
         <Tabs defaultValue="inspector" className="flex h-full flex-col">
-          <TabsList className="mx-3 mt-2 grid h-8 grid-cols-3 bg-white/5">
+          <TabsList className="mx-3 mt-2 grid h-8 grid-cols-4 bg-white/5">
             <TabsTrigger value="inspector" className="h-6 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
-              <Boxes className="mr-1 h-3 w-3" />分子检测
+              <Boxes className="mr-1 h-3 w-3" />检测
             </TabsTrigger>
             <TabsTrigger value="timeline" className="h-6 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
               事件流
             </TabsTrigger>
+            <TabsTrigger value="pharmacology" className="h-6 text-[11px] data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-300">
+              <Pill className="mr-1 h-3 w-3" />药理
+            </TabsTrigger>
             <TabsTrigger value="ai" className="h-6 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
-              AI 助手
+              AI
             </TabsTrigger>
           </TabsList>
           <TabsContent value="inspector" className="min-h-0 flex-1 overflow-hidden mt-0">
@@ -212,6 +216,9 @@ export function LabWorkspace() {
           </TabsContent>
           <TabsContent value="timeline" className="min-h-0 flex-1 overflow-hidden mt-0">
             <EventTimeline />
+          </TabsContent>
+          <TabsContent value="pharmacology" className="min-h-0 flex-1 overflow-hidden mt-0">
+            <PharmacologyPanel />
           </TabsContent>
           <TabsContent value="ai" className="min-h-0 flex-1 overflow-hidden mt-0">
             <AiAssistant />

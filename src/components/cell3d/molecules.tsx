@@ -46,6 +46,7 @@ export interface SimSnapshot {
   nodeStates: Record<string, { activity: number; phospho: number; activated: boolean }>;
   signalFlux: Record<string, number>;
   injected: Record<string, boolean>;
+  inhibition: Record<string, number>;
   focus: boolean;
 }
 
@@ -66,6 +67,7 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
   const groupRef = useRef<THREE.Group>(null);
   const haloRef = useRef<THREE.Mesh>(null);
   const phosphoRef = useRef<THREE.Mesh>(null);
+  const inhibRingRef = useRef<THREE.Mesh>(null);
   const labelRef = useRef<HTMLDivElement>(null);
   const phase = useMemo(() => (node.id.charCodeAt(0) % 7) * 0.9, [node.id]);
 
@@ -104,13 +106,25 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
       }),
     [],
   );
+  const inhibMat = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        color: '#c084fc',
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    [],
+  );
   useEffect(
     () => () => {
       coreMat.dispose();
       haloMat.dispose();
       phosphoMat.dispose();
+      inhibMat.dispose();
     },
-    [coreMat, haloMat, phosphoMat],
+    [coreMat, haloMat, phosphoMat, inhibMat],
   );
 
   useFrame((state) => {
@@ -143,12 +157,22 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
       phosphoRef.current.rotation.x = Math.PI / 3;
       phosphoMat.opacity = Math.min(0.95, ph * 1.3);
     }
+    // 药物抑制环（紫色，反向旋转）
+    const inh = sim.current.inhibition?.[node.id] ?? 0;
+    if (inhibRingRef.current) {
+      inhibRingRef.current.visible = inh > 0.05;
+      inhibRingRef.current.scale.setScalar(Math.max(0.001, 0.6 + inh * 0.6));
+      inhibRingRef.current.rotation.y = -t * 1.1;
+      inhibRingRef.current.rotation.x = -Math.PI / 3;
+      inhibMat.opacity = Math.min(0.9, inh * 1.1);
+    }
     // 标签（DOM imperative）
     const el = labelRef.current;
     if (el) {
       const bright = a > 0.25 || selected;
       el.classList.toggle('is-active', bright);
       el.classList.toggle('is-phospho', ph > 0.25);
+      el.classList.toggle('is-inhibited', inh > 0.25);
       el.style.opacity = showLabel
         ? String(Math.max(0.5 * vis + a * 0.5, bright ? 1 : 0.62))
         : bright
@@ -214,6 +238,11 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
         <torusGeometry args={[node.r * 1.5 + 0.12, 0.05, 8, 32]} />
       </mesh>
 
+      {/* 药物抑制环（紫色 = 催化输出钳制） */}
+      <mesh ref={inhibRingRef} material={inhibMat} scale={0.001} renderOrder={92}>
+        <torusGeometry args={[node.r * 1.85 + 0.16, 0.055, 8, 36]} />
+      </mesh>
+
       {/* 选中环 */}
       {selected && (
         <mesh rotation={[Math.PI / 2.4, 0, 0]}>
@@ -236,6 +265,7 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
           <span className="mol3d-sym">{node.label}</span>
           <span className="mol3d-kind">{kindZh}</span>
           <span className="mol3d-p">P</span>
+          <span className="mol3d-inh">⊘</span>
           {mutant && <span className={`mol3d-mut ${mutant === 'KO' ? 'ko' : ''}`}>{mutant === 'KO' ? 'KO' : 'M'}</span>}
         </div>
       </Html>

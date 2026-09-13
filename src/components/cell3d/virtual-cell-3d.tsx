@@ -160,12 +160,13 @@ export function VirtualCell3D() {
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
   // 模拟快照: zustand 订阅写入可变引用（避免逐 tick React 重渲染）
-  const sim = useRef<SimSnapshot>({ nodeStates: {}, signalFlux: {}, injected: {}, focus: false });
+  const sim = useRef<SimSnapshot>({ nodeStates: {}, signalFlux: {}, injected: {}, inhibition: {}, focus: false });
   useEffect(() => {
     const unsub = useLabStore.subscribe((s) => {
       sim.current.nodeStates = s.nodeStates;
       sim.current.signalFlux = s.signalFlux;
       sim.current.injected = s.injected;
+      sim.current.inhibition = s.inhibition;
     });
     return unsub;
   }, []);

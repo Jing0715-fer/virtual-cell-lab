@@ -343,3 +343,18 @@
   font-style: italic;
   color: rgba(148, 163, 184, 0.65);
 }
+
+/* 药物抑制状态（紫色 = 催化输出钳制） */
+.mol3d-inh {
+  display: none;
+  font-size: 9px;
+  font-weight: 700;
+  color: #d8b4fe;
+}
+.mol3d-label.is-inhibited {
+  border-color: rgba(192, 132, 252, 0.55);
+  background: rgba(59, 7, 100, 0.85);
+  box-shadow: 0 0 14px rgba(192, 132, 252, 0.35);
+}
+.mol3d-label.is-inhibited .mol3d-sym { color: #e9d5ff; }
+.mol3d-label.is-inhibited .mol3d-inh { display: inline; }

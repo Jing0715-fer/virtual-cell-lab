@@ -104,6 +104,9 @@ export interface StepContext {
   mutations: MutationSpec[];
   newEvents: SimEvent[];
   signalFlux: Record<string, number>; // 本 tick 边通量（source>target → 强度，用于可视化）
+  /** 药物抑制强度（nodeId → 0-1）：门控该节点作为信号源的催化输出；
+   *  被抑制激酶仍可被上游磷酸化（如曲美替尼下 pMEK 累积），仅输出被钳 */
+  inhibition?: Record<string, number>;
 }
 
 function fmtTime(tick: number): string {
@@ -201,8 +204,11 @@ export function step(ctx: StepContext): void {
     // 配体需要较高活性才传导；胞内节点阈值较低
     const srcGate = isSrcLigand ? 0.55 : 0.28;
     if (src.activity < srcGate) return;
+    // 药物门控：阻断源节点的催化输出（活性/磷化照常累积，输出归零）
+    const inh = ctx.inhibition?.[srcId] ?? 0;
+    if (inh >= 0.99) return;
     const w = EDGE_WEIGHT[e.kind] ?? 0.8;
-    const flux = src.activity * w * (e.kind === 'expression' ? 0.9 : 1);
+    const flux = src.activity * w * (e.kind === 'expression' ? 0.9 : 1) * (1 - inh);
     const key = `${e.source}>${e.target}`;
     const prevFlux = ctx.signalFlux[key] ?? 0;
     // 视觉通量：保留绝对值更大的方向

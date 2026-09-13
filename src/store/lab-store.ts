@@ -10,6 +10,7 @@ import {
 } from '@/lib/simulation/engine';
 import { applyScaffoldEdges } from '@/lib/simulation/scaffold';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
+import { INHIBITORS } from '@/data/inhibitors';
 
 export type ViewMode = 'cell' | 'map' | 'cell3d';
 
@@ -36,6 +37,12 @@ interface LabStore {
   activityHistory: ActivitySample[];
   selectedNode: string | null;
   autoInjected: boolean;
+  /** 药理扰动：drugId → 是否投药 */
+  inhibitors: Record<string, boolean>;
+  /** 药代动力学：drugId → 血药浓度等效强度 0-1 */
+  drugLevels: Record<string, number>;
+  /** 节点级阻断强度（视图直读，nodeId → 0-1） */
+  inhibition: Record<string, number>;
 
   // actions
   setCell: (id: string) => void;
@@ -49,6 +56,7 @@ interface LabStore {
   stepOnce: () => void;
   setSpeed: (n: number) => void;
   toggleLigand: (id: string, on?: boolean) => void;
+  toggleInhibitor: (drugId: string) => void;
   tickSim: () => void;
   selectNode: (id: string | null) => void;
 }
@@ -75,6 +83,9 @@ export const useLabStore = create<LabStore>((set, get) => ({
   activityHistory: [],
   selectedNode: null,
   autoInjected: false,
+  inhibitors: {},
+  drugLevels: {},
+  inhibition: {},
 
   setCell: (id) => {
     set({ cellId: id });
@@ -116,6 +127,9 @@ export const useLabStore = create<LabStore>((set, get) => ({
       tick: 0,
       running: false,
       injected: {},
+      inhibitors: {},
+      drugLevels: {},
+      inhibition: {},
       phase: phase0,
       events: [
         {
@@ -223,8 +237,38 @@ export const useLabStore = create<LabStore>((set, get) => ({
     });
   },
 
+  toggleInhibitor: (drugId) => {
+    const { inhibitors, tick, events, graph } = get();
+    const drug = INHIBITORS.find((d) => d.id === drugId);
+    if (!drug || !graph) return;
+    const turningOn = !inhibitors[drugId];
+    // 与当前核心子图的靶点交集（事件文案用）
+    const present = drug.targets.filter((t) =>
+      graph.core.nodes.some((n) => n.id === t || n.label === t),
+    );
+    const targetText = present.length
+      ? present.map((t) => graph.core.nodes.find((n) => n.id === t || n.label === t)?.label ?? t).join(' / ')
+      : drug.targets.join(' / ');
+    set({
+      inhibitors: { ...inhibitors, [drugId]: turningOn },
+      running: true,
+      events: [
+        ...events,
+        {
+          id: `drug-${drugId}-${Date.now()}`,
+          tick,
+          simTime: `T+${(tick * 0.5).toFixed(1)}s`,
+          kind: 'inhibition' as const,
+          text: turningOn
+            ? `[给药] ${drug.name}（${drug.code}）加入培养基 —— ${drug.mechanism}靶点：${targetText}。观察下游级联断流与转录响应。`
+            : `[洗脱] 移除 ${drug.name} —— 血药浓度清除，靶点催化活性逐步恢复，残余信号将重新传导。`,
+        },
+      ].slice(-MAX_EVENTS),
+    });
+  },
+
   tickSim: () => {
-    const { graph, nodeStates, tick, injected, events, activityHistory, speed, running } = get();
+    const { graph, nodeStates, tick, injected, events, activityHistory, speed, running, inhibitors, drugLevels } = get();
     if (!graph) return;
     // speed 以多步/单步实现（0.5 = 每 2 tick 执行 1 次推进的近似；直接乘 dt 更平滑）
     const steps = speed >= 2 ? Math.round(speed) : 1;
@@ -232,6 +276,31 @@ export const useLabStore = create<LabStore>((set, get) => ({
     let t = tick;
     const newEvents: SimEvent[] = [];
     let flux: Record<string, number> = {};
+    // ---- 药代动力学更新（每个 sim step：起效 ramp 快、洗脱清除慢） ----
+    let levels = drugLevels;
+    const activeDrugs = INHIBITORS.filter((d) => inhibitors[d.id]);
+    if (activeDrugs.length > 0 || Object.values(drugLevels).some((v) => v > 0)) {
+      levels = { ...drugLevels };
+      for (const d of INHIBITORS) {
+        const cur = levels[d.id] ?? 0;
+        const target = inhibitors[d.id] ? 1 : 0;
+        if (cur === target) continue;
+        // 起效：5 sim-steps 内爬升至治疗浓度；洗脱：15 steps 半衰清除
+        const rate = target > cur ? 0.22 : -0.075;
+        levels[d.id] = Math.min(1, Math.max(0, cur + rate));
+      }
+    }
+    // 节点级阻断强度（多药取最大）：靶点匹配 id 或 label
+    const inhibition: Record<string, number> = {};
+    for (const d of INHIBITORS) {
+      const lv = levels[d.id] ?? 0;
+      if (lv <= 0) continue;
+      for (const tgt of d.targets) {
+        const node = graph.core.nodes.find((n) => n.id === tgt || n.label === tgt);
+        if (!node) continue;
+        inhibition[node.id] = Math.max(inhibition[node.id] ?? 0, lv);
+      }
+    }
     for (let i = 0; i < steps; i++) {
       const ctx: StepContext = {
         graph: graph.core,
@@ -244,6 +313,7 @@ export const useLabStore = create<LabStore>((set, get) => ({
         })),
         newEvents,
         signalFlux: {},
+        inhibition,
       };
       step(ctx);
       states = ctx.states;
@@ -257,6 +327,8 @@ export const useLabStore = create<LabStore>((set, get) => ({
       tick: t,
       phase,
       signalFlux: flux,
+      drugLevels: levels,
+      inhibition,
       events: events.length + newEvents.length > MAX_EVENTS
         ? [...events, ...newEvents].slice(-MAX_EVENTS)
         : [...events, ...newEvents],
