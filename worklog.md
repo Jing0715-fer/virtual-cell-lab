@@ -287,3 +287,51 @@ Stage Summary:
   2. 报告导出 PDF 增加对照实验页（复用 compareSummary + 差异表）
   3. TGF-β/Wnt/Notch 教学级联策划（CURATED_EVENTS 已有素材）
   4. 转录组热图导出 CSV
+
+---
+Task ID: 15
+Agent: 主协调 Agent (Z.ai Code)
+Task: QA 巡检 + 1 项数据修复 + 4 个新功能（教学级联 3 通路扩充 / 转录组 CSV 导出 / 对照实验报告 PDF / 3D 切面模式）+ PDF 下载机制修复
+
+Work Log:
+- [QA 巡检] dev.log 正常（早期一条 mutation-equiv 瞬态模块错误为 HMR 期间噪音, 后续编译全通过）; lint/tsc src 零错误; 端到端验证: 3D 渲染（VLM 全页 9.5/10、画布特写 8.5/10 无渲染错误）、模拟播放（T+29s 阶段 4/4）、教学引导、药理投药（曲美替尼→治疗浓度/洗脱）、转录组热图、PDF 导出、对照模式（自主激活 7 分子/平均差 19.3%/退出无损）→ 项目稳定, 转入新功能
+- [QA 发现瑕疵] 转录组热图重复行: KEGG 重复 entry（ELK1×2、FOS×2 —— ERK 分支与 JNK 分支的同名基因独立 entry）在热图中显示为重复行 → transcriptomic-heatmap.tsx: 按 label 分组（Map< label, CoreNode[] >）合并重复 entry, 平行分支活性取 max（代表该基因总体转录响应）; 修复后 MAPK 5 行唯一基因（原 7 行）
+- [新功能 A: 教学引导 3 通路扩充（4→7 通路, worklog Task 14 建议 #3）] guided-tour.ts CURATED_TOURS 新增:
+  · TGF-β (hsa04350): TGFB1→TGFBR2→TGFBR1→SMAD2→SMAD4→ID1→SMAD6→SMURF2 8 站（"上皮的刹车信号"叙事: 双受体接力磷酸化→R-Smad/Co-Smad 入核→I-Smad 自诱导负反馈→受体泛素化降解）
+  · Wnt (hsa04310): WNT3A→FZD1→LRP5→DVL1→AXIN1→GSK3B→CTNNB1→TCF7L2→CCND1→DKK1 10 站（"胚胎发育的核心开关"叙事: signalosome 聚集→破坏复合体解体→β-cat 免于降解入核→增殖程序→DKK1 拮抗闭环）
+  · Notch (hsa04330): DLL1→NOTCH1→ADAM17→PSEN1→NCSTN→RBPJ→MAML1→HES1→HEY1→LFNG 10 站（"不需要第二信使的捷径"叙事: 配体牵拉→S2/S3 顺序切割→NICD 入核 CSL 开关→HES/HEY 双臂抑制→Fringe 糖基化微调）
+  · 分子注释扩充: molecular-notes.ts 新增 ~40 条 NODE_NOTES（FZD1/LRP5/SMAD6/ID1/LFNG/NUMB/DKK1/CSNK1A1/BMP 分支/Ski 辅抑制子/Notch 抑制复合体全家等）+ ~20 条 CURATED_EVENTS（WNT3A>FZD1/LRP5、NOTCH1>ADAM17 三步切割链、SMAD6>SMURF2、CCND1>DKK1 自调节负反馈等, 全部残基/结构域级）
+  · pathway-library.tsx: 新增"教学"徽标（teal 色, 7 条策划通路标识, tooltip 提示 3D 视图→教学引导入口）
+  · QA: Wnt 逐站（站 5"破坏复合体·解体"+级联注释"LRP5 胞内磷酸化 PPPSPxS 簇…"）、TGF-β 8/8 站（潜伏态唤醒→SMURF2）、Notch 10/10 站（LFNG 末站）全部验证 ✓
+- [新功能 B: 转录组热图 CSV 导出（worklog Task 14 建议 #4）] transcriptomic-heatmap.tsx: 头部 CSV 按钮 → 基因×时间活性矩阵（peak_activity/peak_time_s/final_activity + 48 时间列, UTF-8 BOM 可直接 Excel 打开, 注释头含通路/细胞系/采样说明）; QA: 1519B CSV 下载, 内容结构完整 ✓
+- [新功能 C: 对照实验报告 PDF（worklog Task 14 建议 #2）] report-export.tsx 新增 CompareReportExportButton（~240 行, 复用主报告画布绘制体系）:
+  · 第 1 页: 玫瑰色横幅（VC-CMP 编号）→ 对照设置 8 键值（通路/臂 A/B 细胞系/同步刺激/时长/双臂遗传背景）→ 摘要卡 4 张（自主激活/平均活性差/阶段④首达时差/事件总数）→ 双臂动力学对比图（drawCompareChart: A 臂虚线 teal + B 臂实线 rose, Δ Top 4 分子并列, 图例带 Δ%）→ 分子差异表 Top 14（A/B 双色条形 + Δ 徽标 + 智能解读列: 组成性活化/激活提前/两臂一致）→ 方法学说明（单变量设计 + 同族等价映射声明）
+  · 第 2 页: 实验臂（B）分子事件流（最近 32 条）
+  · compare-view.tsx 头部集成导出按钮（tick<2 禁用 + 状态反馈）; QA: 3 页 714KB, VLM 确认横幅/设置/摘要卡/双曲线/差异表全部无重叠截断 ✓
+- [新功能 D: 3D 切面模式（worklog Task 10 建议 #3）] virtual-cell-3d.tsx:
+  · SectionClipController: THREE.Plane((0,-0.22,-1), 0.55) 全局裁剪平面（renderer.clippingPlanes）剖开细胞前半部; 开启时 scene.traverse 将所有材质临时 DoubleSide（记忆原 side 以便还原）→ 剖面内壁可见, 内部细胞器/核内分子直接暴露
+  · 切面方位环视觉（双 ring 玉青色, 按平面法向四元数定向, 指示切割位置）
+  · HUD 新增"切面视图"开关（Layers 图标）+ 底部提示条动态切换（"切面模式·细胞前半部已剖开——旋转视角观察内部"）
+  · QA: VLM 确认细胞剖开可见细胞核剖面/线粒体/高尔基体, 方位环存在, 渲染无破碎 ✓
+- [关键修复: PDF 下载机制] 本轮 QA 发现 PDF 导出下载静默失败（无报错无产物）→ 系统性隔离测试定位根因:
+  · jsPDF 4.x saveAs 使用"分离节点 anchor + setTimeout(0) click", 本环境 headless Chrome 对该模式不可靠（挂载+同步 click 可下载, 分离/异步均失败）
+  · 修复: 新增 downloadPdfBlob()（doc.output('blob') → 挂载 body 的 anchor 同步 click → 4s 后 revokeURL）, 主报告与对照报告双链路统一接入 → 修复后两类 PDF 均正常下载
+  · 次发现: QA 快速重复点击导出会触发 Chrome"多文件自动下载"保护（headless 无法授权）, 表现为后续所有下载静默失败——纯 QA 环境假象, 真实用户单次点击导出不受影响; 换新会话后单次导出验证通过
+- [React 19 lint 适配] SectionClipController 的 renderer.clippingPlanes 命令式赋值触发 react-hooks/immutability → 文件顶部局部 eslint-disable（与 molecules/mrna-flow/event-pulses 同范式, 注明 R3F 命令式 API 为标准用法）
+- [全量回归] lint 零错误 / tsc src 零错误 / 新会话 0 console error / MAPK 级联 T+30.5s 阶段 4/4 / 4+3 通路教学逐站 / CSV+双 PDF 下载 / 切面模式 / VLM 三轮视觉验证 / dev.log 无异常
+
+Stage Summary:
+- 项目当前状态: 3D 沉浸虚拟细胞平台全功能矩阵（13 通路/7 细胞系/三视图/教学引导 7 通路手工策划/药理/热图+CSV/双报告 PDF/AI 助手/对照实验+报告）, 全部 QA 通过, 稳定可交付
+- 本轮产出: 1 数据修复（热图重复行合并）+ 4 新功能（教学级联×3、CSV 导出、对照报告 PDF、3D 切面）+ 1 关键下载机制修复（downloadPdfBlob 替代 jsPDF saveAs）
+- 关键技术决策: ① PDF 下载统一走"挂载式同步 anchor click"（环境兼容性远优于 jsPDF 默认 saveAs）② 切面用全局裁剪平面而非逐材质 clippingPlanes（零材质侵入, 配合临时 DoubleSide 还原机制）③ 热图按 label 合并 KEGG 重复 entry（活性取 max, 语义=该基因总体转录响应）
+- 未解决问题/风险:
+  1. 对照模式 transcriptionLead 在两臂未达阶段④时显示"—"（长模拟后可出值, 语义正常）
+  2. QA 环境快速重复下载触发 Chrome 自动下载保护（测试时避免连续多次导出; 生产用户无此问题）
+  3. KEGG 图谱视图 scaffold 边不显示（旧已知, 低优先级）
+  4. 沙盒 4GB 内存天花板（长时间多 3D 会话可能 OOM, 流畅模式已缓解）
+- 下一阶段建议:
+  1. 对照模式 3D 视图（双 R3F Canvas 并排, worklog Task 14 建议 #1 遗留）
+  2. 报告导出嵌入 3D 截图（gl.domElement.toDataURL 插入报告第 1 页）
+  3. 剩余 6 通路教学级联策划（mTOR/NF-κB/Apoptosis/p53/AMPK/Ca²⁺, 自动推导已可用, 手工策划提升叙事质量）
+  4. 转录组热图报告页嵌入（复用热图渲染逻辑到 canvas, worklog Task 13 建议 #3 遗留）
+  5. 切面模式进阶: 剖面深度滑杆（拖动平面 constant）+ 剖面方向跟随相机

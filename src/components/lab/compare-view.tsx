@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { X, Play, Pause, RotateCcw, GitCompare, ChevronRight, Dna, Timer, Zap, Sigma } from 'lucide-react';
 import { useCompareStore, moleculeDeltas, compareSummary } from '@/store/compare-store';
+import { CompareReportExportButton } from './report-export';
 import { CELL_TYPE_MAP, CELL_TYPES } from '@/data/cell-types';
 import { layoutCellView, CANVAS, type PositionedNode, type LaidOutEdge } from '@/lib/simulation/layout';
 import { CellMorphology } from './morphologies';
@@ -252,6 +253,7 @@ export function CompareView() {
 
         <div className="ml-auto flex items-center gap-3">
           <span className="font-mono text-[10px] text-slate-500">T+{(tick * 0.5).toFixed(1)}s</span>
+          <CompareReportExportButton />
           <button
             onClick={() => useCompareStore.getState().close()}
             className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-slate-400 transition hover:border-rose-500/40 hover:text-rose-300"

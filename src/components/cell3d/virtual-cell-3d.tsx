@@ -15,7 +15,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, Noise, Vignette } from '@react-three/postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge } from 'lucide-react';
+import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
 import { layout3D, type Vec3 } from '@/lib/simulation/layout3d';
@@ -44,6 +44,71 @@ function detectLowEndGpu(): boolean {
   } catch {
     return false;
   }
+}
+
+/** 切面控制器: 全局裁剪平面剖切细胞前半部，露出内部细胞器与核内分子 */
+/* eslint-disable react-hooks/immutability -- renderer.clippingPlanes 为 three.js 全局渲染器命令式 API（R3F 标准用法） */
+function SectionClipController({ enabled, ringR }: { enabled: boolean; ringR: number }) {
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  // 剖面法向: 稍微俯视的前向切割（与默认相机方位一致，翻开“细胞剖面”）
+  const plane = useMemo(
+    () => new THREE.Plane(new THREE.Vector3(0, -0.22, -1).normalize(), 0.55),
+    [],
+  );
+  const origSides = useRef<Map<THREE.Material, THREE.Side>>(new Map());
+  const ringRef = useRef<THREE.Group | null>(null);
+
+  useEffect(() => {
+    const restore = () => {
+      origSides.current.forEach((side, m) => {
+        m.side = side;
+        m.needsUpdate = true;
+      });
+      origSides.current.clear();
+    };
+    if (enabled) {
+      gl.clippingPlanes = [plane];
+      // 剖开后内壁可见: 结构材质临时双面化（记忆原 side 以便还原）
+      scene.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (!mesh.material) return;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const m of mats) {
+          if (!(m instanceof THREE.Material)) continue;
+          if (!origSides.current.has(m)) origSides.current.set(m, m.side);
+          m.side = THREE.DoubleSide;
+          m.needsUpdate = true;
+        }
+      });
+    } else {
+      gl.clippingPlanes = [];
+    }
+    return () => {
+      gl.clippingPlanes = [];
+      restore();
+    };
+  }, [enabled, gl, scene, plane]);
+
+  // 剖面方位环（淡淡的两圈标记，指示切割平面位置与朝向）
+  const ringQuat = useMemo(() => {
+    const q = new THREE.Quaternion();
+    q.setFromUnitVectors(new THREE.Vector3(0, 0, 1), plane.normal);
+    return q;
+  }, [plane]);
+
+  return enabled ? (
+    <group ref={ringRef} quaternion={ringQuat} position={plane.normal.clone().multiplyScalar(-plane.constant)}>
+      <mesh>
+        <ringGeometry args={[ringR - 0.12, ringR, 96]} />
+        <meshBasicMaterial color="#5eead4" transparent opacity={0.22} side={THREE.DoubleSide} fog={false} />
+      </mesh>
+      <mesh>
+        <ringGeometry args={[ringR * 0.42, ringR * 0.42 + 0.05, 64]} />
+        <meshBasicMaterial color="#5eead4" transparent opacity={0.1} side={THREE.DoubleSide} fog={false} />
+      </mesh>
+    </group>
+  ) : null;
 }
 
 /** 相机驱动器: 预设机位（含标准观察方位） + 信号跟随 + 教学聚焦（阻尼插值） */
@@ -200,6 +265,8 @@ export function VirtualCell3D() {
   const [tourAuto, setTourAuto] = useState(true);
   // 流畅模式: 低端设备自动开启（低分辨率渲染 + 关闭 MSAA，保留辉光视觉特征）
   const [perfMode, setPerfMode] = useState(false);
+  // 切面模式: 剖切细胞前半部露出内部细胞器（全局裁剪平面）
+  const [clipView, setClipView] = useState(false);
 
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
@@ -340,6 +407,7 @@ export function VirtualCell3D() {
             <Lightformer intensity={0.7} color="#0e5f56" position={[0, -12, 0]} scale={[14, 14, 1]} rotation-x={Math.PI / 2} />
           </Environment>
           <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} sim={sim} />
+          <SectionClipController enabled={clipView} ringR={morph === 'tcell' ? 9.6 : 10.8} />
           <CameraRig mode={camMode} layout={layout} spec={layoutSpec} controlsRef={controlsRef} tourTarget={tourTarget} />
           <OrbitControls
             ref={controlsRef}
@@ -396,6 +464,7 @@ export function VirtualCell3D() {
         <HudToggle active={showAnatomy} onClick={() => setShowAnatomy(!showAnatomy)} icon={Tags} label="解剖标注" />
         <HudToggle active={showLabels} onClick={() => setShowLabels(!showLabels)} icon={Eye} label="全部标签" />
         <HudToggle active={focus} onClick={() => setFocus(!focus)} icon={Focus} label="专注模式" />
+        <HudToggle active={clipView} onClick={() => setClipView(!clipView)} icon={Layers} label="切面视图" highlight={false} />
         <HudToggle active={autoRotate} onClick={() => setAutoRotate(!autoRotate)} icon={RotateCw} label="自动环视" />
       </div>
 
@@ -531,8 +600,16 @@ export function VirtualCell3D() {
           </div>
         </div>
       ) : (
-        <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 hidden -translate-x-1/2 rounded-full border border-white/8 bg-slate-950/60 px-3 py-1 text-[9px] text-slate-500 backdrop-blur-md md:block">
-          拖拽旋转 · 滚轮缩放 · 点击分子查看档案 · 悬停显示分子卡
+        <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 hidden -translate-x-1/2 items-center gap-2 rounded-full border border-white/8 bg-slate-950/60 px-3 py-1 text-[9px] text-slate-500 backdrop-blur-md md:flex">
+          {clipView ? (
+            <>
+              <Layers className="h-3 w-3 text-teal-400" />
+              <span className="text-teal-300/90">切面模式 · 细胞前半部已剖开</span>
+              <span className="text-slate-600">—— 旋转视角观察细胞器内部结构与核内分子</span>
+            </>
+          ) : (
+            <span>拖拽旋转 · 滚轮缩放 · 点击分子查看档案 · 悬停显示分子卡</span>
+          )}
         </div>
       )}
     </div>

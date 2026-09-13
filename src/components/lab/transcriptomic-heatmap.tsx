@@ -9,8 +9,9 @@
  *       + 峰值响应统计 + Top 响应基因排行。节流刷新（400ms）避免逐 tick 重渲染。
  */
 import { useEffect, useMemo, useState } from 'react';
-import { Activity, Flame, Thermometer } from 'lucide-react';
+import { Activity, Download, Flame, Thermometer } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
+import { CELL_TYPE_MAP } from '@/data/cell-types';
 import type { ActivitySample } from '@/lib/simulation/engine';
 import type { CoreNode } from '@/types/kegg';
 import { cn } from '@/lib/utils';
@@ -60,13 +61,22 @@ export function TranscriptomicHeatmap() {
       const tfs = graph.core.nodes.filter((n) => n.compartment === 'nucleus' && n.kind === 'tf' && n.tier >= 5);
       geneNodes = [...geneNodes, ...tfs];
     }
+    // KEGG 重复 entry 按 label 合并（如 ERK 分支与 JNK 分支的 FOS/e137）—— 同一基因
+    // 的平行分支活性取 max，代表该基因的总体转录响应
+    const byLabel = new Map<string, CoreNode[]>();
+    for (const n of geneNodes) {
+      const list = byLabel.get(n.label) ?? [];
+      list.push(n);
+      byLabel.set(n.label, list);
+    }
     // 列 = 降采样历史
     const stride = Math.max(1, Math.ceil(hist.length / MAX_COLS));
     const cols = hist.filter((_, i) => i % stride === 0 || i === hist.length - 1);
     const timeCols = cols.map((c) => c.tick);
-    const rows: HeatRow[] = geneNodes
-      .map((node) => {
-        const values = cols.map((c) => c.values[node.id] ?? 0);
+    const rows: HeatRow[] = [...byLabel.values()]
+      .map((group) => {
+        const node = group[0];
+        const values = cols.map((c) => Math.max(...group.map((g) => c.values[g.id] ?? 0)));
         let peak = 0;
         let peakIdx = 0;
         values.forEach((v, i) => {
@@ -84,6 +94,34 @@ export function TranscriptomicHeatmap() {
 
   const [hover, setHover] = useState<{ row: HeatRow; col: number } | null>(null);
   const svgW = LABEL_W + timeCols.length * COL_W + 8;
+
+  const exportCsv = () => {
+    if (rows.length === 0 || timeCols.length === 0) return;
+    const esc = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+    const lines: string[] = [];
+    lines.push('# VirtualCell Lab 转录组响应谱（时间过程活性矩阵，转录强度代理 0-1）');
+    lines.push(`# 通路: ${esc(graph?.meta.name ?? '')} (${graph?.meta.id ?? ''})`);
+    lines.push(`# 细胞系: ${esc(CELL_TYPE_MAP.get(useLabStore.getState().cellId)?.name ?? '')}`);
+    lines.push(`# 采样: 每列 ${(0.5).toFixed(1)}s 模拟时间 × 降采样，共 ${timeCols.length} 列`);
+    lines.push('gene_symbol,peak_activity,peak_time_s,final_activity,' + timeCols.map((t) => `t${(t * 0.5).toFixed(1)}s`).join(','));
+    for (const r of rows) {
+      const cells = [
+        r.node.label,
+        r.peak.toFixed(3),
+        (timeCols[Math.min(r.peakIdx, timeCols.length - 1)] * 0.5).toFixed(1),
+        r.final.toFixed(3),
+        ...r.values.map((v) => v.toFixed(3)),
+      ];
+      lines.push(cells.join(','));
+    }
+    const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `VirtualCell-Transcriptome-${graph?.meta.id ?? 'pathway'}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  };
 
   if (!graph) {
     return <div className="p-4 text-xs text-slate-600">等待通路加载…</div>;
@@ -113,6 +151,13 @@ export function TranscriptomicHeatmap() {
           <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[9px] text-amber-300">
             {graph.meta.name}
           </span>
+          <button
+            onClick={exportCsv}
+            title="导出 CSV（基因 × 时间活性矩阵，含 BOM 可直接用 Excel 打开）"
+            className="ml-auto flex items-center gap-1 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1 font-mono text-[9px] text-amber-300 transition-colors hover:bg-amber-500/20 hover:text-amber-200"
+          >
+            <Download className="h-3 w-3" />CSV
+          </button>
         </div>
         <div className="mt-2 grid grid-cols-3 gap-1.5">
           <div className="rounded-lg border border-white/8 bg-white/5 px-2 py-1.5">

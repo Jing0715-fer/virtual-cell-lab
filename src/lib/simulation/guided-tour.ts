@@ -35,6 +35,9 @@ interface CuratedChain {
  * PI3K-Akt: 生长因子 → RTK → 脂质激酶 → 脂信使 → 双磷酸化 → 代谢/存活/翻译（三条分支汇合）
  * JAK-STAT: 细胞因子 → 受体链 → Janus 激酶 → STAT 磷酸化二聚体入核 → 增殖基因 + 负反馈
  * cAMP: 肾上腺素 → GPCR → Gs → 腺苷酸环化酶 → 第二信使 → 双分支（PKA/EPAC）→ 即早基因
+ * TGF-β: 配体 → 双受体接力磷酸化 → R-Smad/Co-Smad 入核 → 靶基因 + I-Smad 负反馈 + 受体降解
+ * Wnt: 配体 → Fz/LRP 共受体 → DVL 信号体 → 破坏复合体解体 → β-cat 入核 → 增殖基因 + DKK1 拮抗闭环
+ * Notch: 配体牵拉 → S2/S3 顺序切割 → NICD 入核 → CSL 开关 + MAML 共激活 → HES/HEY + Fringe 微调
  */
 const CURATED_TOURS: Record<string, CuratedChain> = {
   hsa04010: {
@@ -97,6 +100,49 @@ const CURATED_TOURS: Record<string, CuratedChain> = {
       'Rap1 · 整合素激活终点',
     ],
   },
+  hsa04350: {
+    chain: ['TGFB1', 'TGFBR2', 'TGFBR1', 'SMAD2', 'SMAD4', 'ID1', 'SMAD6', 'SMURF2'],
+    titles: [
+      '信号起点 · 潜伏态唤醒',
+      'II 型受体 · 组成性激酶',
+      'I 型受体 · GS 域接力',
+      'R-Smad · SSXS 磷酸化',
+      'Co-Smad · 异源三聚体入核',
+      '靶基因 · 分化抑制应答',
+      'I-Smad · 自诱导负反馈',
+      '信号衰减 · 受体泛素化降解',
+    ],
+  },
+  hsa04310: {
+    chain: ['WNT3A', 'FZD1', 'LRP5', 'DVL1', 'AXIN1', 'GSK3B', 'CTNNB1', 'TCF7L2', 'CCND1', 'DKK1'],
+    titles: [
+      '信号起点 · 脂质化配体',
+      'Frizzled · CRD 识别',
+      '共受体 · signalosome 聚集',
+      'Dishevelled · 信号体支架',
+      '破坏复合体 · 解体',
+      'GSK3β · 磷酸化降解停摆',
+      'β-catenin · 免于降解入核',
+      'TCF4 · 转录开关翻转',
+      'Cyclin D1 · G1/S 增殖程序',
+      '拮抗闭环 · DKK1 负反馈',
+    ],
+  },
+  hsa04330: {
+    chain: ['DLL1', 'NOTCH1', 'ADAM17', 'PSEN1', 'NCSTN', 'RBPJ', 'MAML1', 'HES1', 'HEY1', 'LFNG'],
+    titles: [
+      '信号起点 · 相邻细胞配体',
+      '受体牵拉 · 变构暴露 S2',
+      'S2 切割 · ADAM 金属蛋白酶',
+      'S3 膜内切割 · γ-分泌酶催化',
+      '底物递呈 · Nicastrin 门控',
+      'NICD 入核 · CSL 转换开关',
+      '共激活子 · MAML 包裹组装',
+      'HES1 · bHLH 抑制子诱导',
+      'HEY1 · 双臂抑制网络',
+      '通路微调 · Fringe 糖基化',
+    ],
+  },
 };
 
 /** 手工策划链的补充文案（引导语，教育性 framing） */
@@ -109,6 +155,12 @@ const CURATED_INTROS: Record<string, string> = {
     '免疫细胞的增殖指令：IL-2 自分泌信号 9 站往返——从细胞因子到 JAK-STAT5 核内转录，再经 SOCS 负反馈关闭（含信号重置）。',
   hsa04024:
     '最古老的第一信使系统：肾上腺素 → GPCR → Gs → cAMP 第二信使放大 1000 倍，经 PKA 与 EPAC 双分支抵达基因与粘附终点。',
+  hsa04350:
+    '上皮的“刹车信号”：TGF-β 经双受体接力磷酸化唤醒 R-Smad，8 站完成从细胞外到核内基因的旅程——末两站演示信号如何自我关闭（I-Smad 反馈 + 受体降解）。',
+  hsa04310:
+    '胚胎发育的核心开关：Wnt 如何在 10 站内“解散”破坏复合体、让 β-catenin 免于降解入核开启增殖程序——最后一站 DKK1 演示通路自带的外部关闭机制。',
+  hsa04330:
+    '不需要第二信使的捷径：Notch 信号经“配体牵拉 + 三次蛋白酶切割”直接释放转录因子入核——10 站看懂发育生物学最直接的细胞对话，末站揭示 Fringe 糖基化如何微调配体选择性。',
 };
 
 const EDGE_BIDIRECTIONAL = new Set(['binding', 'association']);

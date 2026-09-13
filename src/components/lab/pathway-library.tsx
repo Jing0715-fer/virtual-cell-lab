@@ -10,6 +10,11 @@ import { CELL_TYPE_MAP } from '@/data/cell-types';
 import { useLabStore } from '@/store/lab-store';
 import { cn } from '@/lib/utils';
 
+/** 具有手工策划教学级联的通路（与 guided-tour.ts CURATED_TOURS 同步） */
+const CURATED_TOUR_PATHWAYS = new Set([
+  'hsa04010', 'hsa04151', 'hsa04630', 'hsa04024', 'hsa04350', 'hsa04310', 'hsa04330',
+]);
+
 export function PathwayLibrary() {
   const cellId = useLabStore((s) => s.cellId);
   const pathwayId = useLabStore((s) => s.pathwayId);
@@ -108,6 +113,14 @@ export function PathwayLibrary() {
                       <span className={cn('text-[12.5px] font-medium', active ? 'text-emerald-200' : 'text-slate-200')}>{p.nameZh}</span>
                       {rec && (
                         <span className="rounded bg-emerald-500/15 px-1 py-px text-[8.5px] text-emerald-300/90">适配</span>
+                      )}
+                      {CURATED_TOUR_PATHWAYS.has(p.id) && (
+                        <span
+                          title="已策划分步教学级联（3D 视图 → 教学引导）"
+                          className="rounded bg-teal-500/15 px-1 py-px text-[8.5px] text-teal-300/90"
+                        >
+                          教学
+                        </span>
                       )}
                       <ChevronRight className={cn('ml-auto h-3 w-3 transition-transform', active ? 'text-emerald-400' : 'text-slate-600 group-hover:translate-x-0.5')} />
                     </div>

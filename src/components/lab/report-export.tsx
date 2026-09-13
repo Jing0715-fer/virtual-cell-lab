@@ -12,6 +12,7 @@
 import { useState } from 'react';
 import { FileDown, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
+import { useCompareStore, moleculeDeltas, compareSummary } from '@/store/compare-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
 import { INHIBITORS } from '@/data/inhibitors';
 import type { CoreNode, PathwayGraph } from '@/types/kegg';
@@ -147,6 +148,19 @@ function drawBar(ctx: CanvasRenderingContext2D, x: number, y: number, value: num
   setFont(ctx, 10, '400', true, INK_SOFT);
   ctx.fillText(`${Math.round(value * 100)}%`, x + w + 8, y + 7);
   return x + w + 8 + 46;
+}
+
+/** 下载 PDF Blob（挂载式同步 click —— 比jsPDF 默认的分离节点+setTimeout 更兼容 headless/严格浏览器） */
+function downloadPdfBlob(doc: { output: (type: 'blob') => Blob }, filename: string): void {
+  const blob = doc.output('blob');
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
 // ---------- 活性动力学曲线（报告风格） ----------
@@ -509,7 +523,7 @@ export function ReportExportButton() {
         doc.addImage(pages[i].toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, A4_PT_W, A4_PT_H, undefined, 'FAST');
       }
       const dateStr = stamp.slice(0, 10).replace(/-/g, '');
-      doc.save(`VirtualCell-Report-${graph.meta.id}-${dateStr}.pdf`);
+      downloadPdfBlob(doc, `VirtualCell-Report-${graph.meta.id}-${dateStr}.pdf`);
 
       setState('done');
       toast({ title: '实验报告已导出', description: `${pages.length} 页 PDF · ${eventCount} 分子事件 · ${graph.meta.nameZh}` });
@@ -540,5 +554,333 @@ export function ReportExportButton() {
         : state === 'error' ? <AlertCircle className="h-3.5 w-3.5" />
         : <FileDown className="h-3.5 w-3.5" />}
     </Button>
+  );
+}
+
+/* ============ 对照实验报告（正常 vs 病变双臂） ============ */
+
+/** 双臂动力学对比图: A 臂虚线 teal / B 臂实线 rose（同分子并列，Δ 即为带间距离） */
+function drawCompareChart(
+  ctx: CanvasRenderingContext2D,
+  ox: number, oy: number,
+  historyA: { tick: number; values: Record<string, number> }[],
+  historyB: { tick: number; values: Record<string, number> }[],
+  molecules: { id: string; label: string }[],
+): void {
+  const W = CONTENT_W - 20, H = 190, padL = 40, padR = 14, padT = 14, padB = 26;
+  ctx.save();
+  ctx.translate(ox, oy);
+  ctx.strokeStyle = LINE; ctx.lineWidth = 1;
+  roundRect(ctx, 0, 0, W + 20, H + 20, 8); ctx.stroke();
+  setFont(ctx, 9, '400', true, INK_FAINT);
+  for (let i = 0; i <= 4; i++) {
+    const gy = padT + ((H - padT - padB) * i) / 4;
+    ctx.strokeStyle = '#edf1f5';
+    ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(W - padR, gy); ctx.stroke();
+    const label = ['100', '75', '50', '25', '0'][i];
+    ctx.fillText(label, padL - 6 - ctx.measureText(label).width, gy + 3);
+  }
+  if (historyA.length > 1) {
+    ctx.textAlign = 'center';
+    const tMax = historyA[historyA.length - 1].tick * 0.5;
+    const marks = Math.min(6, Math.max(2, Math.round(tMax / 5)));
+    for (let i = 0; i <= marks; i++) {
+      const gx = padL + ((W - padL - padR) * i) / marks;
+      ctx.strokeStyle = '#edf1f5';
+      ctx.beginPath(); ctx.moveTo(gx, padT); ctx.lineTo(gx, H - padB); ctx.stroke();
+      ctx.fillText(`${Math.round((tMax * i) / marks)}s`, gx, H - padB + 12);
+    }
+    ctx.textAlign = 'left';
+  }
+  const drawArm = (history: typeof historyA, arm: 'A' | 'B') => {
+    molecules.forEach((m) => {
+      ctx.strokeStyle = arm === 'A' ? '#0d9488' : '#e11d48';
+      ctx.lineWidth = arm === 'A' ? 1.2 : 1.8;
+      ctx.setLineDash(arm === 'A' ? [4, 3] : []);
+      ctx.beginPath();
+      history.forEach((sm, i) => {
+        const gx = padL + ((W - padL - padR) * i) / Math.max(1, history.length - 1);
+        const v = sm.values[m.id] ?? 0;
+        const gy = H - padB - (H - padT - padB) * Math.min(1, v);
+        if (i === 0) ctx.moveTo(gx, gy); else ctx.lineTo(gx, gy);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
+  };
+  drawArm(historyA, 'A');
+  drawArm(historyB, 'B');
+  // 图例: A/B 线型 + 分子
+  setFont(ctx, 8.5, '400', true, INK_SOFT);
+  let lx = padL;
+  const ly = H + 6;
+  ctx.strokeStyle = '#0d9488'; ctx.lineWidth = 1.2; ctx.setLineDash([4, 3]);
+  ctx.beginPath(); ctx.moveTo(lx, ly + 3); ctx.lineTo(lx + 16, ly + 3); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = INK_SOFT; ctx.fillText('对照臂 A', lx + 20, ly + 6); lx += 64;
+  ctx.strokeStyle = '#e11d48'; ctx.lineWidth = 1.8;
+  ctx.beginPath(); ctx.moveTo(lx, ly + 3); ctx.lineTo(lx + 16, ly + 3); ctx.stroke();
+  ctx.fillText('实验臂 B', lx + 20, ly + 6); lx += 64;
+  molecules.forEach((m, mi) => {
+    const delta = (historyB[historyB.length - 1]?.values[m.id] ?? 0) - (historyA[historyA.length - 1]?.values[m.id] ?? 0);
+    const t = `${m.label} Δ${delta >= 0 ? '+' : ''}${Math.round(delta * 100)}%`;
+    ctx.fillStyle = ['#0f766e', '#9f1239', '#b45309', '#be185d'][mi % 4];
+    ctx.fillText(t, lx + 4, ly + 6);
+    lx += 14 + ctx.measureText(t).width + 12;
+  });
+  ctx.restore();
+}
+
+export function CompareReportExportButton() {
+  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle');
+  const tick = useCompareStore((s) => s.tick);
+  const { toast } = useToast();
+
+  const handleExport = async () => {
+    const { graph, armA, armB, cellA, cellB, injected } = useCompareStore.getState();
+    if (!graph || !armA || !armB) return;
+    setState('busy');
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    const reportId = `VC-CMP-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+
+    try {
+      const deltas = moleculeDeltas(graph, armA, armB);
+      const summary = compareSummary(deltas, armA, armB);
+      const cellAMeta = CELL_TYPE_MAP.get(cellA);
+      const cellBMeta = CELL_TYPE_MAP.get(cellB);
+      const injectedLabels = Object.entries(injected).filter(([, v]) => v)
+        .map(([id]) => graph.core.nodes.find((n) => n.id === id)?.label ?? id);
+      const EFFECT_ZH: Record<string, string> = { constitutive: '组成性激活', knockout: '功能缺失', overexpress: '过表达' };
+
+      const pages: HTMLCanvasElement[] = [];
+      const mkPage = (): { canvas: HTMLCanvasElement; c: CanvasRenderingContext2D } => {
+        const canvas = document.createElement('canvas');
+        canvas.width = PAGE_W * SCALE; canvas.height = PAGE_H * SCALE;
+        const c = canvas.getContext('2d');
+        if (!c) throw new Error('画布初始化失败');
+        c.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+        c.fillStyle = '#ffffff'; c.fillRect(0, 0, PAGE_W, PAGE_H);
+        pages.push(canvas);
+        return { canvas, c };
+      };
+
+      // ===== 第 1 页 =====
+      const { c: ctx } = mkPage();
+      ctx.fillStyle = '#3b0a1a';
+      roundRect(ctx, PAD, PAD, CONTENT_W, 64, 12); ctx.fill();
+      setFont(ctx, 15, '800', false, '#fff1f2');
+      ctx.fillText('VirtualCell Lab · 对照实验报告', PAD + 24, PAD + 28);
+      setFont(ctx, 9, '400', true, '#fda4af');
+      ctx.fillText('COMPARATIVE EXPERIMENT · 正常 vs 病变 · 单变量设计', PAD + 24, PAD + 44);
+      setFont(ctx, 9, '400', true, '#fecdd3');
+      const idLine = `报告编号 ${reportId}`;
+      ctx.fillText(idLine, PAD + CONTENT_W - 24 - ctx.measureText(idLine).width, PAD + 28);
+      ctx.fillText(stamp, PAD + CONTENT_W - 24 - ctx.measureText(stamp).width, PAD + 44);
+
+      // 实验设置
+      let y = sectionTitle(ctx, PAD + 64, '对照实验设置', 'COMPARATIVE SETUP');
+      const kvRows: [string, string][] = [
+        ['通路', `${graph.meta.nameZh} · ${graph.meta.id}`],
+        ['对照臂 A', `${cellAMeta?.name ?? cellA}（${cellAMeta?.nameEn ?? ''}）`],
+        ['实验臂 B', `${cellBMeta?.name ?? cellB}（${cellBMeta?.nameEn ?? ''}）`],
+        ['同步刺激', injectedLabels.length ? `${injectedLabels.join('、')}（两臂同剂量）` : '无外源配体（内源驱动）'],
+        ['模拟时长', `T+${(tick * 0.5).toFixed(1)} s · A 阶段 ${armA.phase}/4 · B 阶段 ${armB.phase}/4`],
+        ['核心子图', `${graph.stats.coreCount} 分子 / ${graph.core.edges.length} 信号关系`],
+        ['A 遗传背景', cellAMeta?.mutations?.length ? cellAMeta.mutations.map((m) => `${m.node} ${EFFECT_ZH[m.effect] ?? m.effect}`).join('、') : '野生型'],
+        ['B 遗传背景', cellBMeta?.mutations?.length ? cellBMeta.mutations.map((m) => `${m.node} ${EFFECT_ZH[m.effect] ?? m.effect}`).join('、') : '野生型'],
+      ];
+      kvRows.forEach((row, i) => {
+        const col = i % 2, rowI = Math.floor(i / 2);
+        const x = PAD + (col * CONTENT_W) / 2;
+        const ry = y + rowI * 22;
+        setFont(ctx, 9, '400', false, INK_FAINT);
+        ctx.fillText(row[0], x, ry + 8);
+        setFont(ctx, 11, '500');
+        const valueW = CONTENT_W / 2 - 64 - 10;
+        const vLines = wrapText(ctx, row[1], valueW, 1);
+        ctx.fillText(vLines[0] ?? '—', x + 64 + 8, ry + 8);
+      });
+      y += Math.ceil(kvRows.length / 2) * 22 + 6;
+
+      // 摘要卡
+      y = sectionTitle(ctx, y, '对照结果摘要', 'COMPARATIVE SUMMARY');
+      const cards: [string, string, string][] = [
+        [String(summary.autonomousCount), '自主激活分子', '#be123c'],
+        [`${summary.meanDelta >= 0 ? '+' : ''}${(summary.meanDelta * 100).toFixed(1)}%`, '平均活性差 (B−A)', '#0f766e'],
+        [summary.phase4LeadTicks != null ? `${(summary.phase4LeadTicks * 0.5).toFixed(1)}s` : '—', '阶段④首达时差', '#b45309'],
+        [String(summary.totalEvents), '两臂事件总数', '#475569'],
+      ];
+      const cardW = (CONTENT_W - 24) / 4;
+      cards.forEach(([num, label, color], i) => {
+        const x = PAD + i * (cardW + 8);
+        ctx.fillStyle = '#f8fafc'; ctx.strokeStyle = LINE;
+        roundRect(ctx, x, y, cardW, 46, 8); ctx.fill(); ctx.stroke();
+        setFont(ctx, 17, '800', true, color);
+        ctx.fillText(num, x + 10, y + 24);
+        setFont(ctx, 8.5, '400', false, INK_FAINT);
+        ctx.fillText(label, x + 10, y + 38);
+      });
+      y += 58;
+
+      // 双臂动力学对比（按 |Δ| 排序 Top 4）
+      y = sectionTitle(ctx, y, '双臂活性动力学对比（Δ Top 4）', 'DUAL-ARM KINETICS');
+      const top4 = deltas.filter((d) => Math.abs(d.delta) > 0.15).slice(0, 4);
+      if (armA.activityHistory.length > 1 && top4.length > 0) {
+        drawCompareChart(ctx, PAD, y, armA.activityHistory, armB.activityHistory, top4);
+        y += 190 + 40;
+      } else {
+        setFont(ctx, 10, '400', false, INK_FAINT);
+        ctx.fillText('无显著差异分子 —— 播放对照模拟后再导出', PAD + 180, y + 20);
+        y += 40;
+      }
+
+      // 分子差异 Top 14 表
+      y = sectionTitle(ctx, y, '分子差异排行（按 |Δ| 排序 Top 14）', 'MOLECULAR DELTA');
+      const colX = [PAD + 8, PAD + 128, PAD + 196, PAD + 264, PAD + 340, PAD + 480];
+      ctx.fillStyle = '#fef2f2';
+      ctx.fillRect(PAD, y, CONTENT_W, 22);
+      setFont(ctx, 9, '600', false, INK_FAINT);
+      ['分子', '类别', 'A 活性', 'B 活性', 'Δ (B−A)', '解读'].forEach((t, i) => ctx.fillText(t, colX[i], y + 15));
+      y += 22;
+      deltas.slice(0, 14).forEach((d, i) => {
+        const rowH = 24;
+        if (i % 2 === 1) { ctx.fillStyle = '#f8fafc'; ctx.fillRect(PAD, y, CONTENT_W, rowH); }
+        setFont(ctx, 10, '500', true);
+        ctx.fillText(d.label, colX[0], y + 16);
+        setFont(ctx, 9.5, '400', false, INK_SOFT);
+        ctx.fillText(KIND_ZH[d.kind] ?? '分子', colX[1], y + 16);
+        // A/B 双条
+        const barW = 56;
+        ctx.fillStyle = '#eef2f6'; roundRect(ctx, colX[2], y + 8, barW, 6, 3); ctx.fill();
+        ctx.fillStyle = '#0d9488'; roundRect(ctx, colX[2], y + 8, Math.max(3, barW * Math.min(1, d.activityA)), 6, 3); ctx.fill();
+        ctx.fillStyle = '#eef2f6'; roundRect(ctx, colX[3], y + 8, barW, 6, 3); ctx.fill();
+        ctx.fillStyle = '#e11d48'; roundRect(ctx, colX[3], y + 8, Math.max(3, barW * Math.min(1, d.activityB)), 6, 3); ctx.fill();
+        setFont(ctx, 9, '400', true, INK_SOFT);
+        ctx.fillText(`${Math.round(d.activityA * 100)}%`, colX[2] + barW + 5, y + 15);
+        ctx.fillText(`${Math.round(d.activityB * 100)}%`, colX[3] + barW + 5, y + 15);
+        // Δ 徽标
+        const up = d.delta > 0;
+        ctx.fillStyle = up ? '#e11d48' : '#0d9488';
+        roundRect(ctx, colX[4], y + 5, 44, 13, 3); ctx.fill();
+        setFont(ctx, 9, '700', true, '#ffffff');
+        const dt = `${up ? '+' : ''}${Math.round(d.delta * 100)}%`;
+        ctx.fillText(dt, colX[4] + (44 - ctx.measureText(dt).width) / 2, y + 15);
+        // 解读
+        setFont(ctx, 8.5, '400', false, INK_FAINT);
+        const interp = d.activityB > 0.5 && d.activityA < 0.05
+          ? '组成性活化（不依赖刺激）'
+          : d.activatedTickB != null && d.activatedTickA != null && d.activatedTickB < d.activatedTickA
+            ? `激活提前 ${(Math.abs(d.activatedTickB - d.activatedTickA) * 0.5).toFixed(1)}s`
+            : Math.abs(d.delta) < 0.05 ? '两臂一致' : up ? '实验臂增强' : '实验臂减弱';
+        ctx.fillText(interp, colX[5], y + 15);
+        y += rowH;
+      });
+      y += 12;
+
+      // 方法学说明
+      ctx.fillStyle = '#fefce8'; ctx.strokeStyle = '#fef08a'; ctx.lineWidth = 1;
+      if (y + 74 > PAGE_H - PAD - 26) {
+        const { c: ctx2 } = mkPage();
+        y = sectionTitle(ctx2, PAD, '方法学说明', 'METHODOLOGY');
+      } else {
+        y = sectionTitle(ctx, y, '方法学说明', 'METHODOLOGY');
+      }
+      const targetCtx = pages[pages.length - 1].getContext('2d');
+      if (targetCtx) {
+        const tc = targetCtx;
+        tc.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+        tc.fillStyle = '#fefce8';
+        roundRect(tc, PAD, y, CONTENT_W, 58, 8); tc.fill(); tc.stroke();
+        setFont(tc, 9.5, '400', false, '#854d0e');
+        const notes = [
+          '单变量设计：两臂共享同一 KEGG 核心子图、同一配体剂量与引擎参数（离散动力学活性 0-1），唯一变量为细胞系遗传背景。',
+          `遗传背景解析含同族等价映射（如 KRAS→HRAS 等经典成员，催化机制保守）；Δ = 实验臂活性 − 对照臂活性，正值代表信号增强。`,
+        ];
+        notes.forEach((n, i) => {
+          wrapText(tc, n, CONTENT_W - 24, 2).forEach((ln, j) => tc.fillText(ln, PAD + 12, y + 18 + i * 24 + j * 12));
+        });
+      }
+
+      // ===== 实验臂事件流页（有事件时） =====
+      const eventsB = armB.events.filter((e) => e.kind !== 'info' && e.kind !== 'phase').slice(-32);
+      if (eventsB.length > 0) {
+        const { c: ctx3 } = mkPage();
+        let ey = sectionTitle(ctx3, PAD, '实验臂（B）分子事件流', 'ARM-B EVENT LOG');
+        setFont(ctx3, 8.5, '600', false, INK_FAINT);
+        ctx3.fillText('时间(s)', PAD + 6, ey + 13);
+        ctx3.fillText('类型', PAD + 58 + 6, ey + 13);
+        ctx3.fillText('事件描述', PAD + 58 + 52 + 6, ey + 13);
+        ey += 20;
+        for (const ev of eventsB) {
+          const textX = PAD + 58 + 52 + 8;
+          const textW = CONTENT_W - 58 - 52 - 16;
+          setFont(ctx3, 9.5, '400', false, INK);
+          const lines = wrapText(ctx3, ev.text, textW, 2);
+          const rowH = Math.max(20, lines.length * 12 + 6);
+          setFont(ctx3, 9, '400', true, INK_FAINT);
+          ctx3.fillText(ev.simTime.replace('T+', ''), PAD + 6, ey + 11);
+          const [kText, kColor] = EVENT_BADGE[ev.kind] ?? ['信息', '#475569'];
+          ctx3.fillStyle = kColor;
+          roundRect(ctx3, PAD + 58 + 6, ey + 1, 40, 12, 3); ctx3.fill();
+          setFont(ctx3, 8, '600', false, '#ffffff');
+          ctx3.fillText(kText, PAD + 58 + 6 + (40 - ctx3.measureText(kText).width) / 2, ey + 10);
+          setFont(ctx3, 9.5, '400', false, INK);
+          lines.forEach((ln, i) => ctx3.fillText(ln, textX, ey + 11 + i * 12));
+          ey += rowH;
+          ctx3.strokeStyle = '#f1f5f9'; ctx3.lineWidth = 1;
+          ctx3.beginPath(); ctx3.moveTo(PAD, ey); ctx3.lineTo(PAD + CONTENT_W, ey); ctx3.stroke();
+        }
+      }
+
+      // 页脚
+      pages.forEach((pc, i) => {
+        const pctx = pc.getContext('2d');
+        if (pctx) {
+          pctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+          drawFooter(pctx, i + 1, pages.length, stamp);
+        }
+      });
+
+      // Canvas → PDF
+      const { jsPDF } = await import('jspdf');
+      const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait', compress: true });
+      for (let i = 0; i < pages.length; i++) {
+        if (i > 0) doc.addPage();
+        doc.addImage(pages[i].toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, A4_PT_W, A4_PT_H, undefined, 'FAST');
+      }
+      const dateStr = stamp.slice(0, 10).replace(/-/g, '');
+      downloadPdfBlob(doc, `VirtualCell-Compare-${graph.meta.id}-${dateStr}.pdf`);
+
+      setState('done');
+      toast({ title: '对照实验报告已导出', description: `${pages.length} 页 PDF · ${summary.autonomousCount} 自主激活分子 · 平均差 ${(summary.meanDelta * 100).toFixed(1)}%` });
+      setTimeout(() => setState('idle'), 3000);
+    } catch (err) {
+      console.error('对照报告导出失败', err);
+      setState('error');
+      toast({ title: '导出失败', description: err instanceof Error ? err.message : '未知错误，请重试', variant: 'destructive' });
+      setTimeout(() => setState('idle'), 3000);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleExport}
+      disabled={tick < 2 || state === 'busy'}
+      title={tick < 2 ? '播放对照模拟后再导出（需数据）' : '导出对照实验报告（PDF：设置/摘要/双臂曲线/差异表/事件流）'}
+      className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition disabled:opacity-40 ${
+        state === 'done'
+          ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300'
+          : state === 'error'
+            ? 'border-rose-500/50 bg-rose-500/15 text-rose-300'
+            : 'border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20'
+      }`}
+    >
+      {state === 'busy' ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        : state === 'done' ? <CheckCircle2 className="h-3.5 w-3.5" />
+        : state === 'error' ? <AlertCircle className="h-3.5 w-3.5" />
+        : <FileDown className="h-3.5 w-3.5" />}
+      导出对照报告
+    </button>
   );
 }
