@@ -11,7 +11,7 @@ import {
 import { applyScaffoldEdges } from '@/lib/simulation/scaffold';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
 
-export type ViewMode = 'cell' | 'map';
+export type ViewMode = 'cell' | 'map' | 'cell3d';
 
 interface LabStore {
   // 实验配置
@@ -59,7 +59,7 @@ const MAX_HISTORY = 260;
 export const useLabStore = create<LabStore>((set, get) => ({
   cellId: 'hepatocyte',
   pathwayId: 'hsa04010',
-  view: 'cell',
+  view: 'cell3d',
   graph: null,
   graphLoading: false,
   graphError: null,
@@ -84,7 +84,7 @@ export const useLabStore = create<LabStore>((set, get) => ({
   },
 
   selectPathway: (id) => {
-    set({ pathwayId: id, graph: null, graphError: null, running: false, view: 'cell' });
+    set({ pathwayId: id, graph: null, graphError: null, running: false, view: 'cell3d' });
   },
 
   setView: (v) => set({ view: v }),

@@ -97,3 +97,34 @@ Stage Summary:
   4. 通路对比模式（正常 vs 癌细胞同通路并排）
   5. 教学引导（分步高亮讲解经典级联）
   6. 更多细胞类型（肝星状细胞/NK 细胞/β 细胞）与通路（VEGF/ Hippo/ cGAS-STING）
+
+---
+Task ID: 10
+Agent: 主协调 Agent (Z.ai Code)
+Task: 3D 沉浸式虚拟细胞升级 —— 真实 3D 细胞结构 + 通路表现增强 + 科学严谨性打磨（响应用户新需求）
+
+Work Log:
+- 安装 three@0.180 + @react-three/fiber@9.3 + @react-three/drei@10.7（React 19 / Next 16 兼容组合）
+- src/lib/simulation/layout3d.ts: 3D 径向布局引擎 —— 配体→胞外壳层(R*1.235) / 受体→膜面(带法向，跨膜胶囊体) / 胞质级联 tier2-4→壳层(0.845/0.715/0.59) / TF→核内环(0.74N) / 靶基因→内环(0.45N)；受体分支按经度聚类形成"径向信号光束"（每条通路级联清晰可循）；确定性哈希抖动保证布局稳定；二次贝塞尔边曲线（24 采样点 + 垂直确定性弯曲避免平行边重叠）；7 种细胞形态 3D 规格（心肌 16 线粒体/T 细胞高核质比 5.4/成纤维梭形拉伸/癌变核多形性+3 核仁）
+- src/components/cell3d/organelles.tsx: 命令式 three.js 细胞超微结构构建器（~560 行）—— 磷脂双分子层（内外两叶 720×2 实例化脂头，斐波那契球面）+ 核被膜双层 + 52 核孔复合体（环面沿法向）+ 核仁 + 14 染色质纤维 + 线粒体（外膜胶囊+波浪嵴管+环状嵴板，9-16 个/细胞型）+ 粗面内质网（扁平囊池+膜旁核糖体实例化）+ 高尔基体（顺→反 5 囊池+出芽囊泡）+ 运输囊泡 + 中心体放射微管 + 300 胞质颗粒（分子拥挤）；细胞类型特化：肝糖原玫瑰体/上皮微绒毛刷状缘+紧密连接带/成纤维胞外 I 型胶原/神经元髓鞘轴突（郎飞氏结）+树突/癌细胞膜出芽；帧驱动动画（线粒体漂移、胞质旋转、核仁呼吸）+ 全量 dispose
+- src/components/cell3d/molecules.tsx: 3D 分子层 —— 受体=跨膜α螺旋胶囊+胞外配体结合域+胞内信号域（沿膜法向），配体=布朗漂移小球，激酶等=发光球（emissiveIntensity=0.35+活性×2.4）+ 加性光晕呼吸 + 磷酸化琥珀环（旋转+scale=磷化水平）+ 突变 M/KO 徽标 + Html transform 标签（活性 is-active/磷化 is-phospho CSS 类 imperative 切换）+ 悬停分子卡（NODE_NOTES 残基级注释）+ 点击选中（联动右栏检测器）
+- src/components/cell3d/signal-edges.tsx: 信号边层 —— drei Line2 曲线（激活翡翠/抑制玫红虚线/表达琥珀），opacity=0.16+通量×1.15 逐帧 imperative 更新；流动粒子单 InstancedMesh（每边 2 粒，速度=2.2+通量×5.2，实例色随边类型）
+- src/components/cell3d/virtual-cell-3d.tsx: 主场景 —— R3F Canvas + 三点光照（含胞内 teal 点光 + 核内 rose 点光）+ OrbitControls（阻尼+自动环视）；CameraRig 四机位（全景 31/质膜近景 6.2 锚定最活跃受体/核内视角 3.4/跟随信号 6.5 阻尼追踪最近激活分子）；HUD：实验信息卡（T+时间/阶段/分子数/真实直径+非等比声明）、显示开关（解剖标注/全部标签/专注模式/自动环视）、图例（11 分子类+4 边语义）、比例尺；zustand 订阅写入可变快照引用（nodeStates/signalFlux），useFrame 直读 → 模拟 60fps 无 React 重渲染
+- workspace.tsx 集成：三视图切换（3D 沉浸默认/2D 切面/KEGG 图谱）+ next/dynamic ssr:false + 加载动画；lab-store ViewMode 扩展
+- globals.css: mol3d-label（11 类分子色）/mol3d-tip（残基级注释卡）/anatomy-tag（解剖标注）样式体系
+- 关键 bug 修复 ×2：① drei Html transform 内层容器默认 pointerEvents='auto' 导致 32 个标签 DOM 覆盖层拦截全部指针事件（分子无法点击/悬停）→ 所有 Html 传 pointerEvents="none" prop ② workspace 画布容器 onClick=selectNode(null) 在 R3F 事件后触发（R3F stopPropagation 不阻止 DOM 冒泡）导致选中被清空 → 非 3D 视图才执行
+- React Compiler lint 规则适配：molecules.tsx 命令式材质变异为 R3F 标准范式（项目未启用 compiler）局部禁用 react-hooks/immutability；organelles refs 违规改为直调
+- agent-browser 端到端 QA 全通过：3D 渲染（VLM 确认球形细胞/膜/核/发光分子/流动粒子）、播放+自动注射（T+8s）、跟随信号（相机推进聚焦级联末端）、质膜近景（EGFR/GRB2 聚焦）、核内视角（MYC/JUN/FOS 转录因子环境）、专注模式（背景暗化仅活跃级联发光）、解剖标注、分子点击→检测器档案（MAPK1/ERK2 别名+活性+磷化+注释+互作网络）、悬停分子卡（MAPK8 JNK1 Ser63/73 注释）、三视图切换、420px 移动端（3D 画布+HUD 完整）、无 console error、lint/tsc 零错误
+
+Stage Summary:
+- 交付 3D 沉浸式虚拟细胞：真实球状细胞（超微结构级细胞器 + 7 细胞型形态特化）作为舞台，核心子图分子按区室径向布局，信号级联以"光束+粒子流"呈现
+- 通路清晰度三重保障：径向信号束布局（每条受体分支一束）/ 专注模式（熄灭背景只留活跃级联）/ 跟随信号（相机自动追踪最新激活分子）
+- 科学严谨性：解剖标注（质膜/核孔复合体/核仁/线粒体嵴/粗面内质网/高尔基体/微管 + 各型特化结构，中英双语）、真实直径标示+非等比声明、残基级悬停注释、受体跨膜结构域分离表征
+- 性能架构：模拟状态 zustand 订阅→可变快照→useFrame 直读，全程无逐 tick React 重渲染；静态结构命令式构建+memo
+- 后续建议（供 cron 巡检代理）：
+  1. 3D 场景 Bloom 后处理（@react-three/postprocessing）增强辉光质感
+  2. 分子间"信号事件脉冲"特效（结合事件流高亮对应边爆发）
+  3. 激酶抑制剂实验（曲美替尼钳制 MEK）在 3D 中观察代偿
+  4. 转录动画：核内 TF→靶基因表达后 mRNA 出核粒子
+  5. 教学引导模式：分步高亮经典级联（EGF→EGFR→RAS→RAF→MEK→ERK→ELK1→FOS）
+  6. WebGPU/LOD 优化与低端设备降级（粒子数自适应）
