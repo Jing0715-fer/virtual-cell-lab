@@ -171,3 +171,33 @@ Stage Summary:
   3. 实验报告导出（PDF: 事件流 + 活性曲线 + 分子清单）
   4. 转录组响应热图（tier 6 靶基因 × 时间）
   5. 通路对比模式（正常 vs 癌细胞同通路并排）
+
+---
+Task ID: 13
+Agent: 主协调 Agent (Z.ai Code)
+Task: QA 巡检 + 3 个新功能（信号事件脉冲特效 / 转录组响应热图 / 实验报告导出 PDF）+ 自适应画质模式 + 环境稳定性修复
+
+Work Log:
+- [QA 巡检] dev.log 正常、lint/tsc 零错误、agent-browser 端到端验证全部通过：3D 渲染（32 分子标签）、模拟播放（T+8.0s 自动注射 EGF）、教学引导（教学卡/分子高亮/相机聚焦）、药理投药（曲美替尼→1 种作用中→洗脱按钮切换）、AI 助手（残基级回答）、0 console error —— 项目状态稳定，无需修 bug，转入新功能开发
+- [新功能 A: 信号事件脉冲特效] src/components/cell3d/event-pulses.tsx（~200 行）: 事件流订阅（mrna-flow 同款模式，processed Set 去重防泄漏）→ 彗星池（14 条: 头球 sphere + 尾锥 cone 沿 -速度向）沿二次贝塞尔弧线从上游分子飞抵下游分子（时长 0.55-1.05s 按距离）→ 抵达回调写入 SimSnapshot.pulseAt（目标分子闪光）/edgePulse（双向边 key）→ 能量球壳冲击波池（10 个, 0.6s 扩散 0.35→2.65 + 淡出）; 事件色与边语义色一致（磷酸化琥珀/激活翡翠/结合 teal/抑制紫/表达琥珀）; molecules.tsx useFrame 增加抵达闪光（emissive +2.6 / halo +0.75, 650ms 平方衰减）; signal-edges.tsx useFrame 增加边爆发（900ms 内 opacity +0.55）; SimSnapshot 扩展 pulseAt/edgePulse 字段; 图例新增"信号事件脉冲"; VLM 确认彗星粒子沿信号路径飞行 ✓
+- [新功能 B: 转录组响应热图] src/components/lab/transcriptomic-heatmap.tsx（~230 行）: 右栏第 5 个 tab"转录组"（amber 主题区分）; 行 = 核内靶基因（kind=gene; <3 个时纳入 TF）; 列 = activityHistory 降采样至 48 列; 热图色标（深墨→青绿→琥珀→玫红 模拟荧光强度）; ▲ 峰值时刻标记 + 悬停读数（基因×时间→活性%）+ 统计卡（靶基因数/显著响应数/采样终点）+ 峰值响应排行条 + 底部色标说明; 400ms 节流刷新避免逐 tick 10Hz 重渲染; QA 验证: MAPK 通路 7 核内靶基因 6 显著响应, FOS 峰 93%, 时间轴 0-78s ✓
+- [新功能 C: 实验报告导出 PDF] src/components/lab/report-export.tsx（~490 行, 纯 Canvas 2D 方案）: 导出按钮（播放控制台, 状态反馈 spinner/成功/失败 + toast）; 报告内容 = 头部横幅（报告编号/时间戳）+ 实验设置（细胞系/通路/时长/速率/配体/药理 2 列键值）+ 核心级联摘要框 + 摘要统计卡（核心分子/分子事件/活跃分子/响应靶基因）+ 活性动力学曲线（canvas 绘制 Top 6 分子, 网格/坐标轴/彩色曲线/图例）+ 核心分子档案表（Top 12, 活性/磷酸化 mini 条形）+ 药理干预卡 + 遗传背景卡 + 分子事件流全表（时间/类型徽标/逐字折行描述, 自动分页续表）+ 每页页脚（页码/数据源声明）; 逐字折行 wrapText（CJK 安全, 2 行封顶省略号）; A4 794×1123 逻辑单位 ×2 超采样 → jsPDF A4 pt 输出; QA 验证: %PDF-1.3 有效结构、2 页、284KB、真实级联数据（22 分子事件/EGF-MAP2K1-MAPK1 曲线）、VLM 确认排版无重叠截断 ✓
+- [新功能 D: 自适应画质模式] virtual-cell-3d.tsx: detectLowEndGpu()（deviceMemory≤4 / hardwareConcurrency≤4 / WEBGL_debug_renderer_info 匹配 SwiftShader/llvmpipe/software）→ 自动流畅模式（dpr [0.7,1] + 关 MSAA + 关 Canvas antialias, 保留 Bloom 视觉特征）; HUD 新增 Gauge 开关（流畅模式/高清模式手动切换）; 响应 worklog Task 12 遗留风险 #2（低端设备 GPU 负担）
+- [架构决策: 放弃 html2canvas] 首版报告用 html2canvas-pro 光栅化离屏 DOM，在本环境持续报 "Unable to find element in cloned iframe"（主文档 Tailwind 4 CSS 干扰克隆, 隔离 iframe 方案也失败）→ 重写为纯 Canvas 2D 直接绘制（零 DOM 克隆依赖、确定性排版、逐字折行精确控制）→ 移除 html2canvas-pro 依赖（jspdf 保留）
+- [环境稳定性] 本轮发现系统 dev server 被内核 OOM-kill（next-server 1.8GB + Chrome SwiftShader 3D 渲染内存增长触发全局 OOM, dmesg 确认 VizCompositorTh 触发）; 系统看门狗不会自动重启 dev server → 手动 setsid 重启 + 流畅模式（内存稳定 2.2GB）; QA 期间多次 server 静默死亡均为此因, 非代码 bug
+- [QA 全量回归] lint 零错误 / tsc src 零错误 / 3D 渲染 + 播放（T+79.5s）+ 事件脉冲（VLM 确认彗星粒子）+ 转录组热图（7 基因 + 排行）+ PDF 导出（2 页真实数据 VLM 确认）+ 2D/3D 视图切换（67 SVG / canvas 恢复）+ 响应式类存在性（lg:grid-cols + order 类）+ 0 console error
+
+Stage Summary:
+- 项目当前状态: 3D 沉浸式虚拟细胞平台（13 KEGG 通路 + 7 细胞系 + 分子级模拟 + 药理扰动 + 三视图 + AI 助手 + 教学引导 + Bloom）+ 事件脉冲特效 + 转录组热图 + PDF 报告导出 + 自适应画质, 全部 QA 通过
+- 本轮产出: 3 个新功能（事件脉冲/热图/报告导出）+ 自适应画质模式 + 依赖精简（移除 html2canvas-pro）; 修复环境级 OOM 问题（流畅模式自动降级）
+- 关键技术决策: PDF 报告采用纯 Canvas 2D 绘制而非 DOM 克隆光栅化（html2canvas 在 Tailwind 4 环境不可靠）
+- 未解决问题/风险（供下一阶段）:
+  1. 沙盒内存天花板: QA 环境 4GB, 长时间多标签 3D 会话仍可能触发 OOM（流畅模式已大幅缓解; 生产环境真实 GPU 无此问题）
+  2. 报告事件流 160 字截断（超长策划注释在报告中省略, 全文在应用事件流 tab 可见）
+  3. 教学引导仅 MAPK 手工策划（worklog Task 12 遗留, PI3K-Akt/JAK-STAT/cAMP 有 CURATED_EVENTS 素材可优先补）
+  4. KEGG 图谱视图 scaffold 边不显示（旧已知问题, 低优先级）
+- 下一阶段建议优先事项:
+  1. 通路对比模式（正常 vs 癌细胞同通路并排, worklog 遗留建议 #4）
+  2. 更多通路教学级联手工策划（PI3K-Akt / JAK-STAT / cAMP）
+  3. 报告导出增加转录组热图页（复用热图渲染逻辑到 canvas）
+  4. 事件脉冲粒子在低端设备的数量自适应（当前固定池 14+10）

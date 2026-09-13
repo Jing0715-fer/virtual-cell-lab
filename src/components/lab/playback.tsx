@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * 模拟控制台 —— 播放/暂停/单步/重置、速率、信号阶段进度、配体注射
+ * 模拟控制台 —— 播放/暂停/单步/重置、速率、信号阶段进度、配体注射、报告导出
  */
 import { Play, Pause, StepForward, RotateCcw, Droplet, Zap } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
@@ -9,6 +9,7 @@ import { PHASES } from '@/lib/simulation/engine';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { ReportExportButton } from './report-export';
 
 const SPEEDS = [0.5, 1, 2, 4];
 
@@ -98,6 +99,8 @@ export function PlaybackControls() {
           >
             <RotateCcw className="h-3.5 w-3.5" />
           </Button>
+          {/* 实验报告导出（PDF） */}
+          <ReportExportButton />
         </div>
 
         {/* 速率 */}

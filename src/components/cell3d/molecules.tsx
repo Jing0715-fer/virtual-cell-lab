@@ -52,6 +52,10 @@ export interface SimSnapshot {
   tourNode: string | null;
   /** 教学引导: 邻居分子 id 集合（保持可见） */
   tourNeighbors: Set<string> | null;
+  /** 事件脉冲: 分子最近被信号抵达时间戳（performance.now(), 事件脉冲层写入） */
+  pulseAt?: Record<string, number>;
+  /** 事件脉冲: 边最近脉冲时间戳（双向 key） */
+  edgePulse?: Record<string, number>;
 }
 
 interface MoleculeProps {
@@ -133,9 +137,17 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
 
   useFrame((state) => {
     const t = state.clock.elapsedTime;
+    const wallNow = performance.now();
     const st = sim.current.nodeStates[node.id];
     const a = st?.activity ?? 0;
     const ph = st?.phospho ?? 0;
+    // 信号抵达闪光（事件脉冲层写入时间戳, 650ms 衰减）
+    let flash = 0;
+    const pAt = sim.current.pulseAt?.[node.id];
+    if (pAt !== undefined) {
+      const age = (wallNow - pAt) / 650;
+      if (age >= 0 && age < 1) flash = (1 - age) * (1 - age);
+    }
     const focus = sim.current.focus;
     const tourNode = sim.current.tourNode;
     const isTourTarget = !!tourNode && node.id === tourNode;
@@ -155,14 +167,14 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
       groupRef.current.position.y = node.pos.y + Math.sin(t * 0.8 + phase) * 0.16;
       groupRef.current.position.x = node.pos.x + Math.cos(t * 0.5 + phase * 2) * 0.1;
     }
-    // 发光强度 = 活性（教学目标额外脉冲）
+    // 发光强度 = 活性（教学目标额外脉冲 + 信号抵达闪光）
     coreMat.emissiveIntensity =
-      0.35 + a * 2.4 + (isTourTarget ? 1.5 + 0.55 * Math.sin(t * 6) : 0);
+      0.35 + a * 2.4 + flash * 2.6 + (isTourTarget ? 1.5 + 0.55 * Math.sin(t * 6) : 0);
     coreMat.opacity = 0.96 * Math.max(0.35, vis);
-    // 光晕呼吸（教学目标持续可见）
-    haloMat.opacity = Math.max(a * 0.4, isTourTarget ? 0.5 : 0) * vis;
+    // 光晕呼吸（教学目标持续可见 + 抵达瞬间爆发）
+    haloMat.opacity = Math.max(a * 0.4, flash * 0.75, isTourTarget ? 0.5 : 0) * vis;
     if (haloRef.current) {
-      const pulse = 1 + Math.max(a * 0.25, isTourTarget ? 0.3 : 0) * Math.sin(t * 3 + phase);
+      const pulse = 1 + Math.max(a * 0.25, flash * 0.5, isTourTarget ? 0.3 : 0) * Math.sin(t * 3 + phase);
       haloRef.current.scale.setScalar(pulse);
     }
     // 磷酸化环

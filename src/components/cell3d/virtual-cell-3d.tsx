@@ -15,7 +15,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay } from 'lucide-react';
+import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
 import { layout3D, type Vec3 } from '@/lib/simulation/layout3d';
@@ -24,8 +24,27 @@ import { CellBody } from './organelles';
 import { MoleculeLayer, KIND_COLORS, type SimSnapshot } from './molecules';
 import { EdgeLayer } from './signal-edges';
 import { MrnaFlow } from './mrna-flow';
+import { EventPulses } from './event-pulses';
 
 type CamMode = 'free' | 'overview' | 'membrane' | 'nucleus' | 'follow' | 'tour';
+
+/** 低端设备/软件渲染检测（SwiftShader/CPU 渲染/低核数 → 自动流畅模式，降帧缓冲内存与 CPU 负担） */
+function detectLowEndGpu(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const nav = navigator as Navigator & { deviceMemory?: number };
+  if (nav.deviceMemory !== undefined && nav.deviceMemory <= 4) return true;
+  if (nav.hardwareConcurrency && nav.hardwareConcurrency <= 4) return true;
+  try {
+    const c = document.createElement('canvas');
+    const gl = (c.getContext('webgl2') ?? c.getContext('webgl')) as WebGLRenderingContext | null;
+    if (!gl) return true;
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const renderer = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+    return /swiftshader|llvmpipe|software|basic\s*render|angle \(.*software/i.test(renderer);
+  } catch {
+    return false;
+  }
+}
 
 /** 相机驱动器: 预设机位（含标准观察方位） + 信号跟随 + 教学聚焦（阻尼插值） */
 function CameraRig({ mode, layout, spec, controlsRef, tourTarget }: {
@@ -150,6 +169,8 @@ function SceneContents({ showAnatomy, showLabels, focus, sim }: {
       <MoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />
       {/* mRNA 转录出核流（表达事件驱动） */}
       <MrnaFlow nodes={layout.nodes} spec={layout.spec} />
+      {/* 信号事件脉冲（分子事件驱动: 沿边彗星 + 抵达冲击波 + 分子闪光） */}
+      <EventPulses nodes={layout.nodes} sim={sim} />
     </group>
   );
 }
@@ -175,6 +196,8 @@ export function VirtualCell3D() {
   const [tourOpen, setTourOpen] = useState(false);
   const [tourIdx, setTourIdx] = useState(0);
   const [tourAuto, setTourAuto] = useState(true);
+  // 流畅模式: 低端设备自动开启（低分辨率渲染 + 关闭 MSAA，保留辉光视觉特征）
+  const [perfMode, setPerfMode] = useState(false);
 
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
@@ -188,6 +211,13 @@ export function VirtualCell3D() {
   if (tourKey !== lastTourKey) {
     setLastTourKey(tourKey);
     setTourIdx(0);
+  }
+
+  // 首次挂载: 硬件探测自动进入流畅模式（渲染期间状态调整模式，避免 effect 抖动）
+  const [probed, setProbed] = useState(false);
+  if (!probed) {
+    setProbed(true);
+    setPerfMode(detectLowEndGpu());
   }
 
   // 进入/退出教学引导（事件处理器内完成状态切换）
@@ -218,7 +248,7 @@ export function VirtualCell3D() {
   }, [tourOpen, tourAuto, tourIdx, tour.length]);
 
   // 模拟快照: zustand 订阅写入可变引用（避免逐 tick React 重渲染）
-  const sim = useRef<SimSnapshot>({ nodeStates: {}, signalFlux: {}, injected: {}, inhibition: {}, focus: false, tourNode: null, tourNeighbors: null });
+  const sim = useRef<SimSnapshot>({ nodeStates: {}, signalFlux: {}, injected: {}, inhibition: {}, focus: false, tourNode: null, tourNeighbors: null, pulseAt: {}, edgePulse: {} });
   useEffect(() => {
     const unsub = useLabStore.subscribe((s) => {
       sim.current.nodeStates = s.nodeStates;
@@ -285,8 +315,8 @@ export function VirtualCell3D() {
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,#04211d_0%,#020617_55%,#01030e_100%)]">
         <Canvas
           camera={{ fov: 42, near: 0.1, far: 300, position: [0, 9, 28] }}
-          dpr={[1, 1.75]}
-          gl={{ antialias: true, alpha: true }}
+          dpr={perfMode ? [0.7, 1] : [1, 1.75]}
+          gl={{ antialias: !perfMode, alpha: true }}
           onPointerMissed={() => selectNode(null)}
         >
           <ambientLight intensity={0.55} />
@@ -305,9 +335,9 @@ export function VirtualCell3D() {
             autoRotateSpeed={0.5}
             makeDefault
           />
-          {/* 生物荧光辉光: Bloom 提亮发光体 + 暗角聚焦视线 */}
+          {/* 生物荧光辉光: Bloom 提亮发光体 + 暗角聚焦视线（流畅模式关闭 MSAA 降帧缓冲内存） */}
           {glow && (
-            <EffectComposer multisampling={4} enableNormalPass={false}>
+            <EffectComposer multisampling={perfMode ? 0 : 4} enableNormalPass={false}>
               <Bloom mipmapBlur intensity={1.25} luminanceThreshold={0.52} luminanceSmoothing={0.32} />
               <Vignette offset={0.22} darkness={0.52} />
             </EffectComposer>
@@ -345,6 +375,7 @@ export function VirtualCell3D() {
         <HudToggle active={tourOpen} onClick={() => openTour(!tourOpen)} icon={BookOpen} label="教学引导" highlight
           disabled={tour.length === 0} />
         <HudToggle active={glow} onClick={() => setGlow(!glow)} icon={Sparkles} label="辉光渲染" />
+        <HudToggle active={perfMode} onClick={() => setPerfMode(!perfMode)} icon={Gauge} label={perfMode ? '流畅模式' : '高清模式'} />
         <HudToggle active={showAnatomy} onClick={() => setShowAnatomy(!showAnatomy)} icon={Tags} label="解剖标注" />
         <HudToggle active={showLabels} onClick={() => setShowLabels(!showLabels)} icon={Eye} label="全部标签" />
         <HudToggle active={focus} onClick={() => setFocus(!focus)} icon={Focus} label="专注模式" />
@@ -381,6 +412,7 @@ export function VirtualCell3D() {
               <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-amber-400" /><span className="text-[9px] text-slate-400">转录表达</span></div>
               <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full border border-amber-400" /><span className="text-[9px] text-slate-400">磷酸化 (P)</span></div>
               <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-400/80 shadow-[0_0_6px_rgba(251,191,36,0.8)]" /><span className="text-[9px] text-slate-400">mRNA 出核</span></div>
+              <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.9)]" /><span className="text-[9px] text-slate-400">信号事件脉冲</span></div>
             </div>
           </div>
         ) : (

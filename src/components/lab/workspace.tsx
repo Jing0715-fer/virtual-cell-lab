@@ -7,7 +7,7 @@
 import { useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useQuery } from '@tanstack/react-query';
-import { Microscope, Map as MapIcon, FlaskConical, Boxes, Orbit, Pill } from 'lucide-react';
+import { Microscope, Map as MapIcon, FlaskConical, Boxes, Orbit, Pill, Activity } from 'lucide-react';
 import type { PathwayGraph } from '@/types/kegg';
 import { useLabStore } from '@/store/lab-store';
 import { VirtualCellView } from './virtual-cell';
@@ -18,6 +18,7 @@ import { EventTimeline } from './timeline';
 import { PathwayLibrary } from './pathway-library';
 import { PharmacologyPanel } from './pharmacology';
 import { AiAssistant } from './ai-assistant';
+import { TranscriptomicHeatmap } from './transcriptomic-heatmap';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -197,17 +198,20 @@ export function LabWorkspace() {
       {/* 右栏 */}
       <div className="order-3 h-[560px] overflow-hidden rounded-2xl border border-white/8 bg-slate-950/50 lg:h-[760px]">
         <Tabs defaultValue="inspector" className="flex h-full flex-col">
-          <TabsList className="mx-3 mt-2 grid h-8 grid-cols-4 bg-white/5">
-            <TabsTrigger value="inspector" className="h-6 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
+          <TabsList className="mx-3 mt-2 grid h-8 grid-cols-5 bg-white/5">
+            <TabsTrigger value="inspector" className="h-6 px-1 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
               <Boxes className="mr-1 h-3 w-3" />检测
             </TabsTrigger>
-            <TabsTrigger value="timeline" className="h-6 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
+            <TabsTrigger value="timeline" className="h-6 px-1 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
               事件流
             </TabsTrigger>
-            <TabsTrigger value="pharmacology" className="h-6 text-[11px] data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-300">
+            <TabsTrigger value="pharmacology" className="h-6 px-1 text-[11px] data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-300">
               <Pill className="mr-1 h-3 w-3" />药理
             </TabsTrigger>
-            <TabsTrigger value="ai" className="h-6 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
+            <TabsTrigger value="transcriptome" className="h-6 px-1 text-[11px] data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-300">
+              <Activity className="mr-1 h-3 w-3" />转录组
+            </TabsTrigger>
+            <TabsTrigger value="ai" className="h-6 px-1 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
               AI
             </TabsTrigger>
           </TabsList>
@@ -219,6 +223,9 @@ export function LabWorkspace() {
           </TabsContent>
           <TabsContent value="pharmacology" className="min-h-0 flex-1 overflow-hidden mt-0">
             <PharmacologyPanel />
+          </TabsContent>
+          <TabsContent value="transcriptome" className="min-h-0 flex-1 overflow-hidden mt-0">
+            <TranscriptomicHeatmap />
           </TabsContent>
           <TabsContent value="ai" className="min-h-0 flex-1 overflow-hidden mt-0">
             <AiAssistant />

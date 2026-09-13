@@ -34,6 +34,17 @@ function EdgeLine({ edge, sim }: EdgeProps) {
     const flux = Math.abs(sim.current.signalFlux[key] ?? 0);
     const focus = sim.current.focus;
     const tourNode = sim.current.tourNode;
+    // 事件脉冲爆发（脉冲粒子沿此边飞行时, 900ms 内提升亮度）
+    let pulseBoost = 0;
+    const ep = sim.current.edgePulse;
+    if (ep) {
+      const now = performance.now();
+      const ts = ep[key] ?? ep[`${edge.target}>${edge.source}`];
+      if (ts !== undefined) {
+        const age = (now - ts) / 900;
+        if (age >= 0 && age < 1) pulseBoost = 1 - age;
+      }
+    }
     const mat = lineRef.current?.material as THREE.Material | undefined;
     if (mat) {
       if (tourNode) {
@@ -42,7 +53,7 @@ function EdgeLine({ edge, sim }: EdgeProps) {
         mat.opacity = isTourEdge ? 0.9 : 0.03;
       } else {
         const base = focus ? 0.05 : 0.16;
-        mat.opacity = flux > 0.02 ? Math.min(0.92, base + flux * 1.15) : base;
+        mat.opacity = Math.min(1, (flux > 0.02 ? Math.min(0.92, base + flux * 1.15) : base) + pulseBoost * 0.55);
       }
     }
   });
