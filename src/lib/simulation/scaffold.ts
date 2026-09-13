@@ -38,6 +38,20 @@ export const SCAFFOLD_EDGES: Record<string, ScaffoldSpec[]> = {
     // Frizzled 招募 Dishevelled（KEGG 以 indirect 关系绘制；重复 entry 提取后部分 FZD1 实例缺失出边）
     { source: 'FZD1', target: 'DVL1', kind: 'indirect' },
   ],
+  hsa04020: [
+    // Ca²⁺ 协同结合钙调蛋白 4 个 EF-hand（KGML 将 CaM 绘制为指向 Ca²⁺ 的间接效应，
+    // 方向与生化因果相反 —— 钙是 CaM 的输入而非输出）→ 解码 Ca²⁺ 信号至 CaMKII/Calcineurin
+    { source: 'C00076', target: 'CALM1', kind: 'binding' },
+  ],
+  hsa04210: [
+    // tBid（BH3-only）直接变构激活 BAX/BAK：α6 螺旋插入线粒体外膜 + 寡聚成孔
+    // （外源凋亡与内源凋亡在 tBid 汇合 —— 教科书级汇流点，KGML 绘制丢失）
+    { source: 'BID', target: 'BAX', kind: 'activation' },
+    { source: 'BID', target: 'BAK1', kind: 'activation' },
+    // MOMP：BAX/BAK 脂质孔释放细胞色素 c（KGML 将 CYCS 绘制为无入边的源节点）
+    { source: 'BAX', target: 'CYCS', kind: 'activation' },
+    { source: 'BAK1', target: 'CYCS', kind: 'activation' },
+  ],
   hsa04350: [
     // TGF-β 家族经典激活：II 型受体（组成性激酶）磷酸化 I 型受体 GS 域（KEGG 绘制丢失）
     { source: 'TGFBR2', target: 'TGFBR1', kind: 'phosphorylation' },

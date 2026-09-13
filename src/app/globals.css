@@ -358,3 +358,32 @@
 }
 .mol3d-label.is-inhibited .mol3d-sym { color: #e9d5ff; }
 .mol3d-label.is-inhibited .mol3d-inh { display: inline; }
+
+/* 3D 药物分子徽标（球棍模型结合停泊后显示） */
+.drug3d-label {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 3px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(192, 132, 252, 0.5);
+  background: linear-gradient(135deg, rgba(59, 7, 100, 0.92), rgba(30, 10, 60, 0.88));
+  backdrop-filter: blur(4px);
+  white-space: nowrap;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  box-shadow: 0 0 18px rgba(192, 132, 252, 0.3), inset 0 1px 0 rgba(233, 213, 255, 0.14);
+  transition: opacity 0.4s ease;
+  opacity: 0;
+}
+.drug3d-name {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #e9d5ff;
+}
+.drug3d-class {
+  font-size: 8px;
+  color: rgba(196, 181, 253, 0.78);
+  letter-spacing: 0.04em;
+}

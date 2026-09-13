@@ -73,14 +73,17 @@ export function LabWorkspace() {
   });
 
   // 数据 → 状态机
+  // 去重键 = 通路 id + fetchedAt；graph 被重置（重选同一通路 / resetSim 后
+  // selectPathway 置空）而 TanStack 缓存命中同一 data 引用时，dedup 会阻断
+  // 重新装配 → 追加 !graph 兜底条件（graph 已装配时该条件恒 false，不重触发）
   const lastLoaded = useRef<string | null>(null);
   useEffect(() => {
-    if (data && data.meta.id === pathwayId && lastLoaded.current !== data.meta.id + data.fetchedAt) {
+    if (data && data.meta.id === pathwayId && (lastLoaded.current !== data.meta.id + data.fetchedAt || !graph)) {
       lastLoaded.current = data.meta.id + data.fetchedAt;
       setGraphState(false, null, data);
       loadGraph(data);
     }
-  }, [data, pathwayId, setGraphState, loadGraph]);
+  }, [data, pathwayId, graph, setGraphState, loadGraph]);
 
   // 模拟循环
   useEffect(() => {

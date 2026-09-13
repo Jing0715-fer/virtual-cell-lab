@@ -23,6 +23,7 @@ import { layout3D, type Vec3 } from '@/lib/simulation/layout3d';
 import { buildGuidedTour, tourIntro } from '@/lib/simulation/guided-tour';
 import { CellBody } from './organelles';
 import { MoleculeLayer, KIND_COLORS, type SimSnapshot } from './molecules';
+import { DrugMoleculeLayer } from './drug-molecules';
 import { EdgeLayer } from './signal-edges';
 import { MrnaFlow } from './mrna-flow';
 import { EventPulses } from './event-pulses';
@@ -243,6 +244,8 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, sim }: {
       <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} />
       <EdgeLayer edges={layout.edges} sim={sim} />
       <MoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />
+      {/* 激酶抑制剂 3D 药物分子（球棍模型，结合靶点） */}
+      <DrugMoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />
       {/* mRNA 转录出核流（表达事件驱动） */}
       <MrnaFlow nodes={layout.nodes} spec={layout.spec} />
       {/* 信号事件脉冲（分子事件驱动: 沿边彗星 + 抵达冲击波 + 分子闪光） */}

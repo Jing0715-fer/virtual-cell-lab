@@ -60,6 +60,32 @@ const INTRINSIC_DRIVE = 1.0; // 内在活性驱动力（如 Rheb 自身 GDP→GT
 const NEG_KINDS = new Set<EdgeKind>(['inhibition', 'repression', 'dephosphorylation']);
 
 /**
+ * 去磷酸化激活靶点家族：这些蛋白的生物学“开关”方向与常规相反 ——
+ * 去磷酸化（而非磷酸化）暴露活性状态：
+ *   - NFAT 家族：Calcineurin 去磷酸化 SRR/SPX 重复区暴露 NLS → 入核
+ *   - TFEB：Calcineurin 去磷酸化释放其从 14-3-3 锥定的胞质定位
+ *   - CDC25 家族：去磷酸化 Cdk1-Tyr15 激活（G2/M 检点开关，经典正反馈）
+ *   - FOXO 家族：AKT 磷酸化将其逐出核，去磷酸化恢复入核
+ * 引擎将指向这些靶点的 dephosphorylation 边按“激活”通量处理
+ * （其余去磷酸化边维持“信号衰减”语义，如 DUSP → pERK 失活）。
+ */
+const DEPHOS_ACTIVATED = new Set([
+  'NFATC1', 'NFATC2', 'NFATC3', 'NFATC4', 'TFEB',
+  'CDC25A', 'CDC25B', 'CDC25C',
+  'FOXO1', 'FOXO3', 'FOXO4',
+]);
+
+/** 节点是否属于去磷酸化激活家族（按 id 或 label 匹配，大小写不敏感） */
+function isDephosActivated(id: string, label?: string): boolean {
+  if (DEPHOS_ACTIVATED.has(id)) return true;
+  if (label) {
+    const l = label.toUpperCase();
+    for (const s of DEPHOS_ACTIVATED) if (l === s || l.startsWith(s + '#')) return true;
+  }
+  return false;
+}
+
+/**
  * 配对基序：组成性“刹车” → 内在活性小 G 蛋白（如 TSC1/2 GAP → Rheb）
  * 静息态：刹车活性 0.65 压制 gtpase 靶点（纯抑制输入 + 内在核苷酸交换活性）
  * 刹车被抑制物（Akt/AMPK）压制后 → 靶点自主活化 —— 双负结构（抑制物的抑制物）得以传导
@@ -268,6 +294,7 @@ export function step(ctx: StepContext): void {
   const posIn: Record<string, number> = {};
   const negIn: Record<string, number> = {};
   const phosphoIn: Record<string, number> = {};
+  const dephosIn: Record<string, number> = {}; // 去磷酸化通量（NFAT 类：磷水平随激活下降）
   // 记录每个节点最显著的输入边（用于事件溯源）
   const bestEdge: Record<string, { src: string; srcLabel: string; kind: EdgeKind; flux: number }> = {};
 
@@ -290,13 +317,20 @@ export function step(ctx: StepContext): void {
     // 药物门控：阻断源节点的催化输出（活性/磷化照常累积，输出归零）
     const inh = ctx.inhibition?.[srcId] ?? 0;
     if (inh >= 0.99) return;
-    const w = EDGE_WEIGHT[e.kind] ?? 0.8;
-    const flux = src.activity * w * (e.kind === 'expression' ? 0.9 : 1) * (1 - inh);
+    // 去磷酸化激活靶点（NFAT/TFEB/CDC25/FOXO）：去磷酸化 = 暴露活性状态（正向通量）
+    const dephosActivates = e.kind === 'dephosphorylation' && isDephosActivated(dstId, dstNode.label);
+    const effectiveKind: EdgeKind = dephosActivates ? 'activation' : e.kind;
+    const w = dephosActivates ? 1.0 : (EDGE_WEIGHT[e.kind] ?? 0.8);
+    const flux = src.activity * w * (effectiveKind === 'expression' ? 0.9 : 1) * (1 - inh);
     const key = `${e.source}>${e.target}`;
     const prevFlux = ctx.signalFlux[key] ?? 0;
     // 视觉通量：保留绝对值更大的方向
     if (Math.abs(flux) > Math.abs(prevFlux)) ctx.signalFlux[key] = flux;
-    if (flux >= 0) {
+    if (dephosActivates) {
+      // 正向激活 + 去磷酸化程度累积（与常规磷酸化相反方向）
+      posIn[dstId] = (posIn[dstId] ?? 0) + flux;
+      dephosIn[dstId] = (dephosIn[dstId] ?? 0) + flux;
+    } else if (flux >= 0) {
       posIn[dstId] = (posIn[dstId] ?? 0) + flux;
       if (e.kind === 'phosphorylation') phosphoIn[dstId] = (phosphoIn[dstId] ?? 0) + flux;
     } else {
@@ -304,7 +338,7 @@ export function step(ctx: StepContext): void {
     }
     const prev = bestEdge[dstId];
     if (!prev || Math.abs(flux) > Math.abs(prev.flux)) {
-      bestEdge[dstId] = { src: srcId, srcLabel: srcNode.label ?? srcId, kind: e.kind, flux };
+      bestEdge[dstId] = { src: srcId, srcLabel: srcNode.label ?? srcId, kind: effectiveKind, flux };
     }
   };
 
@@ -347,10 +381,16 @@ export function step(ctx: StepContext): void {
     // 基础泄漏（突变表型：即使无输入也缓慢自发活化）
     st.activity = clamp(st.activity + da, 0, 1);
 
-    // 磷酸化修饰
+    // 磷酸化修饰（去磷酸化激活家族：活性上升伴随磷水平下降 —— NLS 暴露的生化标记）
     const pIn = phosphoIn[n.id] ?? 0;
-    if (pIn > 0) st.phospho = clamp(st.phospho + 0.2 * pIn * (1 - st.phospho) * 0.1, 0, 1);
-    else st.phospho = Math.max(0, st.phospho - PHOSPHO_DECAY * 0.1);
+    const dIn = dephosIn[n.id] ?? 0;
+    if (dIn > 0) {
+      st.phospho = clamp(st.phospho - 0.25 * dIn * st.phospho * 0.1, 0, 1);
+    } else if (pIn > 0) {
+      st.phospho = clamp(st.phospho + 0.2 * pIn * (1 - st.phospho) * 0.1, 0, 1);
+    } else {
+      st.phospho = Math.max(0, st.phospho - PHOSPHO_DECAY * 0.1);
+    }
 
     // 激活事件检测（组成性刹车不触发 —— 其活性为背景机制而非信号激活）
     if (!brakes.has(n.id) && !st.activated && st.activity >= ACTIVE_THRESHOLD) {

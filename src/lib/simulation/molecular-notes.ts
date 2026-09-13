@@ -312,6 +312,7 @@ export const CURATED_EVENTS: Record<string, string> = {
   'GNAQ>PLCB2': 'Gqα-GTP 的 switch 区插入 PLCβ2 的 C 端螺旋，将其招募至膜并激活 ~1000 倍。',
   'PLCB2>ITPR1': 'IP3 扩散至 ER，结合 IP3R1 氨基端配体结合域（LBD），通道四聚体变构开放释放 Ca²⁺。',
   'ITPR1>CALM1': 'ER 钙释放使胞质 [Ca²⁺] 从 ~100 nM 跃升至 ~1 μM，4 个 Ca²⁺ 协同结合钙调蛋白 EF-hand。',
+  'C00076>CALM1': 'Ca²⁺ 与 CaM 的 C/N 端 EF-hand 协同结合（Kd ~nM 级，Hill 系数 >2）—— CaM 从哑铃状休眠构象伸展为开放态，暴露疏水靶结合槽。',
   'CALM1>CAMK2A': 'Ca²⁺/CaM 包裹 CaMKII 调节段释放催化域；相邻亚基 Thr286 自磷酸化锁定自主活性（>1 s 记忆）。',
   'CALM1>PPP3CA': 'Ca²⁺/CaM 结合 Calcineurin B 亚基 + 暴露 A 亚基催化域，PP2B 磷酸酶活性激活。',
   'PPP3CA>NFATC1': 'Calcineurin 去磷酸化 NFAT 的 SRR1/SP2 重复区（13 个 Ser/Thr），暴露 NLS → 入核。',

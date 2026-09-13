@@ -11,6 +11,10 @@
  *   4. 边生成 —— KGML relation → CoreEdge（EdgeKind 映射 + group 重定向）
  *   5. tier 修正 —— GErel expression/repression 目标上调为靶基因（tier 6）
  *   6. 清理 —— 剔除度为 0 的非配体节点
+ *   7. 同名合并 —— KGML 常将同一基因绘制为多个独立 entry（如 STAT1×10、
+ *      TRAF6×8），分配不同 id 后会割裂信号流（配体激活"死端"副本而经典
+ *      级联走另一副本）。按 label 合并为唯一节点：canonical 优先基因符号
+ *      id，出边并集去重，keggIds/aliases 取并集。
  */
 
 import type {
@@ -493,6 +497,101 @@ export function extractCoreSubgraph(
   // 同步剔除清理后悬空的边（理论上不会出现，防御性处理）
   const validIds = new Set(finalNodes.map((n) => n.id));
   const finalEdges = allEdges.filter((e) => validIds.has(e.source) && validIds.has(e.target));
+
+  return mergeDuplicateNodes(finalNodes, finalEdges);
+}
+
+/**
+ * 同名节点合并（KEGG 重复 entry 统一）
+ *
+ * KGML 中同一基因常有多个独立 entry（不同绘图位置），子图提取按 label 分配
+ * 唯一 id 后形成"同名异 id"节点群，导致信号流割裂（典型症状：配体激活的
+ * 受体副本无出边，而级联下游从另一副本出发）。本函数按 label 分组合并：
+ *   - canonical 选择：id===label（基因符号 id）> cpd: 前缀化合物 id >
+ *     度数最大 > entryId 最小；保留 canonical 的 KGML 坐标与分类
+ *   - keggIds / aliases 取并集（信息无损）
+ *   - 边端点重映射到 canonical id，(source, target, kind) 三元组去重，
+ *     合并产生自环的边剔除
+ */
+export function mergeDuplicateNodes(
+  nodes: CoreNode[],
+  edges: CoreEdge[],
+): { nodes: CoreNode[]; edges: CoreEdge[] } {
+  // 快速路径：无重复 label 直接返回
+  const labelCount = new Map<string, number>();
+  for (const n of nodes) labelCount.set(n.label, (labelCount.get(n.label) ?? 0) + 1);
+  const hasDup = [...labelCount.values()].some((c) => c > 1);
+  if (!hasDup) return { nodes, edges };
+
+  const degree = new Map<string, number>();
+  for (const e of edges) {
+    degree.set(e.source, (degree.get(e.source) ?? 0) + 1);
+    degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
+  }
+
+  // 按 label 分组
+  const groups = new Map<string, CoreNode[]>();
+  for (const n of nodes) {
+    if (!groups.has(n.label)) groups.set(n.label, []);
+    groups.get(n.label)!.push(n);
+  }
+
+  const idToCanonical = new Map<string, string>();
+  const mergedNodes: CoreNode[] = [];
+
+  for (const [, group] of groups) {
+    if (group.length === 1) {
+      mergedNodes.push(group[0]);
+      continue;
+    }
+    // canonical 排序：基因符号 id > cpd id > 度数 > entryId
+    const canonical = [...group].sort((a, b) => {
+      const score = (n: CoreNode) =>
+        (n.id === n.label ? 2 : 0) + (n.id.startsWith('cpd:') ? 1 : 0);
+      const sa = score(a);
+      const sb = score(b);
+      if (sa !== sb) return sb - sa;
+      const da = degree.get(a.id) ?? 0;
+      const db = degree.get(b.id) ?? 0;
+      if (da !== db) return db - da;
+      return (a.entryId ?? 0) - (b.entryId ?? 0);
+    })[0];
+
+    // 属性并集（keggIds / aliases），分类与坐标保持 canonical
+    const keggIds = [...new Set(group.flatMap((n) => n.keggIds))];
+    const aliases = [
+      ...new Set(group.flatMap((n) => [n.id, ...n.aliases]).filter((s) => s && s !== canonical.label)),
+    ].filter((s) => s !== canonical.id);
+
+    for (const n of group) idToCanonical.set(n.id, canonical.id);
+    mergedNodes.push({ ...canonical, keggIds, aliases });
+  }
+
+  // 边重映射 + 三元组去重 + 自环剔除
+  const seen = new Set<string>();
+  const mergedEdges: CoreEdge[] = [];
+  let idx = 0;
+  for (const e of edges) {
+    const source = idToCanonical.get(e.source) ?? e.source;
+    const target = idToCanonical.get(e.target) ?? e.target;
+    if (source === target) continue; // 合并后自环（如 STAT1↔STAT1 二聚体边）
+    const key = `${source}|${target}|${e.kind}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    mergedEdges.push({ ...e, id: `me${idx++}`, source, target });
+  }
+
+  // 重新清理：合并后可能产生度为 0 的非配体节点（其全部边都成为自环被剔除）
+  const nodeDeg = new Map<string, number>();
+  for (const e of mergedEdges) {
+    nodeDeg.set(e.source, (nodeDeg.get(e.source) ?? 0) + 1);
+    nodeDeg.set(e.target, (nodeDeg.get(e.target) ?? 0) + 1);
+  }
+  const finalNodes = mergedNodes.filter(
+    (n) => n.kind === 'ligand' || (nodeDeg.get(n.id) ?? 0) > 0,
+  );
+  const finalIds = new Set(finalNodes.map((n) => n.id));
+  const finalEdges = mergedEdges.filter((e) => finalIds.has(e.source) && finalIds.has(e.target));
 
   return { nodes: finalNodes, edges: finalEdges };
 }

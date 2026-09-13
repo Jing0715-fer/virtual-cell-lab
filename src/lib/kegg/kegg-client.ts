@@ -17,7 +17,7 @@ import { db } from '@/lib/db';
 import { PATHWAY_MAP } from '@/data/pathway-catalog';
 import type { KeggEntry, PathwayCatalogEntry, PathwayGraph, PathwayMeta } from '@/types/kegg';
 import { parseKgml } from './kgml-parser';
-import { extractCoreSubgraph } from './subgraph';
+import { extractCoreSubgraph, mergeDuplicateNodes } from './subgraph';
 
 const KEGG_BASE = 'https://rest.kegg.jp';
 /** fetch 超时（ms） */
@@ -39,7 +39,7 @@ const g = globalThis as unknown as KeggGlobalCache;
  * 代码版本标记：classify/subgraph 算法迭代后递增版本号使内存缓存自动失效，
  * 避免 dev 热重载后 globalThis 仍持有旧算法产物（生产环境版本恒定无影响）
  */
-const CACHE_VERSION = '2025-01-v5';
+const CACHE_VERSION = '2025-01-v6';
 if (g.cacheVersion !== CACHE_VERSION) {
   g.memCache?.clear();
   g.inflight?.clear();
@@ -226,11 +226,27 @@ export async function getPathwayGraph(id: string): Promise<PathwayGraph> {
   if (pending) return pending;
 
   const task = (async (): Promise<PathwayGraph> => {
+    /**
+     * 归一化：DB 旧缓存行（v6 之前写入）不含同名节点合并 —— 统一在读取时
+     * 应用 mergeDuplicateNodes，保证缓存与在线解析产物一致（幂等：已合并
+     * 图的快速路径直接返回原引用）。
+     */
+    const normalize = (graph: PathwayGraph): PathwayGraph => {
+      const merged = mergeDuplicateNodes(graph.core.nodes, graph.core.edges);
+      if (merged.nodes === graph.core.nodes) return graph;
+      return {
+        ...graph,
+        core: merged,
+        stats: { ...graph.stats, coreCount: merged.nodes.length },
+      };
+    };
+
     // 1. Prisma 持久缓存
     const dbGraph = await readDbCache(id);
     if (dbGraph) {
-      memCache.set(id, dbGraph);
-      return dbGraph;
+      const normalized = normalize(dbGraph);
+      memCache.set(id, normalized);
+      return normalized;
     }
 
     // 2. 在线抓取
@@ -242,8 +258,9 @@ export async function getPathwayGraph(id: string): Promise<PathwayGraph> {
       // 3. 在线失败 → 回退 DB（并发场景下可能刚被其他请求写入）
       const fallback = await readDbCache(id);
       if (fallback) {
-        memCache.set(id, fallback);
-        return fallback;
+        const normalized = normalize(fallback);
+        memCache.set(id, normalized);
+        return normalized;
       }
       throw new Error(
         `KEGG 上游暂时不可用，且无本地缓存: ${err instanceof Error ? err.message : String(err)}`

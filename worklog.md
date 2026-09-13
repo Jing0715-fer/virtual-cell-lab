@@ -398,3 +398,60 @@ Stage Summary:
   2. Wnt β-catenin 双负扩展（酶类靶点+组成性刹车判定放宽至 GSK3B 破坏复合体）
   3. 对照模式 3D 视图（双 R3F Canvas 并排，Task 14 遗留）
   4. 激酶抑制剂 3D 药物分子可视化（当前仅 ⊘ 徽标）
+
+---
+Task ID: 17
+Agent: 主协调 Agent (Z.ai Code)
+Task: QA 巡检 + 引擎级大修（同名节点合并/去磷酸化语义/凋亡内在臂）+ 重选通路卡死修复 + 3D 药物分子可视化 + 活性曲线药物区间带
+
+Work Log:
+- [QA 巡检] dev server 健康（双 fork 孤儿化存活）; 页面加载/3D 渲染（VLM 确认正常）/MAPK 阶段4/0 错误；但 Wnt 卡阶段3、Ca 延迟达阶段4（T+41.5s）——与 worklog Task 16 遗留风险一致，本轮根因定位并修复
+- [根因定位] 引擎级仿真脚本（bun 直跑 engine）+ 子图拓扑检查发现三个结构性断链:
+  1. **KEGG 同名 entry 碎片化**（系统性）: KGML 同一基因绘制为多个 entry（FZD1×3/DVL1×2/WNT5A×2、跨通路 STAT1×10/TRAF6×8/SMAD4×4…），子图分配唯一 id 后"同名异 id"——自动注入的 WNT5A 激活的是无出边"死端"FZD1 副本，经典级联走另一副本 → 信号割裂
+  2. **Ca 链路 C00076→CALM1 缺边**: KGML 将 CaM 绘制为指向 Ca²⁺ 的 indirect（方向与生化因果相反），indirect 不双向传播 → Ca²⁺ 永远到不了 CaM → CaMKII/Calcineurin/NFAT 全链死寂
+  3. **去磷酸化语义反转**: PPP3CA-|NFATC1 的 dephosphorylation 边权重 -1.0（负通量），但生物学上 Calcineurin 去磷酸化 NFAT = 暴露 NLS = 激活
+- [修复 A: 同名节点合并] subgraph.ts 新增 mergeDuplicateNodes()（~90 行）:
+  · 按 label 分组合并；canonical 选择: 基因符号 id > cpd: 前缀 > 度数 > entryId
+  · keggIds/aliases 取并集；边端点重映射 + (source,target,kind) 三元组去重 + 自环剔除
+  · 合并后重新清理度 0 节点；extractCoreSubgraph 返回值接入
+  · kegg-client.ts: getPathwayGraph 统一归一化（DB 旧缓存行读取时合并，幂等快速路径）; CACHE_VERSION v5→v6
+  · index.ts 导出 mergeDuplicateNodes
+- [修复 B: Ca 链路] scaffold.ts hsa04020 新增 C00076→CALM1 binding（Ca²⁺ 协同结合 CaM 4 个 EF-hand 教科书机制）; molecular-notes.ts 新增 C00076>CALM1 策划注释（Kd/Hill 系数级）
+- [修复 C: 去磷酸化激活语义] engine.ts:
+  · DEPHOS_ACTIVATED 家族集（NFATC1-4/TFEB/CDC25A-C/FOXO1/3/4）+ isDephosActivated()（id/label 大小写不敏感）
+  · accumulate(): 指向这些靶点的 dephosphorylation 边按正向激活通量（w=1.0）计入 posIn + 新增 dephosIn 通道
+  · 磷酸化修饰更新: dephosIn>0 时磷水平下降（NFAT 激活 = 去磷酸化，NLS 暴露的生化标记）
+  · 其余去磷酸化边（如 DUSP→pERK 失活）维持负通量语义 → 零回归
+- [修复 D: 凋亡内在臂] scaffold.ts hsa04210 新增 4 条边: BID→BAX/BAK1 activation（tBid BH3-only 直接变构激活，外源/内源凋亡在 tBid 汇合的教科书汇流点）+ BAX/BAK1→CYCS activation（MOMP 释放细胞色素 c; CYCS 原为无入边源节点）; 策划注释 BID>BAX/BAX>CYCS 等已存在直接复用
+- [修复 E: 重选通路卡死]（QA 中发现的预存 bug）: workspace.tsx 数据装配 effect 的 lastLoaded 去重键在重选当前通路时（graph 置空 + TanStack 缓存命中同一 data 引用）阻断重新装配 → "正在装配虚拟细胞"永久卡死; 修复: 追加 !graph 兜底条件（graph 已装配时恒 false 不重触发）
+- [引擎级回归（13 通路 × 80 tick）] MAPK/PI3K/Wnt/Notch/TGF-β/JAK-STAT/cAMP/Ca/NF-κB/p53/AMPK 均达阶段 4（11/13），mTOR 阶段 3（无核节点结构上限）、凋亡修复后阶段 4 —— **12/13 完整转录级联**（原 9/13）
+- [新功能 A: 激酶抑制剂 3D 药物分子可视化]（worklog Task 16 建议 #4）:
+  · 新建 src/components/cell3d/drug-molecules.tsx（~330 行）: DrugMoleculeLayer + DrugMolecule3D
+  · 球棍模型: 按药理学类别分构象动机 —— planar（平面稠环+稠合五元环，ATP 竞争/别构激酶抑制剂）/ macrocycle（11 元大环，雷帕霉素/环孢素/Z-VAD 肽模拟物）/ helical（α-螺旋主链+疏水侧链，维奈克拉 BH3 mimetic）
+  · CPK 变体原子配色（紫C/青N/玫瑰O/琥珀S/青柠卤素）与抑制环视觉语言一致; 圆柱键连接
+  · 动画: 投药后从胞外随机点扩散逼近（ease-out 2.6s + 翻滚）→ 停泊结合位姿（靶点外缘 slot 错开 + 呼吸振荡 + 缓慢自旋）; 洗脱随浓度淡出
+  · 高浓度（level>0.6）双分子占位; 确定性种子（mulberry32 hash）保证同一药物构象稳定; 药物名+类别徽标（新 CSS .drug3d-label 渐变紫）
+  · 集成: virtual-cell-3d.tsx MoleculeLayer 后挂载; transparent 常开避免运行时 shader 重编译
+  · QA: 曲美替尼投药 4 分子（2 靶点 × 高浓度双占位）DOM 挂载 ✓; VLM 确认特写视图球棍模型结合 MAP2K1 附近 + 紫色抑制环 ✓; 洗脱后分子卸载 ✓
+- [新功能 B: 活性曲线药物作用区间带] inspector.tsx:
+  · drugBands 从事件流推导（给药→洗脱事件 tick 区间，洗脱未发生则延伸至当前时刻）
+  · Recharts ReferenceArea 紫色阴影带 + 虚线边框 + 药物名 label + 图例"药物作用区间"
+  · QA: VLM 确认折线图紫色区间带 + 带内药物名 + 图例 + 无渲染错误 ✓
+- [QA 方法论] ① Radix Tabs 需 scrollIntoView 后用 snapshot ref 点击（顶栏遮挡会报 covered）; ② innerText 全局检索比 grep snapshot 更可靠; ③ engine 可用 bun 脚本直跑（免浏览器）快速定位结构断链; ④ grep 终端会把 w-[min( 显示为 w-in(（ANSI 转义混淆，od -c 验证文件真实内容）
+- [全量回归] 0 console error / lint 零错误 / tsc src 零错误 / MAPK 阶段4（T+26s）/ 教学引导 5/10 站级联注释正常 / 对照模式（突变臂 HRAS +100% ⚠ 组成性活化徽标，同步刺激设计下稳态仅突变差异——引擎级验证癌细胞无配体级联 HRAS→RAF1→MAP2K1→MAPK1→FOS 阶段4）/ 2D + KEGG 图谱视图正常 / 热图 5 行唯一基因无重复（合并在源头修复 ELK1×2/FOS×2）/ 重选通路正常加载 / dev.log 无异常
+
+Stage Summary:
+- 项目状态: 3D 沉浸虚拟细胞平台（13 通路/7 细胞系/三视图/13 教学引导/药理+3D 药物分子/热图/双 PDF 报告/AI 助手/对照实验），12/13 通路完整转录级联，稳定可交付
+- 本轮产出: 5 项修复（同名节点合并[系统性]/Ca 链路支架/去磷酸化激活语义/凋亡内在臂/重选通路卡死）+ 2 个新功能（3D 药物分子球棍模型/活性曲线药物区间带）
+- 关键技术决策: ① 同名合并在 kegg-client 读取路径统一归一化（幂等，DB 缓存无需迁移）② 去磷酸化激活限定策划家族集（NFAT/TFEB/CDC25/FOXO），其余维持衰减语义零回归 ③ 药物构象按药理学类别分动机（planar/macrocycle/helical）④ 重选通路修复用 !graph 兜底而非计数器（graph 在装配时恒非空，无重触发风险）
+- 未解决问题/风险:
+  1. mTOR 阶段 3 结构上限（子图无核内节点——转录输出不在核心子图，属 KEGG 数据结构限制）
+  2. 对照模式稳态下同步刺激使两臂饱和、差异仅剩突变分子（动力学瞬态期差异更显著——语义正常但可在 UI 提示"瞬态期观察差异更佳"）
+  3. QA 环境 SwiftShader 软渲染下 3D 药物分子较小（真实 GPU 视觉更佳）; 药物徽标在远视角下可能与其他标签重叠
+  4. 药物分子浓度历史未入 activityHistory 采样（区间带从事件流推导，事件被 MAX_EVENTS 截断的极端长模拟下旧区间可能丢失）
+- 下一阶段建议:
+  1. 对照模式 3D 视图（双 R3F Canvas 并排，Task 14 遗留）
+  2. 药物浓度时程曲线（drugLevels 逐 tick 采样入 history，区间带升级为浓度曲线叠层）
+  3. 药物分子点击交互（点击 3D 药物 → inspector 显示药物档案: 结构/机制/适应症）
+  4. mTOR 通路引入合成转录输出节点（RPS6KB1→核糖体生物合成程序叙事，需科学策划）
+  5. 对照模式瞬态期观察提示（差异指标卡注明"建议 T+15~40s 观察动力学差异"）

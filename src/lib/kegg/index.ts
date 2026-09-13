@@ -13,6 +13,6 @@ export type { KeggComponent, ParsedKgml } from './kgml-parser';
 export { classifyEntry, applyExpressionTargets } from './classify';
 export type { Classification } from './classify';
 
-export { extractCoreSubgraph } from './subgraph';
+export { extractCoreSubgraph, mergeDuplicateNodes } from './subgraph';
 
 export { getPathwayGraph, getCachedStats, clearMemCache } from './kegg-client';

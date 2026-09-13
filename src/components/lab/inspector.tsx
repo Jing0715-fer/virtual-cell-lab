@@ -5,7 +5,7 @@
  */
 import { useMemo } from 'react';
 import { Microscope, ExternalLink, Activity, Dna, ArrowUpRight, ArrowDownRight, ShieldAlert } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid, ReferenceArea } from 'recharts';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
 import { NODE_NOTES, fallbackNote } from '@/lib/simulation/molecular-notes';
@@ -19,6 +19,8 @@ export function MoleculeInspector() {
   const activityHistory = useLabStore((s) => s.activityHistory);
   const selectNode = useLabStore((s) => s.selectNode);
   const cellId = useLabStore((s) => s.cellId);
+  const events = useLabStore((s) => s.events);
+  const curTick = useLabStore((s) => s.tick);
   const cell = CELL_TYPE_MAP.get(cellId);
 
   const node = useMemo(
@@ -44,6 +46,26 @@ export function MoleculeInspector() {
     });
     return { rows, series: ids.map((id) => ({ id, label: labelOf.get(id) ?? id, color: colors[ids.indexOf(id) % 5] }) ) };
   }, [graph, nodeStates, activityHistory]);
+
+  // 药物作用区间（给药事件 → 洗脱事件 / 当前时刻）—— 活性曲线的药理学标注带
+  const drugBands = useMemo(() => {
+    const bands: { drug: string; from: number; to: number }[] = [];
+    let open: { drug: string; from: number } | null = null;
+    for (const ev of events) {
+      if (ev.kind !== 'inhibition') continue;
+      if (ev.text.startsWith('[给药]')) {
+        if (!open) {
+          const name = ev.text.slice(4).split('（')[0].trim();
+          open = { drug: name, from: ev.tick * 0.5 };
+        }
+      } else if (ev.text.startsWith('[洗脱]') && open) {
+        bands.push({ ...open, to: ev.tick * 0.5 });
+        open = null;
+      }
+    }
+    if (open) bands.push({ ...open, to: curTick * 0.5 });
+    return bands;
+  }, [events, curTick]);
 
   const state = selectedNode ? nodeStates[selectedNode] : undefined;
   const mutation = cell?.mutations?.find((m) => m.node === selectedNode);
@@ -189,6 +211,19 @@ export function MoleculeInspector() {
           <div className="h-36">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chart.rows} margin={{ top: 4, right: 6, bottom: 0, left: -22 }}>
+                {drugBands.map((b, i) => (
+                  <ReferenceArea
+                    key={`band-${i}`}
+                    x1={b.from.toFixed(1)}
+                    x2={b.to.toFixed(1)}
+                    fill="#a855f7"
+                    fillOpacity={0.09}
+                    stroke="#c084fc"
+                    strokeOpacity={0.35}
+                    strokeDasharray="3 3"
+                    label={{ value: b.drug, position: 'insideTop', fill: '#d8b4fe', fontSize: 9 }}
+                  />
+                ))}
                 <CartesianGrid stroke="#1e293b" strokeDasharray="2 4" />
                 <XAxis dataKey="t" tick={{ fill: '#475569', fontSize: 9 }} stroke="#1e293b" />
                 <YAxis domain={[0, 100]} tick={{ fill: '#475569', fontSize: 9 }} stroke="#1e293b" />
@@ -209,6 +244,12 @@ export function MoleculeInspector() {
                 {s.label}
               </span>
             ))}
+            {drugBands.length > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-purple-300/80">
+                <span className="h-1.5 w-3 rounded-full bg-purple-500/40 border border-purple-400/40" />
+                药物作用区间
+              </span>
+            )}
           </div>
         </div>
       )}
