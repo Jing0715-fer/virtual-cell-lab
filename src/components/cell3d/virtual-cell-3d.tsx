@@ -16,10 +16,10 @@ import { setSceneSnapshot } from '@/lib/simulation/scene-capture';
 import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, Noise, Vignette } from '@react-three/postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle } from 'lucide-react';
+import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
-import { layout3D, type CellBodySpec, type Vec3 } from '@/lib/simulation/layout3d';
+import { layout3D, projectLayoutToPlane, type CellBodySpec, type Vec3 } from '@/lib/simulation/layout3d';
 import { buildGuidedTour, tourIntro } from '@/lib/simulation/guided-tour';
 import { CellBody } from './organelles';
 import { MoleculeLayer, KIND_COLORS, type SimSnapshot } from './molecules';
@@ -216,13 +216,15 @@ function trackedMolecule(layout: ReturnType<typeof layout3D> | null) {
   return null;
 }
 
-function SceneContents({ showAnatomy, showLabels, focus, perf, sim }: {
+function SceneContents({ showAnatomy, showLabels, focus, perf, sim, snapPlane }: {
   showAnatomy: boolean;
   showLabels: boolean;
   focus: boolean;
   /** 低端设备流畅模式（禁用折射/减实例） */
   perf: boolean;
   sim: { current: SimSnapshot };
+  /** 剖面贴附平面（信号级联正交投影到剖切面上演示; null = 常规 3D 径向布局） */
+  snapPlane: { normal: Vec3; constant: number } | null;
 }) {
   const graph = useLabStore((s) => s.graph);
   const cellId = useLabStore((s) => s.cellId);
@@ -231,9 +233,14 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, sim }: {
   const morph = cell?.morphology ?? 'hepatocyte';
   const tint = cell?.tint?.[0] ?? '#134e4a';
 
-  const layout = useMemo(
+  const baseLayout = useMemo(
     () => (graph ? layout3D(graph.core.nodes, graph.core.edges, morph) : null),
     [graph, morph],
+  );
+  // 剖面贴附: 整个信号级联投影到剖切面 → 演示在切面上完整可见（教科书式"切片上画通路"）
+  const layout = useMemo(
+    () => (baseLayout && snapPlane ? projectLayoutToPlane(baseLayout, snapPlane) : baseLayout),
+    [baseLayout, snapPlane],
   );
 
   if (!layout) return null;
@@ -300,6 +307,10 @@ export function VirtualCell3D() {
   const [clipView, setClipView] = useState(true);
   const [clipDepth, setClipDepth] = useState(0.5);
   const [clipAxis, setClipAxis] = useState<SectionAxis>('front');
+  // 信号贴面: 信号转导演示投影到剖切面上进行（用户需求 —— 切面演示; 默认 50% 过心切面最佳）
+  const [sectionSnap, setSectionSnap] = useState(true);
+  // 接近全屏检视（画布铺满视口, 细节更清晰; ESC 退出）
+  const [fullscreen, setFullscreen] = useState(false);
   // WebGL 上下文丢失提示（自动恢复尝试中）
   const [ctxLost, setCtxLost] = useState(false);
 
@@ -399,11 +410,41 @@ export function VirtualCell3D() {
     () => (graph ? layout3D(graph.core.nodes, graph.core.edges, morph) : null),
     [graph, morph],
   );
+  // 剖面贴附平面（与剖切控制器同参数, 向保留侧偏移 0.3 → 分子半球完整可见不被裁）
+  const snapPlane = useMemo(() => {
+    if (!clipView || !sectionSnap) return null;
+    const o = SECTION_ORIENTS[clipAxis];
+    const R = layout?.spec.membraneR ?? FALLBACK_SPEC.membraneR;
+    return {
+      normal: { x: o.normal.x, y: o.normal.y, z: o.normal.z },
+      constant: R - clipDepth * 2 * R - 0.3,
+    };
+  }, [clipView, sectionSnap, clipAxis, clipDepth, layout]);
+  // 有效布局: 贴面模式下级联投影到切面（相机跟随/教学引导同步使用投影后坐标）
+  const effLayout = useMemo(
+    () => (layout && snapPlane ? projectLayoutToPlane(layout, snapPlane) : layout),
+    [layout, snapPlane],
+  );
   // 教学引导: 当前聚焦分子世界坐标（layout 坐标系）
   const tourTarget = useMemo(() => {
-    if (!tourOpen || !tourStep || !layout) return null;
-    return layout.nodes.find((n) => n.id === tourStep.nodeId)?.pos ?? null;
-  }, [tourOpen, tourStep, layout]);
+    if (!tourOpen || !tourStep || !effLayout) return null;
+    return effLayout.nodes.find((n) => n.id === tourStep.nodeId)?.pos ?? null;
+  }, [tourOpen, tourStep, effLayout]);
+
+  // 全屏模式下 ESC 退出（接近全屏检视; 锁定背景滚动）
+  useEffect(() => {
+    if (!fullscreen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFullscreen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [fullscreen]);
 
   if (!graph) {
     return (
@@ -414,7 +455,14 @@ export function VirtualCell3D() {
   }
 
   return (
-    <div className="relative h-full w-full overflow-hidden">
+    <div
+      className={
+        fullscreen
+          ? 'fixed inset-0 z-[200] overflow-hidden bg-[#030812] sm:inset-2 sm:rounded-3xl sm:border sm:border-emerald-500/15 sm:shadow-[0_0_90px_rgba(0,0,0,0.75)]'
+          : 'relative h-full w-full overflow-hidden'
+      }
+      aria-label={fullscreen ? t('hud.fs') : undefined}
+    >
       {/* 3D 画布（错误边界包裹: WebGL 崩溃时降级为提示卡 + 2D 切面回退, 不掀翻整页） */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,#04211d_0%,#020617_55%,#01030e_100%)]">
         <Cell3DErrorBoundary
@@ -483,7 +531,7 @@ export function VirtualCell3D() {
             {/* 底部微光: 深青 */}
             <Lightformer intensity={0.7} color="#0e5f56" position={[0, -12, 0]} scale={[14, 14, 1]} rotation-x={Math.PI / 2} />
           </Environment>
-          <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} sim={sim} />
+          <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} sim={sim} snapPlane={snapPlane} />
           <SceneCapture />
           <SectionClipController
             enabled={clipView}
@@ -499,7 +547,7 @@ export function VirtualCell3D() {
               section: t('hud.section'),
             }}
           />
-          <CameraRig mode={camMode} layout={layout} spec={layoutSpec} controlsRef={controlsRef} tourTarget={tourTarget} />
+          <CameraRig mode={camMode} layout={effLayout} spec={layoutSpec} controlsRef={controlsRef} tourTarget={tourTarget} />
           <OrbitControls
             ref={controlsRef}
             enableDamping
@@ -560,6 +608,15 @@ export function VirtualCell3D() {
 
       {/* 右上: 显示开关 */}
       <div className="absolute right-3 top-3 z-10 flex flex-col gap-1.5">
+        {/* 接近全屏检视（细节观察; ESC 退出） */}
+        <HudToggle
+          active={fullscreen}
+          onClick={() => setFullscreen(!fullscreen)}
+          icon={fullscreen ? Shrink : Expand}
+          label={fullscreen ? t('hud.exitFs') : t('hud.fs')}
+          highlight
+          title={t('hud.fsTip')}
+        />
         <HudToggle active={tourOpen} onClick={() => openTour(!tourOpen)} icon={BookOpen} label={t('hud.tour')} highlight
           disabled={tour.length === 0} />
         <HudToggle active={glow} onClick={() => setGlow(!glow)} icon={Sparkles} label={t('hud.glow')} />
@@ -606,6 +663,22 @@ export function VirtualCell3D() {
               />
               <span className="w-7 shrink-0 text-right font-mono text-[9px] text-teal-300">{Math.round(clipDepth * 100)}%</span>
             </div>
+            {/* 信号贴面: 级联投影到剖切面上演示 */}
+            <button
+              onClick={() => setSectionSnap(!sectionSnap)}
+              title={t('hud.snapTip')}
+              className={`flex w-full items-center gap-1.5 rounded-md border px-2 py-1.5 text-[9px] transition ${
+                sectionSnap
+                  ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-300'
+                  : 'border-white/10 bg-white/[0.03] text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <Magnet className={`h-3 w-3 shrink-0 ${sectionSnap ? 'text-emerald-300' : ''}`} />
+              <span>{t('hud.snap')}</span>
+              <span className={`ml-auto font-mono text-[8px] ${sectionSnap ? 'text-emerald-400/70' : 'text-slate-600'}`}>
+                {sectionSnap ? 'ON' : 'OFF'}
+              </span>
+            </button>
             <p className="text-[8px] leading-relaxed text-slate-500">{SECTION_ORIENTS[clipAxis].hint[lang]}</p>
           </div>
         )}
@@ -753,6 +826,13 @@ export function VirtualCell3D() {
                 {t('hud.section')} · {SECTION_ORIENTS[clipAxis].label[lang]}
                 {lang === 'zh' ? `（${SECTION_ORIENTS[clipAxis].latin}）` : ` (${SECTION_ORIENTS[clipAxis].latin})`}
               </span>
+              {sectionSnap && (
+                <>
+                  <span className="text-slate-600">|</span>
+                  <Magnet className="h-3 w-3 text-emerald-400" />
+                  <span className="text-emerald-300/90">{t('hud.snapOn')}</span>
+                </>
+              )}
               <span className="text-slate-600">—— {t('hud.tip.section')}</span>
             </>
           ) : (
@@ -764,7 +844,7 @@ export function VirtualCell3D() {
   );
 }
 
-function HudToggle({ active, onClick, icon: Icon, label, highlight, disabled }: {
+function HudToggle({ active, onClick, icon: Icon, label, highlight, disabled, title }: {
   active: boolean;
   onClick: () => void;
   icon: ComponentType<{ className?: string }>;
@@ -772,11 +852,14 @@ function HudToggle({ active, onClick, icon: Icon, label, highlight, disabled }: 
   /** 强调色（教学引导等重要功能） */
   highlight?: boolean;
   disabled?: boolean;
+  /** 悬停提示 */
+  title?: string;
 }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] backdrop-blur-md transition ${
         active
           ? highlight

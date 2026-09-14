@@ -475,18 +475,16 @@ export function SectionClipController({
     return () => cancelAnimationFrame(raf);
   }, [enabled, scene]);
 
-  /* 帧驱动: 方位/深度阻尼 + 双层盘几何同步 + clipPlane 广播
+  /* 帧驱动: 方位/深度与目标同步（即时贴合, 不阻尼）+ 双层盘几何同步 + clipPlane 广播
    * 几何: h = |constant|（切面到球心距离）
    *   细胞质盘 scale = √(R²-h²)/R   （剖切相交圆, 严格贴合）
    *   核盘     scale = √(N²-h²)/N   （h < N 才可见, 切面触核渐入）
-   *   盘组位置 = -constant·normal + normal·0.035（切面中心 + 保留侧微偏移） */
+   *   盘组位置 = -constant·normal + normal·0.035（切面中心 + 保留侧微偏移）
+   * 同步性: 信号贴面投影(layout)使用同一目标平面 → 平面/剖面盘/分子三者零漂移,
+   *   拖动剖深滑杆时分子即时贴附新切面, 不出现"分子先跳、切面慢追"的裁切空窗 */
   useFrame(() => {
-    // 法向阻尼插值
-    plane.normal.lerp(targetNormal.current, 0.07);
-    if (plane.normal.lengthSq() < 0.5) plane.normal.copy(targetNormal.current);
-    plane.normal.normalize();
-    // 常数阻尼
-    plane.constant += (targetConstant.current - plane.constant) * 0.12;
+    plane.normal.copy(targetNormal.current).normalize();
+    plane.constant = targetConstant.current;
 
     const h = Math.abs(plane.constant);
 

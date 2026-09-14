@@ -301,6 +301,45 @@ export function layout3D(
   return { nodes: nodes3, edges: edges3, spec };
 }
 
+/* ============ 剖面贴附投影（信号级联 → 剖切面上演示） ============ */
+
+/** 将整个信号级联布局（分子 + 边曲线）正交投影到剖切平面上：
+ *  每个点 p → p - (p·n̂ + c)·n̂（n̂ 为归一化法向, c 为平面常数）。
+ *  投影后全部分子恰好落于切面 → 剖面模式下信号转导演示在切面上完整可见
+ *  （无分子被前半剖切裁掉）。受体膜法向同步投影 → 跨膜段沿切面展平，
+ *  呈现"冠状切片上画通路"的教科书式视图。 */
+export function projectLayoutToPlane(
+  layout: { nodes: Node3D[]; edges: Edge3D[]; spec: CellBodySpec },
+  plane: { normal: Vec3; constant: number },
+): { nodes: Node3D[]; edges: Edge3D[]; spec: CellBodySpec } {
+  const l = Math.hypot(plane.normal.x, plane.normal.y, plane.normal.z) || 1;
+  const nx = plane.normal.x / l;
+  const ny = plane.normal.y / l;
+  const nz = plane.normal.z / l;
+  const project = (p: Vec3): Vec3 => {
+    const d = p.x * nx + p.y * ny + p.z * nz + plane.constant;
+    return { x: p.x - d * nx, y: p.y - d * ny, z: p.z - d * nz };
+  };
+  const nodes = layout.nodes.map((nd) => ({
+    ...nd,
+    pos: project(nd.pos),
+    normal: nd.normal ? project(nd.normal) : nd.normal,
+  }));
+  const edges = layout.edges.map((e) => {
+    const points = e.points.map(project);
+    let length = 0;
+    for (let i = 1; i < points.length; i++) {
+      length += Math.hypot(
+        points[i].x - points[i - 1].x,
+        points[i].y - points[i - 1].y,
+        points[i].z - points[i - 1].z,
+      );
+    }
+    return { ...e, points, length };
+  });
+  return { nodes, edges, spec: layout.spec };
+}
+
 /** 3D 视图共享颜色契约（与 2D 视图一致的科学配色） */
 export const EDGE_COLORS: Record<string, string> = {
   activation: '#34d399',

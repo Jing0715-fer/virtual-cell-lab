@@ -752,3 +752,26 @@ Stage Summary:
 - 产出: hero-visual.tsx(重写v3)、page.tsx(网格+6细节)、globals.css(focus-visible)
 - 风险/遗留: ① VLM 配额 429 整轮限流, 视觉复验下轮补 ② SimEvent 事件文案/分子注释(NODE_NOTES)数据层中文、PDF 报告中文(Task 22 遗留) ③ dev server 内存偏紧(1.7GB RSS), 建议 QA 批量操作减少整页 reload
 - 下阶段建议: ① SimEvent 事件流文案双语化 ② PDF 报告 EN 版 ③ hero 图长期可换项目自身 3D 视图截图(科学性 100% 可控)
+
+---
+Task ID: 24
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户需求——①虚拟细胞页面支持接近全屏显示（看清细节） ②信号转导演示尽量在 section 50% 切面上进行
+
+Work Log:
+- [接近全屏检视] VirtualCell3D 新增 fullscreen 状态 + HUD 首位高亮按钮(Expand/Shrink 图标): CSS fixed inset-0(移动) / sm:inset-2 圆角边框(桌面"接近全屏"仪器观感), 无需 portal —— 祖先链无 transform/filter 创建包含块, fixed 直接逃逸卡片 overflow-hidden; R3F ResizeObserver 平滑自适应无 WebGL 重建; ESC 退出 + body 滚动锁; 实测 1280×800: 画布 556×568 → 1262×782(面积 4.9×), 全屏下 30/30 分子标签可见, ESC 后卡片尺寸/滚动全部还原
+- [信号贴面 · 核心新特性] layout3d.ts 新增 projectLayoutToPlane(layout, plane): 分子 pos + 受体膜法向 + 边贝塞尔曲线点全部正交投影到剖切平面, 边长重算; VirtualCell3D 的 snapPlane memo(默认 sectionSnap=ON, 与剖切控制器同 axis/depth, 向保留侧偏移 0.3 使分子半球完整可见) → SceneContents 投影布局渲染 → 分子/信号边/mRNA 流/事件脉冲/药物分子全部落于切面, 教科书式"冠状切片上画通路"; 相机跟随/教学引导 tourTarget 同步用投影后 effLayout
+- [根因修复 · 演示被剖掉的痛点] 复现发现: MAPK 核心 31 节点中 EGFR 位于细胞前半(lon π/4 → z=+7.07), 其整条下游级联聚集前半 → 50% 剖切时几乎全簇被裁(ATF2 之外 0/30 可见) —— 正是用户"演示在切面上进行"诉求的根源; 贴面后 30/30 恒可见
+- [同步性修复] SectionClipController useFrame 原为法向 0.07/常数 0.12 阻尼 → 分子(React 即时跳变)与剖切面(逐帧追赶)不同步, 拖动剖深时分子长时间被滞后平面裁掉(无头环境 ~1fps 下永久不可见); 改为法向/常数即时贴合目标 → 平面/剖面盘/分子三者零漂移, 任意深度(25/50/80%)与三方位(正/俯/侧剖)均 30/30 可见
+- [标签降噪阈值] molecules.tsx smartHide 640→480px: 桌面卡片画布 556px 曾误触移动端降噪(静态分子标签全隐); 480 仍覆盖 375-430 手机; 移动端贴面模式保留"激活分子显标签"的降噪语义
+- [模拟验证] 贴面模式播放: EGF→EGFR→GRB2→SOS1→HRAS→RAF1/BRAF/ARAF→MAP2K1/2/MAP3K1→MAPK1 级联在切面上逐级点亮(标签 is-active 序列验证), 事件脉冲沿切面边流动
+- [i18n] 新增 hud.fs/exitFs/fsTip/snap/snapTip/snapOn 双语; 剖面面板内嵌 Magnet 贴面开关(ON/OFF 徽标) + 底部提示条追加贴面状态
+- [QA] lint 0 错误; console 0 错误; 390px 无横向溢出(smartHide 下移动端标签降噪符合设计); EN 模式 Fullscreen/Section snap/剖面标注双语正确; dev server 健康无 OOM
+- [运维] VLM 视觉 QA 持续 429 限流(以 DOM 几何/标签状态/激活序列量化验证替代); dev.log 无异常
+
+Stage Summary:
+- 两大特性落地: ①接近全屏检视(4.9× 画幅, ESC 退出, 滚动锁) ②信号贴面(级联正交投影到剖切面, 默认开启, 50% 过心切面最佳视野, 深度/方位实时联动)
+- 关键根因修复: 剖切平面阻尼不同步(分子先跳平面慢追的裁切空窗) → 即时贴合; smartHide 阈值误伤桌面卡片
+- 产出: layout3d.ts(+projectLayoutToPlane) + virtual-cell-3d.tsx(全屏+贴面+effLayout) + section-view.tsx(即时同步) + molecules.tsx(阈值) + i18n.tsx(+6 键)
+- 风险/遗留: ①无头环境 R3F 帧率 ~1fps(SwiftShader), 真机 60fps 下贴面切换应为亚秒级 ②浅剖深(<0.3)时盘外分子悬于切平面延伸域(设计语义: 载玻片) ③SimEvent 事件文案/PDF 报告仍中文(Task 22 遗留) ④VLM 视觉复验欠账
+- 下阶段建议: ①贴面模式下分子沿切面的自动散点防重叠(浅剖深拥挤) ②SimEvent 双语 ③全屏模式追加快捷键 F/双击画布 ④hero 图换项目 3D 视图截图

@@ -84,6 +84,18 @@ export const T: Record<string, Entry> = {
   'hud.axis': { zh: '剖面方位', en: 'Orientation' },
   'hud.depth': { zh: '剖深', en: 'Depth' },
   'hud.sectionFill': { zh: '剖开处已填充剖面标本图', en: 'Cut filled with specimen-style section' },
+  'hud.fs': { zh: '全屏检视', en: 'Fullscreen' },
+  'hud.exitFs': { zh: '退出全屏', en: 'Exit fullscreen' },
+  'hud.fsTip': {
+    zh: '接近全屏检视 · 更大画幅观察细节 · ESC 或再次点击退出',
+    en: 'Near-fullscreen inspection for finer detail · ESC or click again to exit',
+  },
+  'hud.snap': { zh: '信号贴面', en: 'Section snap' },
+  'hud.snapTip': {
+    zh: '信号级联正交投影到剖切面上演示 —— 全部分子落于切面, 无一被剖切裁掉（50% 过心切面视野最佳）',
+    en: 'Orthogonally projects the cascade onto the section plane — every molecule stays visible on the cut face (best at the 50% mid-plane)',
+  },
+  'hud.snapOn': { zh: '级联贴面演示', en: 'cascade on-plane' },
   'cam.overview': { zh: '全景', en: 'Overview' },
   'cam.membrane': { zh: '质膜近景', en: 'Membrane' },
   'cam.nucleus': { zh: '核内视角', en: 'Nucleus' },

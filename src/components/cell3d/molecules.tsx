@@ -219,9 +219,10 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
       el.classList.toggle('is-active', bright);
       el.classList.toggle('is-phospho', ph > 0.25);
       el.classList.toggle('is-inhibited', inh > 0.25);
-      // 窄视口（移动端 <640px）智能降噪: 恒定尺寸标签在 390px 宽度下必然互相遮挡
+      // 窄视口（移动端 <480px）智能降噪: 恒定尺寸标签在 390px 宽度下必然互相遮挡
       // → 仅保留激活/选中/教学引导相关标签, 其余隐藏（点击分子即选中亮起, 交互可达性不变）
-      const smartHide = state.size.width < 640 && !bright && !isTourNeighbor;
+      // 阈值 640→480: 桌面实验台卡片画布约 556px 宽, 不应误触发移动端降噪
+      const smartHide = state.size.width < 480 && !bright && !isTourNeighbor;
       el.style.opacity =
         clipped || smartHide
           ? '0'
