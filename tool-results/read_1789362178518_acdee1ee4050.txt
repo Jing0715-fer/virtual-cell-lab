@@ -1,0 +1,530 @@
+     1→'use client';
+     2→
+     3→/**
+     4→ * 轻量 i18n（中/英双语界面切换）
+     5→ * - LangProvider: React Context + cookie（vcl-lang）双端持久化 + localStorage 同步
+     6→ * - 水合安全: 初值由根布局（server）读 cookie 传入 initialLang，服务端 HTML 与客户端首帧一致;
+     7→ *   旧版仅存 localStorage 的用户在挂载后一次性迁移（不触发水合错配，仅一帧重渲染）
+     8→ * - useLang(): { lang, setLang, t }
+     9→ * - 字典 T: key → { zh, en }; t(key) 查不到时回退 key 本身（开发期可见漏译）
+    10→ * 覆盖范围: 页面 chrome（导航/hero/方法卡/页脚）+ 实验台视图切换 + 3D HUD 全量 +
+    11→ * 分子类别/区室标签 + 剖面控制; 科学内容（通路描述/分子注释/教学引导文案）
+    12→ * 为策划数据层，暂保持中文（后续任务扩展）。
+    13→ */
+    14→import { createContext, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react';
+    15→
+    16→export type Lang = 'zh' | 'en';
+    17→
+    18→type Entry = { zh: string; en: string };
+    19→
+    20→export const T: Record<string, Entry> = {
+    21→  /* ============ 页头 ============ */
+    22→  'app.title': { zh: '虚拟细胞实验室', en: 'Virtual Cell Lab' },
+    23→  'nav.cells': { zh: '细胞系', en: 'Cell Lines' },
+    24→  'nav.lab': { zh: '模拟实验台', en: 'Simulation Lab' },
+    25→  'nav.method': { zh: '数据与方法', en: 'Data & Methods' },
+    26→  'status.online': { zh: 'KEGG REST · 在线', en: 'KEGG REST · Online' },
+    27→  'status.pathways': { zh: '通路', en: 'pathways' },
+    28→
+    29→  /* ============ Hero ============ */
+    30→  'hero.badge': { zh: '分子级信号转导演示 · KEGG 数据驱动', en: 'Molecular-level signaling demo · KEGG-driven' },
+    31→  'hero.h1a': { zh: '在虚拟细胞中', en: 'Inside a virtual cell,' },
+    32→  'hero.h1b': { zh: '观看信号的旅程', en: 'watch signals travel' },
+    33→  'hero.p': {
+    34→    zh: '从 KEGG 通路数据库实时获取信号转导图谱，映射到可交互的虚拟细胞： 配体扩散 → 受体二聚化 → 胞质激酶级联 → 转录因子入核 → 靶基因表达。 每一步都精确到磷酸化残基与结构域—— 这是教科书插图无法给予的动态直觉。',
+    35→    en: 'Signal transduction maps fetched live from the KEGG pathway database are mapped onto an interactive virtual cell: ligand diffusion → receptor dimerization → cytoplasmic kinase cascades → transcription factor nuclear import → target gene expression. Every step resolves to phosphorylation sites and domains — a dynamic intuition no textbook figure can offer.',
+    36→  },
+    37→  'hero.cta1': { zh: '进入模拟实验台', en: 'Enter Simulation Lab' },
+    38→  'hero.cta2': { zh: '浏览细胞系', en: 'Browse Cell Lines' },
+    39→  'stat.cellLines': { zh: '虚拟细胞系', en: 'Virtual cell lines' },
+    40→  'stat.pathways': { zh: 'KEGG 信号通路', en: 'KEGG pathways' },
+    41→  'stat.entries': { zh: '通路分子条目', en: 'Pathway entries' },
+    42→  'stat.notes': { zh: '分子事件注释', en: 'Molecular event notes' },
+    43→
+    44→  /* ============ 细胞系选择 ============ */
+    45→  'cells.h2a': { zh: '选择虚拟', en: 'Choose a virtual ' },
+    46→  'cells.h2b': { zh: '细胞系', en: 'cell line' },
+    47→  'cells.p': {
+    48→    zh: '每种细胞携带不同的受体组与通路网络 —— 癌细胞模型内置驱动突变，无需配体即可观察失控的信号转导',
+    49→    en: 'Each cell carries its own receptor repertoire and pathway network — the cancer model has built-in driver mutations, showing runaway signaling without any ligand',
+    50→  },
+    51→  'cells.ref': { zh: '形态学参数参照 Alberts MBoC / Ross Histology', en: 'Morphology per Alberts MBoC / Ross Histology' },
+    52→  'cells.pathways': { zh: '条通路', en: 'pathways' },
+    53→
+    54→  /* ============ 实验台 ============ */
+    55→  'lab.h2a': { zh: '模拟', en: 'Simulation ' },
+    56→  'lab.h2b': { zh: '实验台', en: 'Lab' },
+    57→  'lab.p': {
+    58→    zh: '注射配体启动信号级联 · 双视图（细胞 / KEGG 图谱）联动 · 点击分子查看档案 · 时间线实时输出分子事件',
+    59→    en: 'Inject ligands to fire cascades · dual views (cell / KEGG map) linked · click molecules for profiles · timeline streams molecular events',
+    60→  },
+    61→  'view.3d': { zh: '3D 沉浸', en: '3D Immersive' },
+    62→  'view.2d': { zh: '2D 切面', en: '2D Section' },
+    63→  'view.map': { zh: 'KEGG 图谱', en: 'KEGG Map' },
+    64→  'view.compare': { zh: '对照实验', en: 'Compare' },
+    65→  'view.drug': { zh: '药理', en: 'Pharmacology' },
+    66→  'view.heatmap': { zh: '转录热图', en: 'Heatmap' },
+    67→  'view.assistant': { zh: 'AI 助手', en: 'AI Assistant' },
+    68→  'lab.empty.title': { zh: '从左侧通路库选择一条 KEGG 信号通路开始实验', en: 'Pick a KEGG pathway from the library to start' },
+    69→
+    70→  /* ============ 3D HUD ============ */
+    71→  'hud.3dview': { zh: '3D 沉浸视图', en: '3D immersive view' },
+    72→  'hud.phase': { zh: '阶段', en: 'Phase' },
+    73→  'hud.molecules': { zh: '分子', en: 'molecules' },
+    74→  'hud.scale': { zh: '(非等比示意)', en: '(not to scale)' },
+    75→  'hud.tour': { zh: '教学引导', en: 'Guided Tour' },
+    76→  'hud.glow': { zh: '辉光渲染', en: 'Bloom' },
+    77→  'hud.perf': { zh: '流畅模式', en: 'Fast' },
+    78→  'hud.hd': { zh: '高清模式', en: 'HD' },
+    79→  'hud.anatomy': { zh: '解剖标注', en: 'Anatomy' },
+    80→  'hud.labels': { zh: '全部标签', en: 'Labels' },
+    81→  'hud.focus': { zh: '专注模式', en: 'Focus' },
+    82→  'hud.section': { zh: '剖面展示', en: 'Section' },
+    83→  'hud.rotate': { zh: '自动环视', en: 'Auto-rotate' },
+    84→  'hud.axis': { zh: '剖面方位', en: 'Orientation' },
+    85→  'hud.depth': { zh: '剖深', en: 'Depth' },
+    86→  'hud.sectionFill': { zh: '剖开处已填充剖面标本图', en: 'Cut filled with specimen-style section' },
+    87→  'cam.overview': { zh: '全景', en: 'Overview' },
+    88→  'cam.membrane': { zh: '质膜近景', en: 'Membrane' },
+    89→  'cam.nucleus': { zh: '核内视角', en: 'Nucleus' },
+    90→  'cam.follow': { zh: '跟随信号', en: 'Follow' },
+    91→  'cam.following': { zh: '跟随中·点击停止', en: 'Following · click to stop' },
+    92→  'legend.title': { zh: '分子类别', en: 'Molecule kinds' },
+    93→  'legend.collapse': { zh: '收起', en: 'Hide' },
+    94→  'legend.expand': { zh: '图例', en: 'Legend' },
+    95→  'legend.activation': { zh: '激活/磷酸化', en: 'Activation / phosphorylation' },
+    96→  'legend.inhibition': { zh: '抑制/负反馈', en: 'Inhibition / feedback' },
+    97→  'legend.expression': { zh: '转录表达', en: 'Transcription' },
+    98→  'legend.phospho': { zh: '磷酸化 (P)', en: 'Phosphorylated (P)' },
+    99→  'legend.mrna': { zh: 'mRNA 出核', en: 'mRNA export' },
+   100→  'legend.pulse': { zh: '信号事件脉冲', en: 'Signal event pulse' },
+   101→  'hud.tip.free': {
+   102→    zh: '拖拽旋转 · 滚轮缩放 · 点击分子查看档案 · 悬停显示分子卡',
+   103→    en: 'Drag to rotate · scroll to zoom · click a molecule for its profile · hover for molecule card',
+   104→  },
+   105→  'hud.tip.section': {
+   106→    zh: '剖面模式 · 旋转视角观察细胞器内部结构与核内分子',
+   107→    en: 'Section mode · rotate to inspect organelle interiors and nuclear molecules',
+   108→  },
+   109→
+   110→  /* ============ 3D 加载/错误 ============ */
+   111→  'loading.engine': { zh: '正在初始化 3D 渲染引擎…', en: 'Initializing 3D rendering engine…' },
+   112→  'loading.cell': { zh: '正在装配虚拟细胞…', en: 'Assembling virtual cell…' },
+   113→  'err.title': { zh: '3D 渲染引擎异常', en: '3D engine error' },
+   114→  'err.desc': {
+   115→    zh: '图形加速不可用或渲染资源不足。可切换到 2D 切面视图继续实验，或刷新页面重试。',
+   116→    en: 'Hardware acceleration unavailable or rendering resources exhausted. Switch to the 2D section view or reload.',
+   117→  },
+   118→  'err.fallback2d': { zh: '切换 2D 切面视图', en: 'Switch to 2D section view' },
+   119→  'err.reload': { zh: '刷新重试', en: 'Reload' },
+   120→  'ctx.lost': { zh: '图形上下文丢失 · 正在尝试自动恢复…', en: 'Graphics context lost · attempting recovery…' },
+   121→  'ctx.lostHint': { zh: '若长时间未恢复，请刷新页面', en: 'If it does not recover, reload the page' },
+   122→
+   123→  /* ============ 分子类别（3D 标签/图例） ============ */
+   124→  'kind.ligand': { zh: '配体', en: 'Ligand' },
+   125→  'kind.receptor': { zh: '受体', en: 'Receptor' },
+   126→  'kind.channel': { zh: '通道', en: 'Channel' },
+   127→  'kind.kinase': { zh: '激酶', en: 'Kinase' },
+   128→  'kind.phosphatase': { zh: '磷酸酶', en: 'Phosphatase' },
+   129→  'kind.adapter': { zh: '接头', en: 'Adapter' },
+   130→  'kind.gtpase': { zh: 'G 蛋白', en: 'G protein' },
+   131→  'kind.tf': { zh: '转录因子', en: 'Transcription factor' },
+   132→  'kind.gene': { zh: '靶基因', en: 'Target gene' },
+   133→  'kind.compound': { zh: '第二信使', en: 'Second messenger' },
+   134→  'kind.enzyme': { zh: '酶', en: 'Enzyme' },
+   135→
+   136→  /* ============ 区室 ============ */
+   137→  'comp.extracellular': { zh: '细胞外', en: 'Extracellular' },
+   138→  'comp.membrane': { zh: '质膜', en: 'Membrane' },
+   139→  'comp.cytoplasm': { zh: '细胞质', en: 'Cytoplasm' },
+   140→  'comp.nucleus': { zh: '细胞核', en: 'Nucleus' },
+   141→
+   142→  /* ============ 剖面结构标注 ============ */
+   143→  'sec.nucleus': { zh: '细胞核（剖面）', en: 'Nucleus (section)' },
+   144→  'sec.cytosol': { zh: '细胞质基质', en: 'Cytosol' },
+   145→  'sec.membrane': { zh: '质膜（剖面）', en: 'Plasma membrane' },
+   146→
+   147→  /* ============ 悬停分子卡 ============ */
+   148→  'tip.aliases': { zh: '别名', en: 'Aliases' },
+   149→
+   150→  /* ============ 页脚 ============ */
+   151→  'footer.brand': { zh: 'VirtualCell Lab · 虚拟细胞实验室', en: 'VirtualCell Lab' },
+   152→  'footer.data': { zh: 'Pathway data: KEGG REST API (Kanehisa Laboratory)', en: 'Pathway data: KEGG REST API (Kanehisa Laboratory)' },
+   153→
+   154→  /* ============ 通路库 pathway-library ============ */
+   155→  'pw.cellHeader': { zh: '当前虚拟细胞系', en: 'Current virtual cell line' },
+   156→  'pw.pathological': { zh: '病理模型', en: 'Pathological model' },
+   157→  'pw.normal': { zh: '正常表型', en: 'Normal phenotype' },
+   158→  'pw.diseasePrefix': { zh: '病理: ', en: 'Pathology: ' },
+   159→  'pw.title': { zh: 'KEGG 通路库', en: 'KEGG pathway library' },
+   160→  'pw.offline': { zh: '离线', en: 'Offline' },
+   161→  'pw.entries': { zh: '372 条', en: '372 entries' },
+   162→  'pw.searchPlaceholder': { zh: '搜索通路（名称 / 编号）', en: 'Search pathways (name / ID)' },
+   163→  'pw.searchLabel': { zh: '搜索 KEGG 通路', en: 'Search KEGG pathways' },
+   164→  'pw.clearSearch': { zh: '清除搜索', en: 'Clear search' },
+   165→  'pw.searchNone': {
+   166→    zh: ' —— 无匹配通路，试试 "MAPK" / "代谢" / "hsa04916"',
+   167→    en: ' — no matches; try "MAPK", "metabolism" or "hsa04916"',
+   168→  },
+   169→  'pw.curatedSection': { zh: '策划级信号转导通路', en: 'Curated signaling pathways' },
+   170→  'pw.fullSection': { zh: 'KEGG 全量目录', en: 'Full KEGG catalog' },
+   171→  'pw.adapted': { zh: '适配', en: 'Matched' },
+   172→  'pw.tourBadge': { zh: '教学', en: 'Tour' },
+   173→  'pw.tourTitle': { zh: '已策划分步教学级联（3D 视图 → 教学引导）', en: 'Curated step-by-step cascade tour (3D view → guided tour)' },
+   174→  'pw.molecules': { zh: '分子', en: 'molecules' },
+   175→  'pw.seeds': { zh: '种子', en: 'seeds' },
+   176→
+   177→  /* ============ 模拟控制台 playback ============ */
+   178→  'pb.pause': { zh: '暂停', en: 'Pause' },
+   179→  'pb.play': { zh: '播放（自动注射配体）', en: 'Play (auto ligand injection)' },
+   180→  'pb.step': { zh: '单步推进（1 tick = 0.5s）', en: 'Step forward (1 tick = 0.5 s)' },
+   181→  'pb.reset': { zh: '重置模拟', en: 'Reset simulation' },
+   182→  'pb.molEvents': { zh: '分子事件', en: 'events' },
+   183→  'pb.ligandInject': { zh: '配体注射', en: 'Ligand injection' },
+   184→  'pb.directStim': { zh: '直接刺激', en: 'Direct stimulation' },
+   185→  'pb.directStimTip': {
+   186→    zh: '本通路无有效配体入口（如胞内应激/营养感知通路）—— 直接刺激受体或应激激酶以启动级联（等效生理刺激：LPS/辐照/能量应激/生长因子）',
+   187→    en: 'No productive ligand entry in this pathway (e.g. intracellular stress / nutrient sensing) — directly stimulate receptors or stress kinases to fire the cascade (physiological equivalents: LPS / irradiation / energy stress / growth factors)',
+   188→  },
+   189→  'pb.noStim': { zh: '无可用刺激入口', en: 'No stimulation entry available' },
+   190→  'pb.stimReceptorTip': { zh: '受体直接刺激（等效配体结合后构象激活）', en: 'Direct receptor stimulation (conformational activation equivalent to ligand binding)' },
+   191→  'pb.stimStressTip': {
+   192→    zh: '应激刺激入口（等效上游生理激活：DNA 损伤/能量应激/生长因子）',
+   193→    en: 'Stress stimulation entry (equivalent upstream physiological activation: DNA damage / energy stress / growth factors)',
+   194→  },
+   195→  'pb.mutNoticeA': { zh: '本细胞系携带', en: 'This cell line carries' },
+   196→  'pb.mutNoticeB': { zh: '个驱动突变 —— 播放时无需配体即可观察组成性信号转导', en: 'driver mutations — press play to watch constitutive signaling without any ligand' },
+   197→  'pb.phase0.desc': { zh: '无外源信号，基础活性水平', en: 'No external signal; basal activity levels' },
+   198→  'pb.phase1.desc': { zh: '配体扩散至细胞表面并结合受体胞外域', en: 'Ligand diffuses to the cell surface and binds the receptor extracellular domain' },
+   199→  'pb.phase2.desc': { zh: '受体二聚化/变构，胞内域磷酸化启动', en: 'Receptor dimerization/allostery; intracellular-domain phosphorylation begins' },
+   200→  'pb.phase3.desc': { zh: '胞质激酶级联与第二信使放大', en: 'Cytoplasmic kinase cascades and second-messenger amplification' },
+   201→  'pb.phase4.desc': { zh: '转录因子入核，靶基因表达程序启动', en: 'Transcription factors enter the nucleus; target-gene expression programs start' },
+   202→
+   203→  /* ============ 事件流 timeline ============ */
+   204→  'tl.kind.binding': { zh: '结合', en: 'Binding' },
+   205→  'tl.kind.activation': { zh: '激活', en: 'Activation' },
+   206→  'tl.kind.phosphorylation': { zh: '磷酸化', en: 'Phosphorylation' },
+   207→  'tl.kind.inhibition': { zh: '抑制', en: 'Inhibition' },
+   208→  'tl.kind.expression': { zh: '转录', en: 'Transcription' },
+   209→  'tl.kind.repression': { zh: '阻遏', en: 'Repression' },
+   210→  'tl.kind.mutation': { zh: '突变', en: 'Mutation' },
+   211→  'tl.kind.info': { zh: '系统', en: 'System' },
+   212→  'tl.kind.phase': { zh: '阶段', en: 'Phase' },
+   213→  'tl.kind.reset': { zh: '重置', en: 'Reset' },
+   214→  'tl.title': { zh: '实时分子事件流', en: 'Live molecular event stream' },
+   215→  'tl.waiting': { zh: '等待模拟启动…', en: 'Waiting for the simulation to start…' },
+   216→
+   217→  /* ============ 分子档案 inspector ============ */
+   218→  'ins.empty': { zh: '选择通路后此处显示分子档案', en: 'Molecule profiles appear here once a pathway is selected' },
+   219→  'ins.synthetic': { zh: '合成节点', en: 'Synthetic node' },
+   220→  'ins.kind.ligand': { zh: '配体', en: 'Ligand' },
+   221→  'ins.kind.receptor': { zh: '受体', en: 'Receptor' },
+   222→  'ins.kind.kinase': { zh: '激酶', en: 'Kinase' },
+   223→  'ins.kind.phosphatase': { zh: '磷酸酶', en: 'Phosphatase' },
+   224→  'ins.kind.adapter': { zh: '接头蛋白', en: 'Adapter' },
+   225→  'ins.kind.gtpase': { zh: '小 G 蛋白', en: 'Small G protein' },
+   226→  'ins.kind.tf': { zh: '转录因子', en: 'Transcription factor' },
+   227→  'ins.kind.gene': { zh: '靶基因', en: 'Target gene' },
+   228→  'ins.kind.compound': { zh: '第二信使', en: 'Second messenger' },
+   229→  'ins.kind.channel': { zh: '离子通道', en: 'Ion channel' },
+   230→  'ins.kind.enzyme': { zh: '酶', en: 'Enzyme' },
+   231→  'ins.comp.extracellular': { zh: '细胞外', en: 'Extracellular' },
+   232→  'ins.comp.membrane': { zh: '细胞膜', en: 'Plasma membrane' },
+   233→  'ins.comp.cytoplasm': { zh: '细胞质', en: 'Cytoplasm' },
+   234→  'ins.comp.nucleus': { zh: '细胞核', en: 'Nucleus' },
+   235→  'ins.tier': { zh: '信号层级 L', en: 'Signaling tier L' },
+   236→  'ins.activity': { zh: '分子活性', en: 'Molecular activity' },
+   237→  'ins.phosphoLevel': { zh: '磷酸化水平', en: 'Phosphorylation level' },
+   238→  'ins.firstActivation': { zh: '首次激活于', en: 'First activated at' },
+   239→  'ins.mutTitle': { zh: '本细胞系突变档案', en: 'Mutation profile of this cell line' },
+   240→  'ins.noteTitle': { zh: '分子功能注释', en: 'Functional annotation' },
+   241→  'ins.connTitle': { zh: '信号网络连接', en: 'Signaling network connections' },
+   242→  'ins.edge.activation': { zh: '激活', en: 'Activation' },
+   243→  'ins.edge.inhibition': { zh: '抑制', en: 'Inhibition' },
+   244→  'ins.edge.phosphorylation': { zh: '磷酸化', en: 'Phosphorylation' },
+   245→  'ins.edge.dephosphorylation': { zh: '去磷酸化', en: 'Dephosphorylation' },
+   246→  'ins.edge.expression': { zh: '转录表达', en: 'Transcription' },
+   247→  'ins.edge.repression': { zh: '阻遏', en: 'Repression' },
+   248→  'ins.edge.binding': { zh: '结合', en: 'Binding' },
+   249→  'ins.edge.dissociation': { zh: '解离', en: 'Dissociation' },
+   250→  'ins.edge.indirect': { zh: '间接', en: 'Indirect' },
+   251→  'ins.edge.missing': { zh: '缺失互作', en: 'Missing interaction' },
+   252→  'ins.edge.state-change': { zh: '状态变化', en: 'State change' },
+   253→  'ins.cascade': { zh: '核心级联', en: 'Core cascade' },
+   254→  'ins.clickHint': {
+   255→    zh: '点击画布中的分子节点查看分子级档案（残基注释 / 互作 / 突变）',
+   256→    en: 'Click a molecule node on the canvas to open its molecular profile (residue notes / interactions / mutations)',
+   257→  },
+   258→  'ins.chartTitle': { zh: '活性动力学曲线（Top 5）', en: 'Activity dynamics (Top 5)' },
+   259→  'ins.drugBand': { zh: '药物作用区间', en: 'Drug exposure window' },
+   260→
+   261→  /* ============ 药理 pharmacology ============ */
+   262→  'ph.title': { zh: '药理扰动实验', en: 'Pharmacological perturbation' },
+   263→  'ph.loading': { zh: '加载中…', en: 'Loading…' },
+   264→  'ph.dose': { zh: '投药', en: 'Dose' },
+   265→  'ph.washout': { zh: '洗脱', en: 'Washout' },
+   266→  'ph.drugsAvail': { zh: '种药物可用', en: 'drugs available' },
+   267→  'ph.activeCount': { zh: '种作用中', en: 'active' },
+   268→  'ph.src.fda': { zh: 'FDA 批准', en: 'FDA-approved' },
+   269→  'ph.src.trial': { zh: '临床研究', en: 'Clinical trial' },
+   270→  'ph.src.tool': { zh: '工具化合物', en: 'Tool compound' },
+   271→  'ph.onset': { zh: '起效中', en: 'Taking effect' },
+   272→  'ph.therapeutic': { zh: '● 治疗浓度（靶点输出钳制中）', en: '● Therapeutic concentration (target output clamped)' },
+   273→  'ph.introA': { zh: '投药后靶点分子', en: 'After dosing, the target molecule’s ' },
+   274→  'ph.introB': { zh: '催化输出被钳制', en: 'catalytic output is clamped' },
+   275→  'ph.introC': {
+   276→    zh: '（上游磷酸化仍会累积——如曲美替尼下 pMEK 升高），下游级联断流。可在投药前先播放模拟让通路激活，再观察药物阻断效果与洗脱后的信号恢复。',
+   277→    en: ' (upstream phosphorylation still accumulates — e.g. pMEK rises under trametinib), cutting off the downstream cascade. Run the simulation to activate the pathway before dosing, then watch the blockade and the signal recovery after washout.',
+   278→  },
+   279→  'ph.emptyTitle': { zh: '当前通路核心子图内无已收录药物的可作用靶点', en: 'No curated drug targets are present in this pathway’s core subgraph' },
+   280→  'ph.emptyHint': { zh: '尝试切换 MAPK / PI3K-Akt / JAK-STAT / p53 等通路', en: 'Try switching to MAPK / PI3K-Akt / JAK-STAT / p53 pathways' },
+   281→
+   282→  /* ============ AI 助手 ai-assistant ============ */
+   283→  'ai.welcome': {
+   284→    zh: '我是本实验室的分子生物学助手。可以问我当前演示通路中的任何分子机制问题 —— 例如"ERK 磷酸化后进入细胞核发生了什么？"或"为什么癌细胞模型不注射配体 ERK 也会激活？"',
+   285→    en: 'I am this lab’s molecular biology assistant. Ask me anything about the molecular mechanisms in the pathway being demonstrated — e.g. "What happens after ERK is phosphorylated and enters the nucleus?" or "Why does ERK stay active in the cancer model even without ligand injection?"',
+   286→  },
+   287→  'ai.reqFail': { zh: '请求失败', en: 'Request failed' },
+   288→  'ai.unavailable': { zh: 'AI 助手暂时不可用，请稍后重试。', en: 'The AI assistant is temporarily unavailable. Please try again later.' },
+   289→  'ai.q.downstream': { zh: '当前已激活的下游信号意味着什么？', en: 'What does the currently activated downstream signaling mean?' },
+   290→  'ai.q.timing': { zh: '信号从受体到细胞核需要多久？', en: 'How long does the signal take to travel from receptor to nucleus?' },
+   291→  'ai.q.mutations': { zh: '本细胞系的驱动突变如何改变信号流？', en: 'How do this cell line’s driver mutations reshape signal flow?' },
+   292→  'ai.q.feedback': { zh: '这条通路的负反馈机制是什么？', en: 'What is the negative feedback mechanism of this pathway?' },
+   293→  'ai.q.mapk': { zh: 'MAPK 级联为什么有三层激酶？', en: 'Why does the MAPK cascade have three kinase tiers?' },
+   294→  'ai.title': { zh: 'AI 分子生物学助手', en: 'AI molecular biology assistant' },
+   295→  'ai.ctxBadge': { zh: '带实时上下文', en: 'Live context' },
+   296→  'ai.clear': { zh: '清空对话', en: 'Clear conversation' },
+   297→  'ai.thinking': { zh: '正在结合当前模拟状态分析…', en: 'Analyzing with the current simulation state…' },
+   298→  'ai.placeholder': { zh: '询问分子机制…', en: 'Ask about molecular mechanisms…' },
+   299→
+   300→  /* ============ 2D 切面视图 virtual-cell ============ */
+   301→  'vc.loading': { zh: '通路数据加载中…', en: 'Loading pathway data…' },
+   302→  'vc.aria': { zh: '虚拟细胞信号转导演示画布', en: 'Virtual cell signaling demonstration canvas' },
+   303→  'vc.zone.extra': { zh: 'EXTRACELLULAR · 细胞外', en: 'EXTRACELLULAR' },
+   304→  'vc.zone.membrane': { zh: 'PLASMA MEMBRANE · 质膜', en: 'PLASMA MEMBRANE' },
+   305→  'vc.zone.cytoplasm': { zh: 'CYTOPLASM · 细胞质', en: 'CYTOPLASM' },
+   306→  'vc.legend.ligand': { zh: '配体', en: 'Ligand' },
+   307→  'vc.legend.receptor': { zh: '受体/通道', en: 'Receptor/Channel' },
+   308→  'vc.legend.kinase': { zh: '激酶', en: 'Kinase' },
+   309→  'vc.legend.gtpase': { zh: '小G蛋白', en: 'Small G protein' },
+   310→  'vc.legend.tf': { zh: '转录因子', en: 'TF' },
+   311→  'vc.legend.gene': { zh: '靶基因', en: 'Target gene' },
+   312→  'vc.legend.act': { zh: '激活', en: 'Activation' },
+   313→  'vc.legend.inh': { zh: '抑制', en: 'Inhibition' },
+   314→  'vc.legend.expr': { zh: '转录', en: 'Transcription' },
+   315→  'vc.legend.phospho': { zh: '磷酸化', en: 'Phosphorylation' },
+   316→  'vc.zoomIn': { zh: '放大', en: 'Zoom in' },
+   317→  'vc.zoomOut': { zh: '缩小', en: 'Zoom out' },
+   318→  'vc.zoomReset': { zh: '重置视图', en: 'Reset view' },
+   319→  'vc.kind.ligand': { zh: '配体', en: 'Ligand' },
+   320→  'vc.kind.receptor': { zh: '受体', en: 'Receptor' },
+   321→  'vc.kind.channel': { zh: '通道', en: 'Channel' },
+   322→  'vc.kind.kinase': { zh: '激酶', en: 'Kinase' },
+   323→  'vc.kind.phosphatase': { zh: '磷酸酶', en: 'Phosphatase' },
+   324→  'vc.kind.adapter': { zh: '接头', en: 'Adapter' },
+   325→  'vc.kind.gtpase': { zh: 'G 蛋白', en: 'G protein' },
+   326→  'vc.kind.tf': { zh: '转录因子', en: 'Transcription factor' },
+   327→  'vc.kind.gene': { zh: '靶基因', en: 'Target gene' },
+   328→  'vc.kind.compound': { zh: '信使', en: 'Messenger' },
+   329→  'vc.kind.enzyme': { zh: '酶', en: 'Enzyme' },
+   330→  'vc.kind.default': { zh: '分子', en: 'Molecule' },
+   331→  'vc.located': { zh: '定位于', en: 'located in' },
+   332→  'vc.synthetic': { zh: '合成节点', en: 'Synthetic node' },
+   333→  'vc.activity': { zh: '活性', en: 'Activity' },
+   334→  'vc.phosphoPct': { zh: '磷酸化', en: 'Phospho' },
+   335→  'vc.clickProfile': { zh: '点击查看分子档案 →', en: 'Click for molecule profile →' },
+   336→
+   337→  /* ============ 转录组热图 transcriptomic-heatmap ============ */
+   338→  'th.waiting': { zh: '等待通路加载…', en: 'Waiting for pathway…' },
+   339→  'th.emptyTitle': { zh: '尚无转录响应数据', en: 'No transcriptional response data yet' },
+   340→  'th.emptyDesc': { zh: '注射配体并播放模拟，等待级联传导至核内靶基因', en: 'Inject a ligand and run the simulation — wait for the cascade to reach the nuclear target genes' },
+   341→  'th.title': { zh: '转录组响应谱', en: 'Transcriptional response profile' },
+   342→  'th.csvTip': { zh: '导出 CSV（基因 × 时间活性矩阵，含 BOM 可直接用 Excel 打开）', en: 'Export CSV (genes × time activity matrix, with BOM, opens directly in Excel)' },
+   343→  'th.genes': { zh: '核内靶基因', en: 'Nuclear target genes' },
+   344→  'th.responding': { zh: '显著响应 (峰 >30%)', en: 'Responding (peak >30%)' },
+   345→  'th.sampleEnd': { zh: '采样终点', en: 'Sample end' },
+   346→  'th.aria': { zh: '转录组响应热图', en: 'Transcriptomic response heatmap' },
+   347→  'th.topRank': { zh: '峰值响应排行', en: 'Peak response ranking' },
+   348→  'th.peak': { zh: '峰', en: 'peak' },
+   349→  'th.low': { zh: '低', en: 'Low' },
+   350→  'th.intensity': { zh: '转录强度', en: 'Transcription intensity' },
+   351→  'th.footnote': {
+   352→    zh: '行 = 核内靶基因（▲ = 峰值时刻），列 = 模拟时间（每列 0.5s×降采样）。活性为转录强度代理，色标模拟荧光报告强度。',
+   353→    en: 'Rows = nuclear target genes (▲ = peak time); columns = simulated time (0.5 s each, downsampled). Activity is a proxy for transcriptional intensity; the color scale mimics a fluorescence reporter.',
+   354→  },
+   355→
+   356→  /* ============ KEGG 图谱视图 pathway-map-view ============ */
+   357→  'pm.loading': { zh: '通路图谱渲染中…', en: 'Rendering pathway map…' },
+   358→  'pm.aria': { zh: 'KEGG 通路图谱', en: 'KEGG pathway map' },
+   359→  'pm.zoomIn': { zh: '放大', en: 'Zoom in' },
+   360→  'pm.zoomOut': { zh: '缩小', en: 'Zoom out' },
+   361→  'pm.zoomReset': { zh: '重置', en: 'Reset' },
+   362→  'pm.origLayout': { zh: 'KEGG 原始拓扑布局', en: 'KEGG native layout' },
+   363→  'pm.compound': { zh: '化合物', en: 'Compound' },
+   364→  'pm.gene': { zh: '基因', en: 'Gene' },
+   365→  'pm.closePick': { zh: '关闭分子信息卡', en: 'Close molecule info card' },
+   366→  'pm.infoAria': { zh: '分子信息：', en: 'Molecule info: ' },
+   367→  'pm.openInKegg': { zh: '在 KEGG 打开', en: 'Open in KEGG' },
+   368→  'pm.notInCore': {
+   369→    zh: '该分子在全图中，未进入核心演示子图（可在 3D/2D 视图演示的分子集）',
+   370→    en: 'This molecule appears in the full map but lies outside the core demo subgraph (the set demonstrated in the 3D/2D views)',
+   371→  },
+   372→  'pm.officialMap': { zh: 'KEGG 官方通路图 ↗', en: 'KEGG official pathway map ↗' },
+   373→
+   374→  /* ============ 对照实验 compare-view ============ */
+   375→  'cmp.arm': { zh: '臂', en: 'Arm' },
+   376→  'cmp.control': { zh: '对照', en: 'Control' },
+   377→  'cmp.test': { zh: '实验', en: 'Test' },
+   378→  'cmp.title': { zh: '通路对照实验', en: 'Side-by-side pathway compare' },
+   379→  'cmp.subtitle': { zh: '同通路/同刺激/不同遗传背景 · 单变量实验设计', en: 'same pathway / same stimulus / different genetics · single-variable design' },
+   380→  'cmp.pause': { zh: '暂停', en: 'Pause' },
+   381→  'cmp.stimulate': { zh: '同步刺激', en: 'Stimulate both' },
+   382→  'cmp.reset': { zh: '重置', en: 'Reset' },
+   383→  'cmp.costim': { zh: '共同刺激:', en: 'Shared stimulus:' },
+   384→  'cmp.direct': { zh: '直接刺激:', en: 'Direct stimulation:' },
+   385→  'cmp.tipReceptor': { zh: '受体直接刺激（等效配体结合后构象激活）', en: 'Direct receptor stimulation (conformational activation equivalent to ligand binding)' },
+   386→  'cmp.tipStress': { zh: '应激刺激入口（等效上游生理激活）', en: 'Stress stimulation entry (equivalent upstream physiological activation)' },
+   387→  'cmp.exit': { zh: '退出对照', en: 'Exit compare' },
+   388→  'cmp.cellLine': { zh: '细胞系', en: 'cell line' },
+   389→  'cmp.cellViewAria': { zh: '细胞通路视图', en: ' pathway view' },
+   390→  'cmp.autonomous': { zh: '自主激活分子', en: 'Autonomous molecules' },
+   391→  'cmp.autonomousDesc': { zh: '仅实验臂激活（Δ>0.5）', en: 'Active only in test arm (Δ>0.5)' },
+   392→  'cmp.meanDelta': { zh: '平均活性差', en: 'Mean Δ activity' },
+   393→  'cmp.meanDeltaDesc': { zh: '实验臂 − 对照臂', en: 'Test arm − control arm' },
+   394→  'cmp.phase4Lead': { zh: '转录应答提前', en: 'Transcription lead' },
+   395→  'cmp.phase4LeadDesc': { zh: '阶段④首达时差（负=B 更快）', en: 'Phase ④ first-hit gap (negative = B faster)' },
+   396→  'cmp.totalEvents': { zh: '事件总数', en: 'Total events' },
+   397→  'cmp.totalEventsDesc': { zh: '两臂分子事件合计', en: 'Molecular events across both arms' },
+   398→  'cmp.tabDelta': { zh: '分子差异', en: 'Molecular Δ' },
+   399→  'cmp.tabEvents': { zh: '实验臂事件', en: 'Test-arm events' },
+   400→  'cmp.tier.ligand': { zh: '配体', en: 'Ligand' },
+   401→  'cmp.tier.membrane': { zh: '膜', en: 'Membrane' },
+   402→  'cmp.tier.nucleus': { zh: '核', en: 'Nucleus' },
+   403→  'cmp.tier.cytoplasm': { zh: '胞质', en: 'Cytosol' },
+   404→  'cmp.actGap': { zh: '激活时差', en: 'Δ activation' },
+   405→  'cmp.testFaster': { zh: '实验臂更快', en: 'test arm faster' },
+   406→  'cmp.ctrlFaster': { zh: '对照臂更快', en: 'control arm faster' },
+   407→  'cmp.constitutive': { zh: '⚠ 组成性活化 —— 不依赖上游刺激', en: '⚠ Constitutive activation — independent of upstream stimulus' },
+   408→  'cmp.emptyDelta': { zh: '播放模拟后显示分子级差异', en: 'Run the simulation to see molecule-level differences' },
+   409→  'cmp.emptyEvents': { zh: '播放模拟后显示实验臂事件流', en: 'Run the simulation to see the test-arm event stream' },
+   410→  'cmp.footnote': {
+   411→    zh: '对照设计：两臂共享同一 KEGG 子图、同一配体剂量与引擎参数，唯一变量为细胞系遗传背景（突变以 M/KO 徽标标注）。★ = 两臂共同响应配体。',
+   412→    en: 'Design: both arms share the same KEGG subgraph, ligand dose and engine parameters; the only variable is the cell line’s genetic background (mutations flagged with M/KO badges). ★ = ligand co-responded in both arms.',
+   413→  },
+   414→
+   415→  /* ============ 形态学标注 morphologies ============ */
+   416→  'morph.bileCanaliculus': { zh: '胆小管', en: 'Bile canaliculus' },
+   417→  'morph.axon': { zh: '有髓轴突 → 突触终末', en: 'Myelinated axon → terminal' },
+   418→  'morph.dendrite': { zh: '树突', en: 'Dendrite' },
+   419→  'morph.microvilli': { zh: '微绒毛', en: 'Microvilli' },
+   420→  'morph.tightJunction': { zh: '紧密连接', en: 'Tight junction' },
+   421→  'morph.basementMembrane': { zh: '基底膜', en: 'Basement membrane' },
+   422→  'morph.intercalatedDisc': { zh: '闰盘', en: 'Intercalated disc' },
+   423→  'morph.collagen': { zh: '胶原纤维（I 型）', en: 'Collagen fibers (type I)' },
+   424→  'morph.blebs': { zh: '膜出芽', en: 'Membrane blebs' },
+   425→
+   426→  /* ============ 实验台 workspace ============ */
+   427→  'ws.compareTip': { zh: '同一通路在正常 vs 病变细胞中并排对照（单变量实验）', en: 'The same pathway side by side in normal vs diseased cells (single-variable experiment)' },
+   428→  'ws.loading': { zh: '加载中…', en: 'Loading…' },
+   429→  'ws.errTitle': { zh: '通路数据获取失败', en: 'Failed to fetch pathway data' },
+   430→  'ws.errHint': { zh: 'KEGG 上游服务可能暂时不可用，请稍后重试', en: 'The upstream KEGG service may be temporarily unavailable — please retry later' },
+   431→  'ws.tab.inspector': { zh: '检测', en: 'Inspect' },
+   432→  'ws.tab.timeline': { zh: '事件流', en: 'Events' },
+   433→  'ws.tab.heatmap': { zh: '转录组', en: 'Transcriptome' },
+   434→};
+   435→
+   436→interface LangCtx {
+   437→  lang: Lang;
+   438→  setLang: (l: Lang) => void;
+   439→  t: (key: string) => string;
+   440→}
+   441→
+   442→const LangContext = createContext<LangCtx>({
+   443→  lang: 'zh',
+   444→  setLang: () => {},
+   445→  t: (k) => k,
+   446→});
+   447→
+   448→const STORAGE_KEY = 'vcl-lang';
+   449→const COOKIE_KEY = 'vcl-lang';
+   450→const COOKIE_RE = new RegExp(`(?:^|;\\s*)${COOKIE_KEY}=([^;]*)`);
+   451→
+   452→/* 外部存储订阅（useSyncExternalStore 标准范式）: setLang 写入后 emit 通知全部消费组件 */
+   453→const listeners = new Set<() => void>();
+   454→function subscribe(cb: () => void) {
+   455→  listeners.add(cb);
+   456→  return () => {
+   457→    listeners.delete(cb);
+   458→  };
+   459→}
+   460→function emit() {
+   461→  listeners.forEach((l) => l());
+   462→}
+   463→
+   464→/** 客户端快照: cookie 优先（新版主存储）→ localStorage 兑底（旧版迁移读取路径） */
+   465→function readClientLang(): Lang {
+   466→  try {
+   467→    const c = document.cookie.match(COOKIE_RE)?.[1];
+   468→    if (c === 'en' || c === 'zh') return c;
+   469→    const s = window.localStorage.getItem(STORAGE_KEY);
+   470→    if (s === 'en' || s === 'zh') return s;
+   471→  } catch {
+   472→    /* localStorage 不可用（隐私模式） */
+   473→  }
+   474→  return 'zh';
+   475→}
+   476→
+   477→/** 写 cookie（1 年）: 服务端与客户端共读同一份数据 → 刷新后无闪烁 */
+   478→function writeCookie(l: Lang) {
+   479→  try {
+   480→    document.cookie = `${COOKIE_KEY}=${l}; path=/; max-age=31536000; samesite=lax`;
+   481→  } catch {
+   482→    /* ignore */
+   483→  }
+   484→}
+   485→
+   486→/** 切换语言（模块级: 纯外部存储写入 + 通知, 不依赖组件生命周期） */
+   487→function setLang(l: Lang) {
+   488→  writeCookie(l);
+   489→  try {
+   490→    window.localStorage.setItem(STORAGE_KEY, l);
+   491→  } catch {
+   492→    /* ignore */
+   493→  }
+   494→  emit();
+   495→}
+   496→
+   497→export function LangProvider({ children, initialLang = 'zh' }: { children: ReactNode; initialLang?: Lang }) {
+   498→  // useSyncExternalStore 水合安全范式:
+   499→  //   水合期返回 server 快照（= 布局传入的 cookie 值）→ 与 SSR HTML 完全一致;
+   500→  //   水合完成后切 client 快照（cookie/localStorage）→ 差异由 React 安全重渲染（无水合错配）
+   501→  const lang = useSyncExternalStore(subscribe, readClientLang, () => initialLang);
+   502→
+   503→  // 挂载后一次性迁移: 旧版仅存 localStorage 的用户把语言提升写入 cookie（此后服务端直读, 无闪烁）
+   504→  useEffect(() => {
+   505→    try {
+   506→      const hasCookie = COOKIE_RE.test(document.cookie);
+   507→      const saved = window.localStorage.getItem(STORAGE_KEY);
+   508→      if (!hasCookie && (saved === 'en' || saved === 'zh')) writeCookie(saved);
+   509→    } catch {
+   510→      /* ignore */
+   511→    }
+   512→  }, []);
+   513→
+   514→  // 语言切换时同步 <html lang>（无障碍 / 屏幕阅读器发音正确）
+   515→  useEffect(() => {
+   516→    document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN';
+   517→  }, [lang]);
+   518→
+   519→  const value = useMemo<LangCtx>(
+   520→    () => ({ lang, setLang, t: (k: string) => T[k]?.[lang] ?? k }),
+   521→    [lang],
+   522→  );
+   523→
+   524→  return <LangContext.Provider value={value}>{children}</LangContext.Provider>;
+   525→}
+   526→
+   527→export function useLang(): LangCtx {
+   528→  return useContext(LangContext);
+   529→}
+   530→
