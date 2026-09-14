@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { CellPicker } from '@/components/lab/cell-picker';
 import { LabWorkspace } from '@/components/lab/workspace';
+import { HeroVisual } from '@/components/lab/hero-visual';
 import { QueryProvider } from '@/components/lab/providers';
 import { LangProvider, useLang } from '@/lib/i18n';
 // LangProvider 已提升至根布局（layout.tsx）——本文件直接消费 useLang
@@ -65,12 +66,44 @@ function LangSwitch() {
   );
 }
 
+/** 区块标题（索引号 + 荧光短线 + 渐变发丝线） */
+function SectionHeading({
+  index, title, accent, desc, right,
+}: {
+  index: string;
+  title: string;
+  accent: string;
+  desc: string;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="mb-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex items-end gap-3.5">
+          <span className="select-none font-mono text-[11px] font-medium tracking-[0.2em] text-emerald-500/50">{index}</span>
+          <div className="relative">
+            <h2 className="text-xl font-semibold tracking-tight text-slate-100">
+              {title}<span className="text-emerald-400">{accent}</span>
+            </h2>
+            <span className="absolute -left-3.5 -top-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]" aria-hidden />
+          </div>
+        </div>
+        {right}
+      </div>
+      <div className="mt-2.5 flex items-center gap-3">
+        <p className="text-[13px] text-slate-500">{desc}</p>
+        <span className="h-px flex-1 bg-gradient-to-r from-emerald-500/20 via-white/5 to-transparent" aria-hidden />
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const { t, lang } = useLang();
   const stats = [
     { icon: Dna, label: t('stat.cellLines'), value: '7' },
-    { icon: Activity, label: t('stat.pathways'), value: '13' },
-    { icon: Database, label: t('stat.entries'), value: '1,700+' },
+    { icon: Activity, label: t('stat.pathways'), value: '372' },
+    { icon: Database, label: t('stat.entries'), value: '6,000+' },
     { icon: Cpu, label: t('stat.notes'), value: '200+' },
   ];
   return (
@@ -93,9 +126,16 @@ export default function Home() {
           </div>
 
           <nav className="ml-6 hidden items-center gap-5 text-[12.5px] text-slate-400 md:flex">
-            <a href="#cells" className="transition hover:text-emerald-300">{t('nav.cells')}</a>
-            <a href="#lab" className="transition hover:text-emerald-300">{t('nav.lab')}</a>
-            <a href="#method" className="transition hover:text-emerald-300">{t('nav.method')}</a>
+            {[
+              ['#cells', t('nav.cells')],
+              ['#lab', t('nav.lab')],
+              ['#method', t('nav.method')],
+            ].map(([href, label]) => (
+              <a key={href} href={href} className="group relative py-1 transition hover:text-emerald-300">
+                {label}
+                <span className="absolute inset-x-0 -bottom-px h-px origin-left scale-x-0 bg-gradient-to-r from-emerald-400 to-teal-400 transition-transform duration-300 group-hover:scale-x-100" aria-hidden />
+              </a>
+            ))}
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
@@ -103,7 +143,7 @@ export default function Home() {
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
               {t('status.online')}
             </span>
-            <span className="hidden rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 font-mono text-[10px] text-slate-500 md:inline">hsa · 13 {t('status.pathways')}</span>
+            <span className="hidden rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 font-mono text-[10px] text-slate-500 md:inline">hsa · 372 {t('status.pathways')}</span>
             <LangSwitch />
           </div>
         </div>
@@ -178,7 +218,11 @@ export default function Home() {
                 className="mt-9 grid max-w-lg grid-cols-2 gap-3 sm:grid-cols-4"
               >
                 {stats.map((s) => (
-                  <div key={s.label} className="rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2.5">
+                  <div
+                    key={s.label}
+                    className="group relative overflow-hidden rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2.5 transition-all duration-300 hover:border-emerald-500/25 hover:bg-emerald-500/[0.03]"
+                  >
+                    <span className="absolute inset-y-0 left-0 w-px scale-y-0 bg-emerald-400/60 transition-transform duration-300 group-hover:scale-y-100" aria-hidden />
                     <s.icon className="h-3.5 w-3.5 text-emerald-400/80" />
                     <div className="mt-1.5 font-mono text-[15px] font-semibold text-slate-100">{s.value}</div>
                     <div className="text-[10px] text-slate-500">{s.label}</div>
@@ -187,105 +231,94 @@ export default function Home() {
               </motion.div>
             </div>
 
-            {/* 装饰性微细胞 */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.92 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.8, delay: 0.2 }}
-              className="hidden lg:block"
-            >
-              <svg viewBox="0 0 420 320" className="w-full">
-                <defs>
-                  <radialGradient id="heroCell" cx="0.5" cy="0.45" r="0.6">
-                    <stop offset="0%" stopColor="#134e4a" stopOpacity="0.9" />
-                    <stop offset="100%" stopColor="#022c22" stopOpacity="0.4" />
-                  </radialGradient>
-                </defs>
-                <circle cx="210" cy="160" r="130" fill="url(#heroCell)" stroke="#14b8a6" strokeWidth="1.5" opacity="0.9" />
-                <circle cx="210" cy="160" r="118" fill="none" stroke="#2dd4bf" strokeWidth="0.6" strokeDasharray="4 6" opacity="0.4" />
-                <circle cx="245" cy="150" r="44" fill="#022c22" stroke="#34d399" strokeWidth="1.4" opacity="0.9" />
-                <circle cx="257" cy="141" r="8" fill="#f59e0b" opacity="0.35" />
-                <g stroke="#f59e0b" fill="none" opacity="0.6">
-                  <ellipse rx="26" ry="11" cx="130" cy="110" transform="rotate(-18 130 110)" />
-                  <ellipse rx="22" ry="9" cx="140" cy="230" transform="rotate(14 140 230)" />
-                </g>
-                {/* 信号流 */}
-                <path d="M 70 60 C 130 90, 150 110, 205 150" stroke="#34d399" strokeWidth="2" fill="none" opacity="0.75" className="edge-flow" />
-                <path d="M 210 160 C 230 170, 250 170, 258 155" stroke="#fbbf24" strokeWidth="2" fill="none" opacity="0.7" className="edge-flow" />
-                <circle r="4" fill="#34d399">
-                  <animateMotion path="M 70 60 C 130 90, 150 110, 205 150" dur="2.4s" repeatCount="indefinite" />
-                </circle>
-                <circle cx="70" cy="60" r="7" fill="#fbbf24" opacity="0.9" />
-                <text x="70" y="42" textAnchor="middle" fontSize="10" fill="#fde68a" fontFamily="monospace">EGF</text>
-                <text x="210" y="128" textAnchor="middle" fontSize="10" fill="#99f6e4" fontFamily="monospace">N</text>
-              </svg>
-            </motion.div>
+            {/* 装饰性微细胞（AI 渲染 + 仪器化叠加层） */}
+            <HeroVisual />
           </div>
         </section>
 
         {/* ============ 细胞系选择 ============ */}
         <section id="cells" className="mx-auto max-w-[1680px] scroll-mt-20 px-4 py-12 lg:px-6">
-          <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-semibold tracking-tight text-slate-100">
-                {t('cells.h2a')}<span className="text-emerald-400">{t('cells.h2b')}</span>
-              </h2>
-              <p className="mt-1.5 text-[13px] text-slate-500">
-                {t('cells.p')}
-              </p>
-            </div>
-            <div className="flex items-center gap-2 text-[11px] text-slate-600">
-              <ShieldCheck className="h-3.5 w-3.5 text-emerald-500/60" />
-              {t('cells.ref')}
-            </div>
-          </div>
+          <SectionHeading
+            index="01"
+            title={t('cells.h2a')}
+            accent={t('cells.h2b')}
+            desc={t('cells.p')}
+            right={
+              <div className="flex items-center gap-2 text-[11px] text-slate-600">
+                <ShieldCheck className="h-3.5 w-3.5 text-emerald-500/60" />
+                {t('cells.ref')}
+              </div>
+            }
+          />
           <CellPicker />
         </section>
 
         {/* ============ 模拟实验台 ============ */}
         <section id="lab" className="mx-auto max-w-[1680px] scroll-mt-20 px-4 pb-12 lg:px-6">
-          <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-semibold tracking-tight text-slate-100">
-                {t('lab.h2a')}<span className="text-emerald-400">{t('lab.h2b')}</span>
-              </h2>
-              <p className="mt-1.5 text-[13px] text-slate-500">
-                {t('lab.p')}
-              </p>
-            </div>
-          </div>
+          <SectionHeading
+            index="02"
+            title={t('lab.h2a')}
+            accent={t('lab.h2b')}
+            desc={t('lab.p')}
+          />
           <LabWorkspace />
         </section>
 
         {/* ============ 数据与方法 ============ */}
         <section id="method" className="mx-auto max-w-[1680px] scroll-mt-20 px-4 pb-14 lg:px-6">
-          <div className="mb-5">
-            <h2 className="text-xl font-semibold tracking-tight text-slate-100">
-              {t('nav.method')}
-            </h2>
-            <p className="mt-1.5 text-[13px] text-slate-500">{lang === 'zh' ? '科学性与可复现性说明' : 'Scientific rigor & reproducibility'}</p>
-          </div>
+          <SectionHeading
+            index="03"
+            title={t('nav.method')}
+            accent=""
+            desc={lang === 'zh' ? '科学性与可复现性说明' : 'Scientific rigor & reproducibility'}
+          />
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {METHOD.map((m) => (
-              <div key={m.title.en} className="rounded-2xl border border-white/8 bg-slate-950/40 p-4 transition-colors hover:border-emerald-500/25">
-                <m.icon className="h-5 w-5 text-emerald-400" />
+            {METHOD.map((m, i) => (
+              <div
+                key={m.title.en}
+                className="group relative overflow-hidden rounded-2xl border border-white/8 bg-slate-950/40 p-4 transition-all duration-300 hover:-translate-y-1 hover:border-emerald-500/30 hover:shadow-[0_12px_32px_-12px_rgba(16,185,129,0.25)]"
+              >
+                {/* 顶部荧光细线（hover 加亮） */}
+                <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-400/40 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" aria-hidden />
+                <div className="flex items-start justify-between">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-500/25 bg-gradient-to-b from-emerald-500/[0.12] to-transparent transition-colors duration-300 group-hover:border-emerald-500/45">
+                    <m.icon className="h-4.5 w-4.5 text-emerald-400" />
+                  </div>
+                  <span className="font-mono text-[10px] tracking-[0.18em] text-slate-600">{String(i + 1).padStart(2, '0')}</span>
+                </div>
                 <h3 className="mt-3 text-[13.5px] font-semibold text-slate-100">{m.title[lang]}</h3>
                 <p className="mt-2 text-[11.5px] leading-[19px] text-slate-400">{m.desc[lang]}</p>
               </div>
             ))}
           </div>
-          <p className="mt-4 rounded-xl border border-white/5 bg-white/[0.02] p-3 text-[11px] leading-5 text-slate-500">
-            ⚠ 演示说明：模拟时间为压缩尺度（1 tick = 0.5 s），真实生物学时序差异较大（如 ERK 激活 ~1–5 min、即早基因转录 ~15–30 min、T 细胞增殖需数小时）；
-            动力学参数为教学演示设定，非定量系统生物学模型。通路数据引用自 KEGG (Kanehisa Laboratory)，教学用途。
-          </p>
+          <div className="mt-4 flex gap-3 rounded-xl border border-amber-500/15 bg-amber-500/[0.03] p-3.5">
+            <span className="mt-px select-none text-[13px] leading-5 text-amber-400/80">⚠</span>
+            <p className="text-[11px] leading-5 text-slate-500">
+              {lang === 'zh' ? (
+                <>
+                  演示说明：模拟时间为压缩尺度（1 tick = 0.5 s），真实生物学时序差异较大（如 ERK 激活 ~1–5 min、即早基因转录 ~15–30 min、T 细胞增殖需数小时）；
+                  动力学参数为教学演示设定，非定量系统生物学模型。通路数据引用自 KEGG (Kanehisa Laboratory)，教学用途。
+                </>
+              ) : (
+                <>
+                  Demonstration notice: simulated time runs on a compressed scale (1 tick = 0.5 s) and diverges from real biological timing (ERK activation ~1–5 min, immediate-early gene transcription ~15–30 min, T-cell proliferation takes hours);
+                  kinetic parameters are pedagogical defaults, not quantitative systems-biology models. Pathway data cited from KEGG (Kanehisa Laboratory), for educational use.
+                </>
+              )}
+            </p>
+          </div>
         </section>
       </main>
 
       {/* ============ 页脚（吸底） ============ */}
       <footer className="mt-auto border-t border-white/5 bg-[#02040c]">
+        {/* 顶部荧光发丝线 */}
+        <div className="h-px bg-gradient-to-r from-transparent via-emerald-500/25 to-transparent" aria-hidden />
         <div className="mx-auto flex max-w-[1680px] flex-wrap items-center gap-x-6 gap-y-2 px-4 py-5 lg:px-6">
           <div className="flex items-center gap-2 text-[11.5px] text-slate-500">
-            <Dna className="h-3.5 w-3.5 text-emerald-500/60" />
+            <div className="flex h-5 w-5 items-center justify-center rounded-md border border-emerald-500/30 bg-emerald-500/[0.08]">
+              <Dna className="h-3 w-3 text-emerald-400/80" />
+            </div>
             VirtualCell Lab · 虚拟细胞实验室
           </div>
           <a
@@ -296,7 +329,8 @@ export default function Home() {
           >
             Pathway data: KEGG REST API (Kanehisa Laboratory)
           </a>
-          <span className="ml-auto font-mono text-[10px] text-slate-600">
+          <span className="ml-auto flex items-center gap-1.5 font-mono text-[10px] text-slate-600">
+            <span className="h-1 w-1 rounded-full bg-emerald-500/50" aria-hidden />
             Next.js 16 · Prisma · zustand · z-ai-web-dev-sdk
           </span>
         </div>

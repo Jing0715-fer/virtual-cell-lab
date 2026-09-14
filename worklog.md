@@ -658,3 +658,28 @@ Stage Summary:
   2. 热门通路预热脚本（Top 50 按需预取，改善首抓延迟）
   3. 数据层 i18n 扩展 + 译名人工校对
   4. 对照模式 3D 视图（Task 14 遗留）
+
+---
+Task ID: 20
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户三项需求——①默认关闭自动旋转 ②美化标题右侧配图（AI 生成） ③整体 UI 细节打磨 + push GitHub
+
+Work Log:
+- [自动旋转] virtual-cell-3d.tsx: autoRotate useState(true)→false（打开页面保持稳定视角便于观察剖面; HUD 旋转按钮保留可手动开启）; agent-browser 间隔 4s 双截图对比验证视角零变化
+- [Hero 配图] z-ai image 生成 1152×864 动物细胞剖面 3D 渲染图（emerald/teal 生物荧光 + 深底; VLM 评估 9/10）→ public/hero-cell.png (146KB)
+- [HeroVisual 组件] 新建 src/components/lab/hero-visual.tsx: AI 图为主体 + 仪器化叠加层——取景框四角/LIVE 徽标(呼吸点)/视野参数徽标(×4000·60fps·EM-TL 488nm)/4 个悬浮细胞器标注(framer-motion 漂浮, 线粒体·板层嵴/高尔基·扁囊堆/内质网·核糖体/细胞核·核仁)/底部 5 色图例条/暗角+顶底渐变融入/heroScan 缓慢扫描线(prefers-reduced-motion 降级)/外框辉光+仪器铭牌(FIG.1 · Ø 20 µm)
+- [数据同步] page.tsx 统计: 通路 13→372、条目 1,700+→6,000+; header 徽章 hsa·13→372
+- [UI 打磨] 
+  · SectionHeading 组件: 索引号(01/02/03)+荧光圆点+标题+渐变发丝线, 三区块统一
+  · 方法卡: 图标容器(渐变底)/hover 抬升+辉光/顶部荧光线/序号(01-04)/演示说明改 amber 警示样式+EN 翻译
+  · 导航链接: 下划线 origin-left 缩放动画
+  · 统计卡: hover 左侧荧光竖线+边框加亮
+  · 页脚: 顶部渐变荧光发丝线/logo 容器化/状态点
+  · globals.css: html scroll-behavior smooth/::selection emerald
+- [QA] agent-browser: 首屏 VLM 确认 AI 图+取景框+LIVE+标注+图例全部正常、372 显示正确; 3D 区 VLM 确认剖面模式+核+细胞器正常; 自动旋转双图对比=零变化; 移动端 390px 无横向溢出、Hero 图正确隐藏; console 零错误; lint 零错误
+- [Git] 提交并 push 到 github.com/Jing0715-fer/virtual-cell-lab
+
+Stage Summary:
+- 自动旋转默认关闭(可 HUD 手动开); Hero 右侧从简易 SVG 升级为 AI 渲染主视觉+仪器化叠加层; 三区块标题/方法卡/导航/统计卡/页脚全面精修; 统计数字与全量 372 通路目录同步
+- 产出: 1 新组件(hero-visual.tsx) + 1 新图片(hero-cell.png) + 3 文件修改(page.tsx/globals.css/virtual-cell-3d.tsx)
+- 风险: 无; Hero 标注位置基于生成图目测定位, 若换图需同步调整 ANNOTATIONS 坐标

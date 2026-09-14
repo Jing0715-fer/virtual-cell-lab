@@ -116,8 +116,15 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    scroll-behavior: smooth;
+  }
   body {
     @apply bg-background text-foreground;
+  }
+  ::selection {
+    background: rgba(52, 211, 153, 0.28);
+    color: #ecfdf5;
   }
 }
 
@@ -206,6 +213,19 @@
   background: linear-gradient(90deg, transparent, rgba(52, 211, 153, 0.07), transparent);
   animation: scanline 5s linear infinite;
   pointer-events: none;
+}
+
+/* Hero 主视觉扫描线（缓慢横扫整幅渲染图） */
+@keyframes heroScan {
+  0% { transform: translateX(-110%); }
+  55% { transform: translateX(340%); }
+  100% { transform: translateX(340%); }
+}
+.hero-scanline > div {
+  animation: heroScan 6.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-scanline > div { animation: none; }
 }
 
 /* ============ 3D 虚拟细胞 ============ */

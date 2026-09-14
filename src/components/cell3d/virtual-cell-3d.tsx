@@ -284,7 +284,8 @@ export function VirtualCell3D() {
   const [showAnatomy, setShowAnatomy] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [focus, setFocus] = useState(false);
-  const [autoRotate, setAutoRotate] = useState(true);
+  // 自动旋转默认关闭（用户需求: 打开页面即保持稳定视角, 便于观察剖面与细胞器细节; 可经 HUD 手动开启）
+  const [autoRotate, setAutoRotate] = useState(false);
   const [camMode, setCamMode] = useState<CamMode>('overview');
   const [legendOpen, setLegendOpen] = useState(true);
   const [glow, setGlow] = useState(true);
