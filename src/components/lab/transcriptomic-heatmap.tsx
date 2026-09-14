@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Activity, Download, Flame, Thermometer } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
+import { useLang } from '@/lib/i18n';
 import type { ActivitySample } from '@/lib/simulation/engine';
 import type { CoreNode } from '@/types/kegg';
 import { cn } from '@/lib/utils';
@@ -41,6 +42,7 @@ interface HeatRow {
 }
 
 export function TranscriptomicHeatmap() {
+  const { t, lang } = useLang();
   const graph = useLabStore((s) => s.graph);
   const tick = useLabStore((s) => s.tick);
 
@@ -99,11 +101,18 @@ export function TranscriptomicHeatmap() {
     if (rows.length === 0 || timeCols.length === 0) return;
     const esc = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
     const lines: string[] = [];
-    lines.push('# VirtualCell Lab 转录组响应谱（时间过程活性矩阵，转录强度代理 0-1）');
-    lines.push(`# 通路: ${esc(graph?.meta.name ?? '')} (${graph?.meta.id ?? ''})`);
-    lines.push(`# 细胞系: ${esc(CELL_TYPE_MAP.get(useLabStore.getState().cellId)?.name ?? '')}`);
-    lines.push(`# 采样: 每列 ${(0.5).toFixed(1)}s 模拟时间 × 降采样，共 ${timeCols.length} 列`);
-    lines.push('gene_symbol,peak_activity,peak_time_s,final_activity,' + timeCols.map((t) => `t${(t * 0.5).toFixed(1)}s`).join(','));
+    if (lang === 'zh') {
+      lines.push('# VirtualCell Lab 转录组响应谱（时间过程活性矩阵，转录强度代理 0-1）');
+      lines.push(`# 通路: ${esc(graph?.meta.nameZh ?? '')} (${graph?.meta.id ?? ''})`);
+      lines.push(`# 细胞系: ${esc(CELL_TYPE_MAP.get(useLabStore.getState().cellId)?.name ?? '')}`);
+      lines.push(`# 采样: 每列 ${(0.5).toFixed(1)}s 模拟时间 × 降采样，共 ${timeCols.length} 列`);
+    } else {
+      lines.push('# VirtualCell Lab transcriptional response profile (time-course activity matrix, transcription intensity proxy 0-1)');
+      lines.push(`# Pathway: ${esc(graph?.meta.name ?? '')} (${graph?.meta.id ?? ''})`);
+      lines.push(`# Cell line: ${esc(CELL_TYPE_MAP.get(useLabStore.getState().cellId)?.nameEn ?? '')}`);
+      lines.push(`# Sampling: ${(0.5).toFixed(1)}s simulated time per column × downsampled, ${timeCols.length} columns`);
+    }
+    lines.push('gene_symbol,peak_activity,peak_time_s,final_activity,' + timeCols.map((tc) => `t${(tc * 0.5).toFixed(1)}s`).join(','));
     for (const r of rows) {
       const cells = [
         r.node.label,
@@ -124,7 +133,7 @@ export function TranscriptomicHeatmap() {
   };
 
   if (!graph) {
-    return <div className="p-4 text-xs text-slate-600">等待通路加载…</div>;
+    return <div className="p-4 text-xs text-slate-600">{t('th.waiting')}</div>;
   }
 
   if (rows.length === 0 || hist.length < 4) {
@@ -132,8 +141,8 @@ export function TranscriptomicHeatmap() {
       <div className="flex h-full items-center justify-center p-6">
         <div className="text-center">
           <Thermometer className="mx-auto mb-3 h-8 w-8 text-slate-700" />
-          <p className="text-sm text-slate-400">尚无转录响应数据</p>
-          <p className="mt-1 text-xs text-slate-600">注射配体并播放模拟，等待级联传导至核内靶基因</p>
+          <p className="text-sm text-slate-400">{t('th.emptyTitle')}</p>
+          <p className="mt-1 text-xs text-slate-600">{t('th.emptyDesc')}</p>
         </div>
       </div>
     );
@@ -147,13 +156,13 @@ export function TranscriptomicHeatmap() {
       <div className="border-b border-white/5 px-3 py-2.5">
         <div className="flex items-center gap-2">
           <Activity className="h-3.5 w-3.5 text-amber-400" />
-          <span className="text-xs font-medium text-slate-200">转录组响应谱</span>
+          <span className="text-xs font-medium text-slate-200">{t('th.title')}</span>
           <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[9px] text-amber-300">
             {graph.meta.name}
           </span>
           <button
             onClick={exportCsv}
-            title="导出 CSV（基因 × 时间活性矩阵，含 BOM 可直接用 Excel 打开）"
+            title={t('th.csvTip')}
             className="ml-auto flex items-center gap-1 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1 font-mono text-[9px] text-amber-300 transition-colors hover:bg-amber-500/20 hover:text-amber-200"
           >
             <Download className="h-3 w-3" />CSV
@@ -162,15 +171,15 @@ export function TranscriptomicHeatmap() {
         <div className="mt-2 grid grid-cols-3 gap-1.5">
           <div className="rounded-lg border border-white/8 bg-white/5 px-2 py-1.5">
             <div className="font-mono text-sm text-slate-100">{rows.length}</div>
-            <div className="text-[9px] text-slate-500">核内靶基因</div>
+            <div className="text-[9px] text-slate-500">{t('th.genes')}</div>
           </div>
           <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2 py-1.5">
             <div className="font-mono text-sm text-emerald-300">{responding}</div>
-            <div className="text-[9px] text-slate-500">显著响应 (峰 &gt;30%)</div>
+            <div className="text-[9px] text-slate-500">{t('th.responding')}</div>
           </div>
           <div className="rounded-lg border border-white/8 bg-white/5 px-2 py-1.5">
             <div className="font-mono text-sm text-slate-100">T+{(tick * 0.5).toFixed(1)}s</div>
-            <div className="text-[9px] text-slate-500">采样终点</div>
+            <div className="text-[9px] text-slate-500">{t('th.sampleEnd')}</div>
           </div>
         </div>
       </div>
@@ -183,13 +192,13 @@ export function TranscriptomicHeatmap() {
             height={rows.length * ROW_H + 24}
             className="block"
             role="img"
-            aria-label="转录组响应热图"
+            aria-label={t('th.aria')}
           >
             {/* 时间轴（每 10 列一个标注） */}
-            {timeCols.map((t, i) =>
+            {timeCols.map((tc, i) =>
               i % 10 === 0 || i === timeCols.length - 1 ? (
                 <text key={i} x={LABEL_W + i * COL_W} y={12} fill="#64748b" fontSize={8} textAnchor="middle" fontFamily="ui-monospace, monospace">
-                  {(t * 0.5).toFixed(0)}s
+                  {(tc * 0.5).toFixed(0)}s
                 </text>
               ) : null,
             )}
@@ -266,7 +275,7 @@ export function TranscriptomicHeatmap() {
       <div className="border-t border-white/5 px-3 py-2.5">
         <div className="flex items-center gap-1.5">
           <Flame className="h-3 w-3 text-rose-400" />
-          <span className="text-[10px] font-medium text-slate-300">峰值响应排行</span>
+          <span className="text-[10px] font-medium text-slate-300">{t('th.topRank')}</span>
         </div>
         <div className="mt-1.5 space-y-1">
           {topRows.map((r) => (
@@ -279,22 +288,24 @@ export function TranscriptomicHeatmap() {
                 />
               </div>
               <span className="w-24 shrink-0 text-right font-mono text-[9px] text-slate-500">
-                峰{(r.peak * 100).toFixed(0)}% · T+{(timeCols[Math.min(r.peakIdx, timeCols.length - 1)] * 0.5).toFixed(1)}s
+                {lang === 'zh'
+                  ? `峰${(r.peak * 100).toFixed(0)}% · T+${(timeCols[Math.min(r.peakIdx, timeCols.length - 1)] * 0.5).toFixed(1)}s`
+                  : `${t('th.peak')} ${(r.peak * 100).toFixed(0)}% · T+${(timeCols[Math.min(r.peakIdx, timeCols.length - 1)] * 0.5).toFixed(1)}s`}
               </span>
             </div>
           ))}
         </div>
         {/* 色标 */}
         <div className="mt-2.5 flex items-center gap-2">
-          <span className="text-[9px] text-slate-600">低</span>
+          <span className="text-[9px] text-slate-600">{t('th.low')}</span>
           <div
             className="h-1.5 flex-1 rounded-full"
             style={{ background: 'linear-gradient(to right, #0a1a20, #0d3a33, #14b8a6, #2dd4bf, #fbbf24, #fb7185)' }}
           />
-          <span className="text-[9px] text-slate-600">转录强度</span>
+          <span className="text-[9px] text-slate-600">{t('th.intensity')}</span>
         </div>
         <p className={cn('mt-2 text-[9px] leading-relaxed text-slate-600')}>
-          行 = 核内靶基因（▲ = 峰值时刻），列 = 模拟时间（每列 0.5s×降采样）。活性为转录强度代理，色标模拟荧光报告强度。
+          {t('th.footnote')}
         </p>
       </div>
     </div>

@@ -44,7 +44,7 @@ const g = globalThis as unknown as KeggGlobalCache;
  * 代码版本标记：classify/subgraph 算法迭代后递增版本号使内存缓存自动失效，
  * 避免 dev 热重载后 globalThis 仍持有旧算法产物（生产环境版本恒定无影响）
  */
-const CACHE_VERSION = '2025-01-v7';
+const CACHE_VERSION = '2025-01-v8';
 if (g.cacheVersion !== CACHE_VERSION) {
   g.memCache?.clear();
   g.inflight?.clear();
@@ -147,7 +147,9 @@ function buildMeta(catalog: PathwayCatalogEntry, keggTitle: string): PathwayMeta
     nameZh: catalog.nameZh,
     category: catalog.category,
     description: catalog.description,
+    descriptionEn: catalog.descriptionEn,
     cascade: catalog.cascade,
+    cascadeEn: catalog.cascadeEn,
     keggLink: `https://www.kegg.jp/entry/${catalog.id}`,
   };
 }
@@ -170,7 +172,9 @@ export function getCatalogEntry(id: string): PathwayCatalogEntry | null {
     nameZh: entry.nameZh,
     category: entry.categoryZh,
     description: `KEGG 分类：${entry.categoryEn}。全量目录通路：按 KGML 拓扑度数自动提取核心演示子图（无人工策划种子与教学文案，可正常模拟信号传播）。`,
+    descriptionEn: `KEGG category: ${entry.categoryEn}. Full-catalog pathway: a core demo subgraph is auto-extracted from KGML topology by node degree (no curated seeds or teaching copy; signal propagation runs normally).`,
     cascade: 'KEGG 全图 · 自动提取核心子图',
+    cascadeEn: 'KEGG full map · auto-extracted core subgraph',
     seeds: [],
   };
 }
@@ -181,6 +185,9 @@ async function readDbCache(id: string): Promise<PathwayGraph | null> {
     const row = await db.pathwayCache.findUnique({ where: { id } });
     if (!row) return null;
     const graph = JSON.parse(row.graphJson) as PathwayGraph;
+    // meta 始终以当前代码目录为准（描述/级联/双语文案迭代后无需重抓 KGML, 旧缓存行自动获得新 meta）
+    const catalog = getCatalogEntry(id);
+    if (catalog) graph.meta = buildMeta(catalog, graph.meta?.name ?? '');
     graph.source = 'db-cache';
     return graph;
   } catch {

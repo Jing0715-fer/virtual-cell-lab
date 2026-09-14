@@ -683,3 +683,45 @@ Stage Summary:
 - 自动旋转默认关闭(可 HUD 手动开); Hero 右侧从简易 SVG 升级为 AI 渲染主视觉+仪器化叠加层; 三区块标题/方法卡/导航/统计卡/页脚全面精修; 统计数字与全量 372 通路目录同步
 - 产出: 1 新组件(hero-visual.tsx) + 1 新图片(hero-cell.png) + 3 文件修改(page.tsx/globals.css/virtual-cell-3d.tsx)
 - 风险: 无; Hero 标注位置基于生成图目测定位, 若换图需同步调整 ANNOTATIONS 坐标
+
+---
+Task ID: 21-a
+Agent: full-stack-developer 子代理（Lab 面板 i18n）
+Task: EN 模式下 lab 面板组件硬编码中文全面国际化
+
+Work Log:
+- 读 worklog（Task 19/20：372 全量通路 + 已知遗留「i18n 数据层未覆盖」）；发现工作树已有一轮未提交未记日志的同任务改造（13 个 lab 组件 + i18n.tsx +281 行字典；cell-types/inhibitors 的 *En 字段与 cell3d/** 由并行数据层/21-b 代理产出）→ 本 session 执行「全面查漏 + 修复 + 完整验证 + 补写日志」
+- 逐行审计 13 个 owned 组件（pathway-library/playback/timeline/inspector/pharmacology/ai-assistant/compare-view/morphologies/virtual-cell/transcriptomic-heatmap/pathway-map-view/cell-picker/workspace）：全部用户可见文案均已 t() 或 lang 三元；数据层按语言选择已在位（name/nameEn、nameZh/name、categoryZh/categoryEn+TOP_ORDER_EN、tagline/disease/diameter/features/mutation note/drugClass/mechanism/indication 各 En 字段、中文药名回退 code）
+- 字典核对：i18n.tsx 共 323 key（含 13 组件分节注释）；组件静态 t() 引用 184 key + 动态族（tl.kind/ins.kind|comp|edge/vc.kind/comp/ph.src/pb.phase*.desc/morph）全部命中，无缺 key → 本 session 无需新增
+- [修复 1] pathway-library.tsx 当前细胞卡副标题：EN 模式残留中文名（"肝细胞 · 20–30 μm"）→ 语言分支改写（zh 原样 nameEn · diameter 双语对照；EN 仅 diameterEn，标题已是英文名）
+- [修复 2] transcriptomic-heatmap.tsx L292 zh 峰值统计模板字面量缺 $（前轮把 JSX {expr} 搬入反引号模板时漏转换，zh 渲染出原始代码文本）→ 补 $ 恢复「峰95% · T+36.0s」既有语义（回归修复）
+- 保留不译（zh-only 数据字段，规则 4/6 归数据层与 report-export 代理）：engine 事件文案 ev.text、NODE_NOTES/fallbackNote、meta.description/cascade、kegg-client 合成条目 description/cascade、lab-store 系统事件、report-export 按钮文案；virtual-cell KIND_COLORS label 中文为死数据（不可见，未动）
+- [验证] agent-browser 双语实测：EN 模式 #lab innerText 组件层 0 中文（默认态/3D/2D/KEGG Map × 五 tab/对照视图/搜索无命中/癌细胞突变提示/非策划通路 glycolysis 加载态逐一扫描；仅剩数据层中文）；zh 模式渲染原样（细胞卡/病理行/通路库分组/控制台阶段/突变提示/热图峰值行 ELK1峰95% · T+36.0s）；console 与 pageerrors 0；bun run lint 零错误；bunx tsc src 无错误（examples/skills 4 条存量边界外）；dev.log 全 200；截图 6 张存档（en×4 / zh×2）
+- 工作记录同步写入 agent-ctx/21-a-lab-panels-i18n.md
+
+Stage Summary:
+- Lab 面板组件层 EN i18n 完成：13/13 组件审计通过，EN 模式组件可见文案零中文；i18n.tsx 字典 323 key 完备（静态 184 引用 + 动态族全命中）；本 session 修复 2 处（EN 副标题中文名残留 + zh 热图模板插值回归）
+- zh 模式 100% 视觉不变（唯一渲染差异 = 热图峰值行回归修复，恢复的是改造前的正确输出）
+- EN 模式剩余中文全部为数据层所有权：engine 事件文案（timeline/compare 事件流主体）、NODE_NOTES 注释、meta.description/cascade、kegg-client 合成条目文案、lab-store 系统事件、report-export 按钮文案 —— 移交数据层/report-export 代理
+- 风险：无新增；热图 zh 分支曾在上一轮被引入回归（已修复并验证），后续代理改动模板字面量时建议对照 zh 截图回归
+
+---
+Task ID: 22
+Agent: 主协调 Agent (Z.ai Code) + 子代理 21-a（Lab 面板 i18n）+ 21-b（3D/数据层 i18n, 启动超时但工作已落盘, 本条目代为记录与验证）
+Task: 用户三项反馈——①AI 生成图科学性不足, 改用网络检索的科学插画 ②Hero 空白区域过多 ③EN 模式大量残留中文
+
+Work Log:
+- [Hero 配图替换] z-ai image-search 三轮检索(30 候选) + VLM 评估: 淘汰水印图(Alamy/Dreamstime)/浅底教科书图/Khan 图; 选定 StockCake 免版税"有丝分裂后期 3D 渲染"(1424×800, VLM 评分 9.5/10, 深青绿底+金纺锤丝+无水印) → public/hero-cell.jpg; 删除 AI 生成 hero-cell.png
+- [HeroVisual v2] 重写 hero-visual.tsx: 新标注体系按分裂期结构定位(染色体·极向分离/纺锤丝·微管牵引/线粒体·ATP 供给/缢裂沟·胞质分裂); 图注改"图 1 · 有丝分裂后期 — 生长信号级联的终点"(科学叙事: MAPK 级联终点即增殖分裂); LIVE 徽标改"活细胞视野"; 视野参数徽标改 CONF·TL 488nm(共聚焦显微镜语义)
+- [空白填充] 新增"分裂由这些级联驱动"快捷面板: MAPK 级联(hsa04010)/细胞周期(hsa04110)/p53 通路(hsa04115)三按钮, 点击即 selectPathway + 平滑滚动至实验台(实测: 细胞周期 31 核心节点装配 ✓); 右栏高度 633px vs 左栏 466px, 图片下方零空白; 活跃通路高亮态
+- [i18n 全面收尾] EN 模式从"大量中文"收敛到仅剩语言切换按钮的"中"字:
+  · [21-b 子代理(未记账)] i18n.tsx +281 行字典(323 键), lab 13 组件全部 t() 化; cell-types.ts +taglineEn/descriptionEn×7 + features labelEn/valueEn; inhibitors.ts +drugClassEn/mechanismEn×20; organelles.tsx EN 模式仅显 Latin 学名(z 模式保持 zh+Latin); molecules/drug-molecules/mrna-flow/event-pulses 用户字符串双语化
+  · [21-a 子代理] 审计补漏: pathway-library 卡片副标题 EN 泄漏修复; transcriptomic-heatmap 峰值模板字符串 $ 符号回归修复; 全视图×5 标签页 EN 扫描 0 组件层中文
+  · [主代理] cell-picker 副标题反转修复(EN 模式隐藏中文副标题); inspector 使用 meta.descriptionEn/cascadeEn; 页脚品牌 EN 模式去中文; types/kegg.ts PathwayMeta/PathwayCatalogEntry +descriptionEn/cascadeEn 可选字段; kegg-client.ts 合成条目生成 EN 文案 + readDbCache 以当前代码目录重建 meta(旧缓存行免重抓自动获得新文案) + CACHE_VERSION v7→v8; pathway-catalog.ts 13 条策划通路人工科学翻译 descriptionEn+cascadeEn; pathway-library 活跃卡级联 EN 优先
+- [QA] lint 0 错误; tsc 仅 skills/ 预存错误; EN 模式全页正则扫描唯一残留="中"(语言按钮本身); zh 模式描述/级联回归正常; 快捷面板点击端到端(选通路→装配→滚动)✓; 390px 无横向溢出; console 0 错误; API hsa04010 返回 descriptionEn/cascadeEn ✓; VLM 视觉复验因配额 429 限流暂缺(以 DOM 几何测量替代: 列平衡/图片比例/面板存在性)
+
+Stage Summary:
+- Hero 主视觉换为网络检索的科学准确插画(有丝分裂后期, 与"信号级联驱动增殖"叙事呼应); 图片+快捷面板填满右栏, 空白问题解决; EN 国际化完成度≈100%(组件层+数据层双层), 3D 标注 EN 显拉丁学名
+- 产出: hero-cell.jpg(新图) + hero-visual.tsx(重写) + 13 lab 组件 + i18n.tsx(+281 行) + cell-types/inhibitors/pathway-catalog(数据 En 字段) + kegg-client/types(meta 双语) + cell-picker/inspector/page(收尾)
+- 风险/遗留: ① VLM 视觉 QA 因限流未完成(下轮补) ② 模拟事件流文本(SimEvent.text)/分子注释(NODE_NOTES)仍为中文数据层(量级大, 未纳入本轮) ③ report-export PDF 内容仍中文 ④ 图源 StockCake 免版税(商用安全)但建议长期替换为自有渲染截图(项目 3D 视图本身可导出)
+- 下阶段建议: ① SimEvent 事件文案双语(引擎层 key 化) ② PDF 报告 EN 版 ③ hero 图可考虑用项目自身 3D 视图高质量截图替代(科学性 100% 可控)

@@ -31,7 +31,11 @@ export interface PathwayMeta {
   nameZh: string; // "MAPK 信号通路"
   category: string; // 分类（中文）
   description: string; // 专业描述
+  /** 英文描述（合成目录条目/可选; EN 模式优先, 缺失时回退 description） */
+  descriptionEn?: string;
   cascade: string; // 核心级联摘要 "EGF → EGFR → GRB2/SOS → RAS → RAF → MEK → ERK"
+  /** 英文级联摘要（可选, EN 模式优先） */
+  cascadeEn?: string;
   keggLink: string;
 }
 
@@ -115,7 +119,11 @@ export interface PathwayCatalogEntry {
   nameZh: string;
   category: string;
   description: string;
+  /** 英文描述（合成目录条目; EN 模式优先） */
+  descriptionEn?: string;
   cascade: string;
+  /** 英文级联摘要（合成目录条目; EN 模式优先） */
+  cascadeEn?: string;
   /** 核心子图提取的种子基因（符号优先匹配 label/aliases） */
   seeds: string[];
   /** 合成配体（KEGG 图谱中未作为节点出现的配体，如肾上腺素） */

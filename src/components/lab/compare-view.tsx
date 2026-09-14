@@ -12,6 +12,7 @@ import { CompareReportExportButton } from './report-export';
 import { CELL_TYPE_MAP, CELL_TYPES } from '@/data/cell-types';
 import { layoutCellView, CANVAS, type PositionedNode, type LaidOutEdge } from '@/lib/simulation/layout';
 import { CellMorphology } from './morphologies';
+import { useLang } from '@/lib/i18n';
 import type { EdgeKind, MoleculeKind } from '@/types/kegg';
 import { KIND_COLORS_MAP, edgeColor, edgeMarker, truncateLabel, midpointOf } from './view-shared';
 
@@ -27,22 +28,23 @@ function MiniArmView({ side, cellId, nodes, edges, states, injected }: {
   states: Record<string, { activity: number; phospho: number; activated: boolean; activatedAtTick: number | null }>;
   injected: Record<string, boolean>;
 }) {
+  const { t, lang } = useLang();
   const cell = CELL_TYPE_MAP.get(cellId);
   const morph = cell?.morphology ?? 'hepatocyte';
   const tint = cell?.tint ?? ['#134e4a', '#052e2b'];
   const mutNodeIds = new Set((cell?.mutations ?? []).map((m) => m.node));
   const accent = side === 'A' ? '#2dd4bf' : '#fb7185';
-  const labelPrefix = side === 'A' ? '对照' : '实验';
+  const labelPrefix = side === 'A' ? t('cmp.control') : t('cmp.test');
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden rounded-xl border border-white/8 bg-[#020617]">
       {/* 臂头部 */}
       <div className="flex items-center gap-2 border-b border-white/5 px-3 py-2">
         <span className="rounded px-1.5 py-px font-mono text-[9px] font-bold" style={{ background: `${accent}22`, color: accent, border: `1px solid ${accent}44` }}>
-          臂 {side}
+          {t('cmp.arm')} {side}
         </span>
         <div className="min-w-0">
-          <div className="truncate text-[11px] font-medium text-slate-200">{cell?.name ?? cellId}</div>
+          <div className="truncate text-[11px] font-medium text-slate-200">{lang === 'zh' ? cell?.name ?? cellId : cell?.nameEn ?? cellId}</div>
           <div className="truncate text-[8.5px] text-slate-500">{labelPrefix} · {cell?.marker ?? ''}</div>
         </div>
         <div className="ml-auto flex items-center gap-1">
@@ -56,7 +58,7 @@ function MiniArmView({ side, cellId, nodes, edges, states, injected }: {
 
       {/* SVG 细胞视图 */}
       <div className="min-h-0 flex-1">
-        <svg viewBox={`0 0 ${CANVAS.w} ${CANVAS.h}`} className="h-full w-full" role="img" aria-label={`${labelPrefix}细胞通路视图`}>
+        <svg viewBox={`0 0 ${CANVAS.w} ${CANVAS.h}`} className="h-full w-full" role="img" aria-label={`${labelPrefix}${t('cmp.cellViewAria')}`}>
           <defs>
             <linearGradient id={`cmpBg${side}`} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#020617" />
@@ -151,6 +153,7 @@ function MiniArmView({ side, cellId, nodes, edges, states, injected }: {
 /* ============ 主对比视图 ============ */
 
 export function CompareView() {
+  const { t, lang } = useLang();
   const active = useCompareStore((s) => s.active);
   const graph = useCompareStore((s) => s.graph);
   const armA = useCompareStore((s) => s.armA);
@@ -203,9 +206,9 @@ export function CompareView() {
         <div className="flex items-center gap-2">
           <GitCompare className="h-4 w-4 text-teal-300" />
           <div>
-            <div className="text-[13px] font-semibold text-slate-100">通路对照实验</div>
+            <div className="text-[13px] font-semibold text-slate-100">{t('cmp.title')}</div>
             <div className="text-[9.5px] text-slate-500">
-              {graph.meta.nameZh} · 同通路/同刺激/不同遗传背景 · 单变量实验设计
+              {lang === 'zh' ? graph.meta.nameZh : graph.meta.name} · {t('cmp.subtitle')}
             </div>
           </div>
         </div>
@@ -221,21 +224,21 @@ export function CompareView() {
             }`}
           >
             {running ? <Pause className="h-3.5 w-3.5" /> : <Play className="ml-0.5 h-3.5 w-3.5" />}
-            {running ? '暂停' : '同步刺激'}
+            {running ? t('cmp.pause') : t('cmp.stimulate')}
           </button>
           <button
             onClick={reset}
             className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] text-slate-400 transition hover:text-rose-300"
           >
             <RotateCcw className="h-3 w-3" />
-            重置
+            {t('cmp.reset')}
           </button>
         </div>
 
         {/* 配体选择（无有效配体通路回退为直接刺激入口） */}
         <div className="flex items-center gap-1">
           <span className="text-[9px] text-slate-500">
-            {graph.core.edges.some((e) => graph.core.nodes.some((n) => n.tier === 0 && n.id === e.source)) ? '共同刺激:' : '直接刺激:'}
+            {graph.core.edges.some((e) => graph.core.nodes.some((n) => n.tier === 0 && n.id === e.source)) ? t('cmp.costim') : t('cmp.direct')}
           </span>
           {(() => {
             const hasProductiveLigand = graph.core.edges.some((e) =>
@@ -276,8 +279,8 @@ export function CompareView() {
               }`}
               title={
                 surface
-                  ? `${n.label} —— 受体直接刺激（等效配体结合后构象激活）`
-                  : `${n.label} —— 应激刺激入口（等效上游生理激活）`
+                  ? `${n.label} —— ${t('cmp.tipReceptor')}`
+                  : `${n.label} —— ${t('cmp.tipStress')}`
               }
             >
               {n.label}
@@ -294,7 +297,7 @@ export function CompareView() {
             className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-slate-400 transition hover:border-rose-500/40 hover:text-rose-300"
           >
             <X className="h-3.5 w-3.5" />
-            退出对照
+            {t('cmp.exit')}
           </button>
         </div>
       </div>
@@ -310,14 +313,14 @@ export function CompareView() {
           <div className="grid grid-cols-2 gap-2">
             {([['A', cellA, setCellA], ['B', cellB, setCellB]] as const).map(([side, val, setter]) => (
               <label key={side} className="block">
-                <span className={`mb-1 block text-[8.5px] ${side === 'A' ? 'text-teal-400' : 'text-rose-400'}`}>臂 {side} 细胞系</span>
+                <span className={`mb-1 block text-[8.5px] ${side === 'A' ? 'text-teal-400' : 'text-rose-400'}`}>{t('cmp.arm')} {side} {t('cmp.cellLine')}</span>
                 <select
                   value={val}
                   onChange={(e) => setter(e.target.value)}
                   className="w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-[10.5px] text-slate-200 outline-none focus:border-teal-500/50"
                 >
                   {CELL_TYPES.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
+                    <option key={c.id} value={c.id}>{lang === 'zh' ? c.name : c.nameEn}</option>
                   ))}
                 </select>
               </label>
@@ -328,28 +331,28 @@ export function CompareView() {
           {summary && (
             <div className="grid grid-cols-2 gap-2">
               <div className="rounded-lg border border-rose-500/25 bg-rose-500/8 p-2.5">
-                <div className="flex items-center gap-1 text-[8.5px] text-rose-300/80"><Zap className="h-3 w-3" />自主激活分子</div>
+                <div className="flex items-center gap-1 text-[8.5px] text-rose-300/80"><Zap className="h-3 w-3" />{t('cmp.autonomous')}</div>
                 <div className="mt-0.5 font-mono text-xl font-bold text-rose-300">{summary.autonomousCount}</div>
-                <div className="text-[8px] text-slate-500">仅实验臂激活（Δ&gt;0.5）</div>
+                <div className="text-[8px] text-slate-500">{t('cmp.autonomousDesc')}</div>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/5 p-2.5">
-                <div className="flex items-center gap-1 text-[8.5px] text-slate-400"><Sigma className="h-3 w-3" />平均活性差</div>
+                <div className="flex items-center gap-1 text-[8.5px] text-slate-400"><Sigma className="h-3 w-3" />{t('cmp.meanDelta')}</div>
                 <div className={`mt-0.5 font-mono text-xl font-bold ${summary.meanDelta > 0.05 ? 'text-rose-300' : summary.meanDelta < -0.05 ? 'text-teal-300' : 'text-slate-300'}`}>
                   {summary.meanDelta >= 0 ? '+' : ''}{(summary.meanDelta * 100).toFixed(1)}%
                 </div>
-                <div className="text-[8px] text-slate-500">实验臂 − 对照臂</div>
+                <div className="text-[8px] text-slate-500">{t('cmp.meanDeltaDesc')}</div>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/5 p-2.5">
-                <div className="flex items-center gap-1 text-[8.5px] text-slate-400"><Timer className="h-3 w-3" />转录应答提前</div>
+                <div className="flex items-center gap-1 text-[8.5px] text-slate-400"><Timer className="h-3 w-3" />{t('cmp.phase4Lead')}</div>
                 <div className="mt-0.5 font-mono text-xl font-bold text-amber-300">
                   {summary.phase4LeadTicks != null ? `${(summary.phase4LeadTicks * 0.5).toFixed(1)}s` : '—'}
                 </div>
-                <div className="text-[8px] text-slate-500">阶段④首达时差（负=B 更快）</div>
+                <div className="text-[8px] text-slate-500">{t('cmp.phase4LeadDesc')}</div>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/5 p-2.5">
-                <div className="flex items-center gap-1 text-[8.5px] text-slate-400"><Dna className="h-3 w-3" />事件总数</div>
+                <div className="flex items-center gap-1 text-[8.5px] text-slate-400"><Dna className="h-3 w-3" />{t('cmp.totalEvents')}</div>
                 <div className="mt-0.5 font-mono text-xl font-bold text-slate-200">{summary.totalEvents}</div>
-                <div className="text-[8px] text-slate-500">两臂分子事件合计</div>
+                <div className="text-[8px] text-slate-500">{t('cmp.totalEventsDesc')}</div>
               </div>
             </div>
           )}
@@ -357,13 +360,13 @@ export function CompareView() {
           {/* 差异 tab */}
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-white/8 bg-slate-950/50">
             <div className="flex border-b border-white/5">
-              {(['delta', 'events'] as const).map((t) => (
+              {(['delta', 'events'] as const).map((tabId) => (
                 <button
-                  key={t}
-                  onClick={() => setTab(t)}
-                  className={`px-3 py-1.5 text-[10px] transition ${tab === t ? 'border-b-2 border-teal-400 text-teal-300' : 'text-slate-500 hover:text-slate-300'}`}
+                  key={tabId}
+                  onClick={() => setTab(tabId)}
+                  className={`px-3 py-1.5 text-[10px] transition ${tab === tabId ? 'border-b-2 border-teal-400 text-teal-300' : 'text-slate-500 hover:text-slate-300'}`}
                 >
-                  {t === 'delta' ? `分子差异 Top ${topDeltas.length}` : '实验臂事件'}
+                  {tabId === 'delta' ? `${t('cmp.tabDelta')} Top ${topDeltas.length}` : t('cmp.tabEvents')}
                 </button>
               ))}
             </div>
@@ -377,7 +380,7 @@ export function CompareView() {
                       <div key={d.id} className="rounded-lg border border-white/5 bg-white/[0.03] px-2 py-1.5">
                         <div className="flex items-center gap-2">
                           <span className="w-16 truncate font-mono text-[10px] font-semibold text-slate-200">{d.label}</span>
-                          <span className="rounded bg-white/5 px-1 font-mono text-[8px] text-slate-500">{d.tier === 0 ? '配体' : d.tier === 1 ? '膜' : d.tier >= 5 ? '核' : '胞质'}</span>
+                          <span className="rounded bg-white/5 px-1 font-mono text-[8px] text-slate-500">{d.tier === 0 ? t('cmp.tier.ligand') : d.tier === 1 ? t('cmp.tier.membrane') : d.tier >= 5 ? t('cmp.tier.nucleus') : t('cmp.tier.cytoplasm')}</span>
                           <span className={`ml-auto font-mono text-[10px] font-bold ${up ? 'text-rose-300' : 'text-teal-300'}`}>
                             {up ? '+' : ''}{(d.delta * 100).toFixed(0)}%
                           </span>
@@ -397,16 +400,16 @@ export function CompareView() {
                         {/* 提速标注 */}
                         {d.activatedTickA != null && d.activatedTickB != null && d.activatedTickB !== d.activatedTickA && (
                           <div className="mt-0.5 text-[8px] text-amber-400/80">
-                            激活时差 {((d.activatedTickB - d.activatedTickA) * 0.5).toFixed(1)}s（{d.activatedTickB < d.activatedTickA ? '实验臂更快' : '对照臂更快'}）
+                            {t('cmp.actGap')} {((d.activatedTickB - d.activatedTickA) * 0.5).toFixed(1)}s（{d.activatedTickB < d.activatedTickA ? t('cmp.testFaster') : t('cmp.ctrlFaster')}）
                           </div>
                         )}
                         {pct > 0.5 && d.activityB > 0.5 && d.activityA < 0.05 && (
-                          <div className="mt-0.5 text-[8px] text-rose-400/90">⚠ 组成性活化 —— 不依赖上游刺激</div>
+                          <div className="mt-0.5 text-[8px] text-rose-400/90">{t('cmp.constitutive')}</div>
                         )}
                       </div>
                     );
                   })}
-                  {topDeltas.length === 0 && <p className="p-3 text-center text-[10px] text-slate-500">播放模拟后显示分子级差异</p>}
+                  {topDeltas.length === 0 && <p className="p-3 text-center text-[10px] text-slate-500">{t('cmp.emptyDelta')}</p>}
                 </div>
               ) : (
                 <div className="space-y-1">
@@ -419,14 +422,14 @@ export function CompareView() {
                       <p className="mt-0.5 line-clamp-2 text-[9.5px] leading-snug text-slate-300">{e.text}</p>
                     </div>
                   ))}
-                  {eventsB.length === 0 && <p className="p-3 text-center text-[10px] text-slate-500">播放模拟后显示实验臂事件流</p>}
+                  {eventsB.length === 0 && <p className="p-3 text-center text-[10px] text-slate-500">{t('cmp.emptyEvents')}</p>}
                 </div>
               )}
             </div>
           </div>
 
           <p className="px-1 text-[8px] leading-relaxed text-slate-600">
-            对照设计：两臂共享同一 KEGG 子图、同一配体剂量与引擎参数，唯一变量为细胞系遗传背景（突变以 M/KO 徽标标注）。★ = 两臂共同响应配体。
+            {t('cmp.footnote')}
           </p>
         </div>
       </div>

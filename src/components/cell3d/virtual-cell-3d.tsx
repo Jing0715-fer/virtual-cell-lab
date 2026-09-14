@@ -537,8 +537,10 @@ export function VirtualCell3D() {
         <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-slate-950/70 px-2.5 py-1.5 backdrop-blur-md">
           <Shell className="h-3.5 w-3.5 text-emerald-400" />
           <div>
-            <div className="text-[11px] font-medium text-emerald-300">{cell?.name ?? t('loading.cell')}</div>
-            <div className="text-[9px] text-slate-500">{graph.meta.nameZh} · {t('hud.3dview')}</div>
+            <div className="text-[11px] font-medium text-emerald-300">
+              {(lang === 'zh' ? cell?.name : cell?.nameEn ?? cell?.name) ?? t('loading.cell')}
+            </div>
+            <div className="text-[9px] text-slate-500">{(lang === 'zh' ? graph.meta.nameZh : graph.meta.name)} · {t('hud.3dview')}</div>
           </div>
         </div>
         <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-white/10 bg-slate-950/70 px-2.5 py-1 backdrop-blur-md font-mono text-[9px] text-slate-400">
@@ -551,7 +553,7 @@ export function VirtualCell3D() {
         </div>
         <div className="pointer-events-auto flex items-center gap-1.5 rounded-lg border border-white/10 bg-slate-950/70 px-2.5 py-1 backdrop-blur-md text-[9px] text-slate-500">
           <Ruler className="h-3 w-3 text-slate-400" />
-          <span>⌀ {cell?.diameter ?? '—'}</span>
+          <span>⌀ {(lang === 'zh' ? cell?.diameter : cell?.diameterEn ?? cell?.diameter) ?? '—'}</span>
           <span className="text-slate-600">{t('hud.scale')}</span>
         </div>
       </div>
@@ -735,7 +737,9 @@ export function VirtualCell3D() {
             {/* 末站导出提示 */}
             {tourIdx >= tour.length - 1 && (
               <p className="mt-2 border-t border-white/8 pt-1.5 text-[9px] text-slate-500">
-                级联讲解完毕 —— 退出引导后点击「播放」可观察动态信号流，或在「药理」面板投放激酶抑制剂观察断流效应。
+                {lang === 'zh'
+                  ? '级联讲解完毕 —— 退出引导后点击「播放」可观察动态信号流，或在「药理」面板投放激酶抑制剂观察断流效应。'
+                  : 'Cascade walkthrough complete — exit the tour and press “Play” to watch dynamic signal flow, or deploy kinase inhibitors in the “Pharmacology” panel to observe blockade effects.'}
               </p>
             )}
           </div>
@@ -745,7 +749,10 @@ export function VirtualCell3D() {
           {clipView ? (
             <>
               <Layers className="h-3 w-3 text-teal-400" />
-              <span className="text-teal-300/90">{t('hud.section')} · {SECTION_ORIENTS[clipAxis].label[lang]}（{SECTION_ORIENTS[clipAxis].latin}）</span>
+              <span className="text-teal-300/90">
+                {t('hud.section')} · {SECTION_ORIENTS[clipAxis].label[lang]}
+                {lang === 'zh' ? `（${SECTION_ORIENTS[clipAxis].latin}）` : ` (${SECTION_ORIENTS[clipAxis].latin})`}
+              </span>
               <span className="text-slate-600">—— {t('hud.tip.section')}</span>
             </>
           ) : (

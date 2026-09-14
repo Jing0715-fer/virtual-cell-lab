@@ -319,7 +319,7 @@ export default function Home() {
             <div className="flex h-5 w-5 items-center justify-center rounded-md border border-emerald-500/30 bg-emerald-500/[0.08]">
               <Dna className="h-3 w-3 text-emerald-400/80" />
             </div>
-            VirtualCell Lab · 虚拟细胞实验室
+            VirtualCell Lab{lang === 'zh' ? ' · 虚拟细胞实验室' : ''}
           </div>
           <a
             href="https://www.kegg.jp/kegg/rest.html"

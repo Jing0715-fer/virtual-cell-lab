@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * 虚拟细胞形态学渲染 —— 7 种细胞类型的 SVG 显微结构绘制
  * 组织学参照: Ross & Pawlina Histology / Alberts MBoC
@@ -6,6 +8,7 @@
 import { memo } from 'react';
 import type { MorphologyKey } from '@/data/cell-types';
 import { getGeometry, type CellGeometry } from '@/lib/simulation/layout';
+import { useLang } from '@/lib/i18n';
 
 interface Props {
   morph: MorphologyKey;
@@ -219,6 +222,7 @@ function BodyOutline({ morph, geom }: { morph: MorphologyKey; geom: CellGeometry
 /* ---------------- 形态学特化结构 ---------------- */
 
 function MorphExtras({ morph, geom }: { morph: MorphologyKey; geom: CellGeometry }) {
+  const { t } = useLang();
   const { membraneY, bodyX0, bodyX1, membraneH } = geom;
   switch (morph) {
     case 'hepatocyte':
@@ -232,7 +236,7 @@ function MorphExtras({ morph, geom }: { morph: MorphologyKey; geom: CellGeometry
           </g>
           {/* 胆小管 */}
           <path d={`M ${bodyX0 + 40} ${membraneY + membraneH + 14} q 40 -8 80 0 q 40 8 80 0`} fill="none" stroke="#fbbf24" strokeWidth={2.6} opacity={0.4} />
-          <text x={bodyX0 + 52} y={membraneY + membraneH + 40} fill="#fbbf24" fontSize={10} opacity={0.55}>胆小管</text>
+          <text x={bodyX0 + 52} y={membraneY + membraneH + 40} fill="#fbbf24" fontSize={10} opacity={0.55}>{t('morph.bileCanaliculus')}</text>
         </g>
       );
     case 'neuron':
@@ -256,8 +260,8 @@ function MorphExtras({ morph, geom }: { morph: MorphologyKey; geom: CellGeometry
           </g>
           {/* 轴突终末 */}
           <path d="M 1180 470 q 14 -16 26 -8 q 12 8 0 18 q -12 8 -26 -10 z" fill="#14b8a6" opacity={0.35} />
-          <text x={930} y={500} fill="#5eead4" fontSize={10} opacity={0.6}>有髓轴突 → 突触终末</text>
-          <text x={340} y={92} fill="#5eead4" fontSize={10} opacity={0.6}>树突</text>
+          <text x={930} y={500} fill="#5eead4" fontSize={10} opacity={0.6}>{t('morph.axon')}</text>
+          <text x={340} y={92} fill="#5eead4" fontSize={10} opacity={0.6}>{t('morph.dendrite')}</text>
           {/* Nissl 小体（rER 团块） */}
           <g opacity={0.75}>
             <RoughER x={330} y={300} w={110} rows={3} />
@@ -276,7 +280,7 @@ function MorphExtras({ morph, geom }: { morph: MorphologyKey; geom: CellGeometry
               return <line key={i} x1={x} y1={membraneY + 4} x2={x + (i % 3 - 1) * 5} y2={membraneY - len} />;
             })}
           </g>
-          <text x={bodyX0 + 10} y={membraneY - 30} fill="#5eead4" fontSize={10} opacity={0.6}>微绒毛</text>
+          <text x={bodyX0 + 10} y={membraneY - 30} fill="#5eead4" fontSize={10} opacity={0.6}>{t('morph.microvilli')}</text>
         </g>
       );
     case 'epithelial':
@@ -293,11 +297,11 @@ function MorphExtras({ morph, geom }: { morph: MorphologyKey; geom: CellGeometry
           <g>
             <path d={`M ${bodyX0 - 4} ${membraneY + membraneH + 26} l 0 8 M ${bodyX0 + 2} ${membraneY + membraneH + 34} l 0 8`} stroke="#f43f5e" strokeWidth={3} opacity={0.7} />
             <path d={`M ${bodyX1 + 4} ${membraneY + membraneH + 26} l 0 8 M ${bodyX1 - 2} ${membraneY + membraneH + 34} l 0 8`} stroke="#f43f5e" strokeWidth={3} opacity={0.7} />
-            <text x={bodyX0 - 78} y={membraneY + membraneH + 42} fill="#fda4af" fontSize={9.5} opacity={0.75}>紧密连接</text>
+            <text x={bodyX0 - 78} y={membraneY + membraneH + 42} fill="#fda4af" fontSize={9.5} opacity={0.75}>{t('morph.tightJunction')}</text>
           </g>
           {/* 基底板 */}
           <path d={`M ${bodyX0 - 26} 762 Q 600 770, ${bodyX1 + 26} 762`} stroke="#fbbf24" strokeWidth={3.4} fill="none" opacity={0.4} />
-          <text x={bodyX1 - 80} y={775} fill="#fbbf24" fontSize={9.5} opacity={0.6}>基底膜</text>
+          <text x={bodyX1 - 80} y={775} fill="#fbbf24" fontSize={9.5} opacity={0.6}>{t('morph.basementMembrane')}</text>
         </g>
       );
     case 'cardiomyocyte': {
@@ -318,7 +322,7 @@ function MorphExtras({ morph, geom }: { morph: MorphologyKey; geom: CellGeometry
           </g>
           {/* 闰盘（右侧） */}
           <path d={`M ${bodyX1 - 34} 240 l 16 20 l -16 20 l 16 20 l -16 20`} fill="none" stroke="#f43f5e" strokeWidth={3.2} opacity={0.75} />
-          <text x={bodyX1 - 106} y={236} fill="#fda4af" fontSize={10} opacity={0.7}>闰盘</text>
+          <text x={bodyX1 - 106} y={236} fill="#fda4af" fontSize={10} opacity={0.7}>{t('morph.intercalatedDisc')}</text>
           {/* 平行线粒体列 */}
           <Mitochondrion x={bodyX0 + 120} y={560} rot={2} scale={0.9} />
           <Mitochondrion x={bodyX0 + 320} y={580} rot={-2} scale={0.9} />
@@ -335,7 +339,7 @@ function MorphExtras({ morph, geom }: { morph: MorphologyKey; geom: CellGeometry
             <path d="M 150 118 q 60 26 120 0 t 120 0" />
             <path d="M 980 96 q 55 24 110 0 t 110 0" />
           </g>
-          <text x={128} y={70} fill="#fbbf24" fontSize={10} opacity={0.6}>胶原纤维（I 型）</text>
+          <text x={128} y={70} fill="#fbbf24" fontSize={10} opacity={0.6}>{t('morph.collagen')}</text>
           {/* 发达的 rER */}
           <g opacity={0.85}>
             <RoughER x={220} y={640} w={190} rows={4} />
@@ -353,7 +357,7 @@ function MorphExtras({ morph, geom }: { morph: MorphologyKey; geom: CellGeometry
             <circle cx={bodyX1 - 90} cy={344} r={11} />
             <circle cx={bodyX1 - 170} cy={303} r={8} />
           </g>
-          <text x={bodyX0 + 110} y={288} fill="#fda4af" fontSize={10} opacity={0.7}>膜出芽</text>
+          <text x={bodyX0 + 110} y={288} fill="#fda4af" fontSize={10} opacity={0.7}>{t('morph.blebs')}</text>
         </g>
       );
   }

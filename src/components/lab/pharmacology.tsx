@@ -8,7 +8,8 @@
 import { useMemo } from 'react';
 import { Pill, FlaskConical, Info, ShieldCheck, Microscope, Beaker } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
-import { INHIBITORS, DRUG_SOURCE_ZH, type DrugSource } from '@/data/inhibitors';
+import { INHIBITORS, type DrugSource } from '@/data/inhibitors';
+import { useLang } from '@/lib/i18n';
 
 const SOURCE_ICON: Record<DrugSource, typeof ShieldCheck> = {
   fda: ShieldCheck,
@@ -23,6 +24,7 @@ const SOURCE_STYLE: Record<DrugSource, string> = {
 };
 
 function DrugCard({ drugId }: { drugId: string }) {
+  const { t, lang } = useLang();
   const drug = INHIBITORS.find((d) => d.id === drugId)!;
   const graph = useLabStore((s) => s.graph);
   const inhibitors = useLabStore((s) => s.inhibitors);
@@ -56,9 +58,11 @@ function DrugCard({ drugId }: { drugId: string }) {
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <Pill className={`h-3.5 w-3.5 shrink-0 ${active ? 'text-purple-300' : 'text-slate-500'}`} />
-            <span className="truncate text-[13px] font-semibold text-slate-100">{drug.name}</span>
+            <span className="truncate text-[13px] font-semibold text-slate-100">
+              {lang === 'zh' ? drug.name : /[\u4e00-\u9fff]/.test(drug.name) ? drug.code.split(' ·')[0] : drug.name}
+            </span>
             <span className={`shrink-0 rounded border px-1 py-px text-[8px] leading-tight ${SOURCE_STYLE[drug.source]}`}>
-              {DRUG_SOURCE_ZH[drug.source]}
+              {t(`ph.src.${drug.source}`)}
             </span>
           </div>
           <div className="mt-0.5 font-mono text-[9px] text-slate-500">{drug.code}</div>
@@ -71,14 +75,14 @@ function DrugCard({ drugId }: { drugId: string }) {
               : 'border-purple-400/30 bg-purple-500/8 text-purple-300/80 hover:bg-purple-500/15'
           }`}
         >
-          {active ? '洗脱' : '投药'}
+          {active ? t('ph.washout') : t('ph.dose')}
         </button>
       </div>
 
       {/* 药物类别 */}
       <div className="mt-2 flex items-center gap-1.5">
         <SourceIcon className="h-3 w-3 text-slate-500" />
-        <span className="text-[10px] text-slate-400">{drug.drugClass}</span>
+        <span className="text-[10px] text-slate-400">{lang === 'zh' ? drug.drugClass : drug.drugClassEn}</span>
       </div>
 
       {/* 靶点活性监控 */}
@@ -106,31 +110,32 @@ function DrugCard({ drugId }: { drugId: string }) {
       </div>
 
       {/* 机制 */}
-      <p className="mt-2 text-[10px] leading-relaxed text-slate-400">{drug.mechanism}</p>
+      <p className="mt-2 text-[10px] leading-relaxed text-slate-400">{lang === 'zh' ? drug.mechanism : drug.mechanismEn}</p>
 
       {/* 适应症 */}
       <div className="mt-2 flex items-center gap-1.5 border-t border-white/5 pt-1.5">
         <Info className="h-2.5 w-2.5 text-slate-600" />
-        <span className="text-[9px] text-slate-500">{drug.indication}</span>
+        <span className="text-[9px] text-slate-500">{lang === 'zh' ? drug.indication : drug.indicationEn}</span>
       </div>
 
       {/* 起效进度 */}
       {active && level < 0.99 && (
         <div className="mt-1.5 flex items-center gap-1.5">
-          <span className="text-[9px] text-purple-300">起效中</span>
+          <span className="text-[9px] text-purple-300">{t('ph.onset')}</span>
           <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/8">
             <div className="h-full rounded-full bg-purple-400 transition-all" style={{ width: `${level * 100}%` }} />
           </div>
         </div>
       )}
       {active && level >= 0.99 && (
-        <div className="mt-1.5 font-mono text-[9px] text-purple-300">● 治疗浓度（靶点输出钳制中）</div>
+        <div className="mt-1.5 font-mono text-[9px] text-purple-300">{t('ph.therapeutic')}</div>
       )}
     </div>
   );
 }
 
 export function PharmacologyPanel() {
+  const { t, lang } = useLang();
   const graph = useLabStore((s) => s.graph);
   const inhibitors = useLabStore((s) => s.inhibitors);
 
@@ -149,24 +154,25 @@ export function PharmacologyPanel() {
       <div className="mb-2 flex items-center gap-2">
         <FlaskConical className="h-4 w-4 text-purple-400" />
         <div>
-          <div className="text-[12px] font-semibold text-slate-100">药理扰动实验</div>
+          <div className="text-[12px] font-semibold text-slate-100">{t('ph.title')}</div>
           <div className="text-[9px] text-slate-500">
-            {graph ? `${graph.meta.nameZh} · ${applicable.length} 种药物可用` : '加载中…'}
-            {activeCount > 0 && <span className="ml-1 text-purple-300">· {activeCount} 种作用中</span>}
+            {graph
+              ? `${lang === 'zh' ? graph.meta.nameZh : graph.meta.name} · ${applicable.length} ${t('ph.drugsAvail')}`
+              : t('ph.loading')}
+            {activeCount > 0 && <span className="ml-1 text-purple-300">· {activeCount} {t('ph.activeCount')}</span>}
           </div>
         </div>
       </div>
 
       <p className="mb-3 rounded-lg border border-purple-500/15 bg-purple-950/15 p-2 text-[10px] leading-relaxed text-slate-400">
-        投药后靶点分子<span className="text-purple-300">催化输出被钳制</span>（上游磷酸化仍会累积——如曲美替尼下 pMEK
-        升高），下游级联断流。可在投药前先播放模拟让通路激活，再观察药物阻断效果与洗脱后的信号恢复。
+        {t('ph.introA')}<span className="text-purple-300">{t('ph.introB')}</span>{t('ph.introC')}
       </p>
 
       {applicable.length === 0 ? (
         <div className="rounded-xl border border-white/8 bg-white/[0.02] p-4 text-center">
           <Pill className="mx-auto mb-2 h-6 w-6 text-slate-700" />
-          <p className="text-[11px] text-slate-500">当前通路核心子图内无已收录药物的可作用靶点</p>
-          <p className="mt-1 text-[9px] text-slate-600">尝试切换 MAPK / PI3K-Akt / JAK-STAT / p53 等通路</p>
+          <p className="text-[11px] text-slate-500">{t('ph.emptyTitle')}</p>
+          <p className="mt-1 text-[9px] text-slate-600">{t('ph.emptyHint')}</p>
         </div>
       ) : (
         <div className="space-y-2">

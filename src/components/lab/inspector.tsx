@@ -9,10 +9,11 @@ import { LineChart, Line, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
 import { NODE_NOTES, fallbackNote } from '@/lib/simulation/molecular-notes';
-import { KIND_ZH, COMPARTMENT_ZH } from '@/lib/simulation/engine';
+import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 export function MoleculeInspector() {
+  const { t, lang } = useLang();
   const graph = useLabStore((s) => s.graph);
   const selectedNode = useLabStore((s) => s.selectedNode);
   const nodeStates = useLabStore((s) => s.nodeStates);
@@ -27,6 +28,12 @@ export function MoleculeInspector() {
     () => graph?.core.nodes.find((n) => n.id === selectedNode) ?? null,
     [graph, selectedNode],
   );
+
+  // 边类型标签（i18n；字典缺失时回退原始 kind）
+  const edgeLabel = (kind: string) => {
+    const s = t(`ins.edge.${kind}`);
+    return s.startsWith('ins.edge.') ? kind : s;
+  };
 
   // 活性曲线数据：取当前活性最高的 5 个节点
   const chart = useMemo(() => {
@@ -81,7 +88,7 @@ export function MoleculeInspector() {
   if (!graph) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-center text-xs text-slate-600">
-        选择通路后此处显示分子档案
+        {t('ins.empty')}
       </div>
     );
   }
@@ -97,7 +104,7 @@ export function MoleculeInspector() {
                 <Microscope className="h-4 w-4 text-emerald-400" />
                 <h3 className="font-mono text-base font-semibold tracking-tight text-slate-100">{node.label}</h3>
                 {node.synthetic && (
-                  <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] text-amber-300">合成节点</span>
+                  <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] text-amber-300">{t('ins.synthetic')}</span>
                 )}
               </div>
               {node.aliases.length > 0 && (
@@ -118,21 +125,21 @@ export function MoleculeInspector() {
 
           {/* 分类徽标 */}
           <div className="flex flex-wrap gap-1.5">
-            <Badge>{KIND_ZH[node.kind]}</Badge>
-            <Badge>{COMPARTMENT_ZH[node.compartment]}</Badge>
-            <Badge>信号层级 L{node.tier}</Badge>
+            <Badge>{t(`ins.kind.${node.kind}`)}</Badge>
+            <Badge>{t(`ins.comp.${node.compartment}`)}</Badge>
+            <Badge>{t('ins.tier')}{node.tier}</Badge>
             {node.keggIds[0] && <Badge>{node.keggIds[0]}</Badge>}
           </div>
 
           {/* 状态计量 */}
           <div className="space-y-2.5 rounded-lg border border-white/5 bg-slate-900/50 p-3">
-            <Meter label="分子活性" value={state?.activity ?? 0} color="emerald" activated={state?.activated} />
+            <Meter label={t('ins.activity')} value={state?.activity ?? 0} color="emerald" activated={state?.activated} />
             {node.kind !== 'compound' && (
-              <Meter label="磷酸化水平" value={state?.phospho ?? 0} color="amber" />
+              <Meter label={t('ins.phosphoLevel')} value={state?.phospho ?? 0} color="amber" />
             )}
             {(state?.activatedAtTick ?? null) !== null && (
               <p className="font-mono text-[10px] text-slate-500">
-                首次激活于 T+{(((state?.activatedAtTick ?? 0) as number) * 0.5).toFixed(1)}s
+                {t('ins.firstActivation')} T+{(((state?.activatedAtTick ?? 0) as number) * 0.5).toFixed(1)}s
               </p>
             )}
           </div>
@@ -141,15 +148,15 @@ export function MoleculeInspector() {
           {mutation && (
             <div className="space-y-1 rounded-lg border border-rose-500/30 bg-rose-950/20 p-3">
               <div className="flex items-center gap-1.5 text-[11px] font-semibold text-rose-300">
-                <ShieldAlert className="h-3.5 w-3.5" /> 本细胞系突变档案
+                <ShieldAlert className="h-3.5 w-3.5" /> {t('ins.mutTitle')}
               </div>
-              <p className="text-[11px] leading-4 text-rose-200/80">{mutation.note}</p>
+              <p className="text-[11px] leading-4 text-rose-200/80">{lang === 'zh' ? mutation.note : mutation.noteEn}</p>
             </div>
           )}
 
           {/* 功能注释 */}
           <div>
-            <h4 className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">分子功能注释</h4>
+            <h4 className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">{t('ins.noteTitle')}</h4>
             <p className="rounded-lg bg-slate-900/40 p-2.5 text-[11.5px] leading-[19px] text-slate-300">
               {NODE_NOTES[node.label] ?? NODE_NOTES[node.id] ?? fallbackNote(node.label, node.kind, node.compartment)}
             </p>
@@ -158,7 +165,7 @@ export function MoleculeInspector() {
           {/* 互作网络 */}
           {connections && (connections.up.length > 0 || connections.down.length > 0) && (
             <div>
-              <h4 className="mb-1.5 text-[10px] uppercase tracking-wider text-slate-500">信号网络连接</h4>
+              <h4 className="mb-1.5 text-[10px] uppercase tracking-wider text-slate-500">{t('ins.connTitle')}</h4>
               <div className="space-y-1">
                 {connections.up.map((e) => {
                   const src = connections.labelOf.get(e.source);
@@ -167,7 +174,7 @@ export function MoleculeInspector() {
                       className="flex w-full items-center gap-1.5 rounded-md border border-white/5 bg-slate-900/40 px-2 py-1 text-left text-[10.5px] text-slate-400 transition hover:border-emerald-500/30 hover:text-emerald-200">
                       <ArrowDownRight className="h-3 w-3 shrink-0 text-emerald-400" />
                       <span className="font-mono text-slate-300">{src?.label}</span>
-                      <span className="ml-auto text-[9px] text-slate-600">{edgeKindZh(e.kind)}</span>
+                      <span className="ml-auto text-[9px] text-slate-600">{edgeLabel(e.kind)}</span>
                     </button>
                   );
                 })}
@@ -178,7 +185,7 @@ export function MoleculeInspector() {
                       className="flex w-full items-center gap-1.5 rounded-md border border-white/5 bg-slate-900/40 px-2 py-1 text-left text-[10.5px] text-slate-400 transition hover:border-emerald-500/30 hover:text-emerald-200">
                       <ArrowUpRight className="h-3 w-3 shrink-0 text-teal-400" />
                       <span className="font-mono text-slate-300">{tgt?.label}</span>
-                      <span className="ml-auto text-[9px] text-slate-600">{edgeKindZh(e.kind)}</span>
+                      <span className="ml-auto text-[9px] text-slate-600">{edgeLabel(e.kind)}</span>
                     </button>
                   );
                 })}
@@ -190,16 +197,18 @@ export function MoleculeInspector() {
         <div className="space-y-3 p-4">
           <div className="flex items-center gap-2">
             <Dna className="h-4 w-4 text-emerald-400" />
-            <h3 className="text-sm font-semibold text-slate-200">{graph.meta.nameZh}</h3>
+            <h3 className="text-sm font-semibold text-slate-200">{lang === 'zh' ? graph.meta.nameZh : graph.meta.name}</h3>
           </div>
-          <p className="text-[11.5px] leading-[19px] text-slate-400">{graph.meta.description}</p>
+          <p className="text-[11.5px] leading-[19px] text-slate-400">
+            {lang === 'en' && graph.meta.descriptionEn ? graph.meta.descriptionEn : graph.meta.description}
+          </p>
           <div className="rounded-lg border border-white/5 bg-slate-900/50 p-2.5 font-mono text-[10.5px] leading-5 text-slate-400">
-            <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">核心级联</div>
-            {graph.meta.cascade}
+            <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">{t('ins.cascade')}</div>
+            {lang === 'en' && graph.meta.cascadeEn ? graph.meta.cascadeEn : graph.meta.cascade}
           </div>
           <p className="flex items-center gap-1.5 text-[11px] text-slate-500">
             <Activity className="h-3.5 w-3.5" />
-            点击画布中的分子节点查看分子级档案（残基注释 / 互作 / 突变）
+            {t('ins.clickHint')}
           </p>
         </div>
       )}
@@ -207,7 +216,7 @@ export function MoleculeInspector() {
       {/* 活性曲线 */}
       {chart && (
         <div className="mt-auto border-t border-white/5 p-3">
-          <h4 className="mb-2 text-[10px] uppercase tracking-wider text-slate-500">活性动力学曲线（Top 5）</h4>
+          <h4 className="mb-2 text-[10px] uppercase tracking-wider text-slate-500">{t('ins.chartTitle')}</h4>
           <div className="h-36">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chart.rows} margin={{ top: 4, right: 6, bottom: 0, left: -22 }}>
@@ -247,7 +256,7 @@ export function MoleculeInspector() {
             {drugBands.length > 0 && (
               <span className="flex items-center gap-1 text-[10px] text-purple-300/80">
                 <span className="h-1.5 w-3 rounded-full bg-purple-500/40 border border-purple-400/40" />
-                药物作用区间
+                {t('ins.drugBand')}
               </span>
             )}
           </div>
@@ -289,11 +298,3 @@ function Meter({ label, value, color, activated }: { label: string; value: numbe
   );
 }
 
-function edgeKindZh(kind: string): string {
-  const m: Record<string, string> = {
-    activation: '激活', inhibition: '抑制', phosphorylation: '磷酸化', dephosphorylation: '去磷酸化',
-    expression: '转录表达', repression: '阻遏', binding: '结合', dissociation: '解离',
-    indirect: '间接', missing: '缺失互作', 'state-change': '状态变化',
-  };
-  return m[kind] ?? kind;
-}

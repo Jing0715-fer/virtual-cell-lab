@@ -13,7 +13,10 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
     category: '环境信息处理 · 信号转导',
     description:
       '丝裂原活化蛋白激酶（MAPK）级联是真核生物中高度保守的三级激酶信号模块（MAPKKK → MAPKK → MAPK），将生长因子、细胞因子与应激刺激转化为基因表达程序的改变。ERK1/2 分支介导增殖与分化，JNK/SAPK 与 p38 分支应答应激与炎症信号。',
+    descriptionEn:
+      'The mitogen-activated protein kinase (MAPK) cascade is a highly conserved three-tiered kinase module (MAPKKK → MAPKK → MAPK) that converts growth-factor, cytokine and stress stimuli into gene-expression programs. The ERK1/2 branch drives proliferation and differentiation, while the JNK/SAPK and p38 branches transduce stress and inflammatory signaling.',
     cascade: 'EGF → EGFR → GRB2/SOS → RAS-GTP → RAF → MEK1/2 → ERK1/2 → ELK1/c-FOS',
+    cascadeEn: 'EGF → EGFR → GRB2/SOS → RAS-GTP → RAF → MEK1/2 → ERK1/2 → ELK1/c-FOS',
     seeds: [
       'EGF', 'TGFB1', 'FGF2', 'EGFR', 'ERBB2', 'GRB2', 'SOS1', 'SOS2', 'SHC1',
       'HRAS', 'KRAS', 'NRAS', 'RAF1', 'BRAF', 'ARAF', 'MAP2K1', 'MAP2K2',
@@ -30,7 +33,10 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
     category: '环境信息处理 · 信号转导',
     description:
       '磷脂酰肌醇 3-激酶（PI3K）被 RTK/GPCR 激活后在膜上生成第二信使 PIP3，招募 PDK1 与 Akt；Akt 磷酸化 FOXO、GSK-3β、TSC2 等底物，调控细胞存活、代谢、生长与增殖。PTEN 使 PIP3 去磷酸化实现负调控，是重要的抑癌基因。',
+    descriptionEn:
+      'Phosphoinositide 3-kinase (PI3K), activated downstream of RTKs/GPCRs, generates the second messenger PIP3 at the membrane to recruit PDK1 and Akt; Akt phosphorylates FOXO, GSK-3β, TSC2 and other substrates to govern cell survival, metabolism, growth and proliferation. PTEN dephosphorylates PIP3 as a key negative regulator and tumor suppressor.',
     cascade: 'IGF-1 → IGF1R → PI3K → PIP3 → PDK1/Akt → mTORC1 / GSK3β / FOXO',
+    cascadeEn: 'IGF-1 → IGF1R → PI3K → PIP3 → PDK1/Akt → mTORC1 / GSK3β / FOXO',
     seeds: [
       'IGF1', 'IGF2', 'EGF', 'INS', 'IGF1R', 'INSR', 'EGFR', 'ERBB3',
       'PIK3CA', 'PIK3CB', 'PIK3CD', 'PIK3R1', 'PIK3R2', 'PDPK1',
@@ -46,7 +52,10 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
     category: '环境信息处理 · 信号转导',
     description:
       'Wnt 家族分泌型糖蛋白结合 Frizzled 七次跨膜受体与 LRP5/6 共受体。经典 Wnt/β-catenin 通路中，受体激活经 Dishevelled 解散 β-catenin 破坏复合体（Axin/APC/GSK3β/CK1），使 β-catenin 免于泛素化降解、入核与 TCF/LEF 协同驱动 MYC、CCND1 等靶基因，决定细胞命运与干细胞干性维持。',
+    descriptionEn:
+      'Secreted Wnt glycoproteins bind Frizzled seven-transmembrane receptors together with LRP5/6 co-receptors. In the canonical Wnt/β-catenin branch, receptor activation via Dishevelled disassembles the β-catenin destruction complex (Axin/APC/GSK3β/CK1), sparing β-catenin from ubiquitin-mediated degradation; it then enters the nucleus and partners with TCF/LEF to drive MYC, CCND1 and other target genes — specifying cell fate and stemness maintenance.',
     cascade: 'WNT3A → FZD/LRP6 → DVL ⊣ 破坏复合体 → β-catenin 入核 → TCF/LEF → MYC/CCND1',
+    cascadeEn: 'WNT3A → FZD/LRP6 → DVL ⊣ destruction complex → β-catenin nuclear entry → TCF/LEF → MYC/CCND1',
     seeds: [
       'WNT3A', 'WNT1', 'WNT5A', 'FZD1', 'FZD2', 'FZD4', 'FZD7', 'LRP5', 'LRP6',
       'DVL1', 'DVL2', 'DVL3', 'GSK3B', 'CSNK1A1', 'CSNK2A1', 'CTNNB1', 'APC',
@@ -61,7 +70,10 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
     category: '环境信息处理 · 信号转导',
     description:
       'Notch 受体与相邻细胞表面的 Delta/Jagged 配体结合（旁分泌接触依赖），触发两次顺序蛋白酶切：ADAM 金属蛋白酶切除胞外域，γ-分泌酶复合体（Presenilin/Nicastrin）释放 Notch 胞内结构域（NICD）。NICD 转位入核，将转录抑制因子 RBP-Jκ 转化为激活子，与 MAML 组装复合体驱动 HES/HEY 等靶基因，介导侧抑制与细胞命运决定。',
+    descriptionEn:
+      'Notch receptors bind Delta/Jagged ligands on adjacent cells (juxtacrine, contact-dependent), triggering two sequential proteolytic cleavages: ADAM metalloproteases shed the extracellular domain, then the γ-secretase complex (Presenilin/Nicastrin) releases the Notch intracellular domain (NICD). NICD translocates to the nucleus, converting the transcriptional repressor RBP-Jκ into an activator that assembles with MAML to drive HES/HEY targets — mediating lateral inhibition and cell-fate decisions.',
     cascade: 'DLL/JAG → NOTCH → ADAM/γ-secretase 切割 → NICD 入核 → RBPJ/MAML → HES1',
+    cascadeEn: 'DLL/JAG → NOTCH → ADAM/γ-secretase cleavage → NICD nuclear entry → RBPJ/MAML → HES1',
     seeds: [
       'DLL1', 'DLL3', 'DLL4', 'JAG1', 'JAG2', 'NOTCH1', 'NOTCH2', 'NOTCH3',
       'NOTCH4', 'ADAM10', 'ADAM17', 'PSEN1', 'PSEN2', 'NCSTN', 'APH1A', 'PSENEN',
@@ -76,7 +88,10 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
     category: '环境信息处理 · 信号转导',
     description:
       'TGF-β 超家族（TGF-β/Activin/Nodal/BMP）配体结合 II 型丝/苏氨酸激酶受体，招募并磷酸化 I 型受体；活化受体磷酸化 R-Smad（Smad2/3 或 Smad1/5/8），与 Co-Smad（Smad4）组装复合体入核，协同 FAST1/Ski 等辅因子调节转录。抑制性 Smad6/7 与 E3 泛素连接酶 Smurf2 构成负反馈。TGF-β 在上皮细胞中尚可经非 Smad 通路（RhoA/ MAPK/PI3K）诱导 EMT。',
+    descriptionEn:
+      'TGF-β superfamily ligands (TGF-β/Activin/Nodal/BMP) bind type-II serine/threonine kinase receptors, which recruit and phosphorylate type-I receptors; the activated receptors phosphorylate R-Smads (Smad2/3 or Smad1/5/8) that complex with Co-Smad (Smad4) and enter the nucleus, tuning transcription with cofactors such as FAST1/Ski. Inhibitory Smad6/7 and the E3 ligase Smurf2 form negative feedback. In epithelial cells TGF-β can also induce EMT via non-Smad routes (RhoA/MAPK/PI3K).',
     cascade: 'TGF-β1 → TGFBR2 → TGFBR1 → pSMAD2/3-SMAD4 复合体 → PAI-1/p21/EMT 基因',
+    cascadeEn: 'TGF-β1 → TGFBR2 → TGFBR1 → pSMAD2/3-SMAD4 complex → PAI-1/p21/EMT genes',
     seeds: [
       'TGFB1', 'TGFB2', 'TGFB3', 'INHBA', 'BMP4', 'BMP2', 'TGFBR1', 'TGFBR2',
       'ACVR1', 'ACVR2A', 'BMPR1A', 'SMAD1', 'SMAD2', 'SMAD3', 'SMAD4', 'SMAD5',
@@ -91,7 +106,10 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
     category: '免疫系统 · 细胞因子信号',
     description:
       'I/II 型细胞因子受体自身缺乏激酶活性，与 JAK 家族酪氨酸激酶（JAK1/2/3、Tyk2）组成性关联。配体诱导受体二聚化后 JAK 交叉磷酸化受体胞内尾部 Tyr 残基，形成 STAT 募集位点；STAT 被磷酸化后经 SH2-pTyr 互换二聚化、转位入核结合 GAS 元件驱动转录。SOCS 蛋白家族与 STAT 诱导表达，构成经典负反馈环路。',
+    descriptionEn:
+      'Type I/II cytokine receptors lack intrinsic kinase activity and constitutively associate with JAK family tyrosine kinases (JAK1/2/3, Tyk2). Ligand-induced dimerization lets JAKs cross-phosphorylate receptor tail Tyr residues, creating STAT docking sites; phosphorylated STATs dimerize via reciprocal SH2-pTyr interactions, translocate and bind GAS elements to drive transcription. The SOCS family is STAT-induced, closing a classic negative-feedback loop.',
     cascade: 'IL-2 → IL2Rβ/γc → JAK1/JAK3 → pSTAT5 二聚体 → 增殖基因；SOCS 负反馈',
+    cascadeEn: 'IL-2 → IL2Rβ/γc → JAK1/JAK3 → pSTAT5 dimer → proliferation genes; SOCS negative feedback',
     seeds: [
       'IL2', 'IL3', 'IL6', 'IFNG', 'IFNA1', 'EPO', 'GH1', 'IL2RA', 'IL2RB',
       'IL2RG', 'IL6R', 'IFNGR1', 'IFNGR2', 'IFNAR1', 'IFNAR2', 'EPOR', 'GHR',
@@ -110,7 +128,10 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
     category: '环境信息处理 · 信号转导',
     description:
       'G 蛋白偶联受体（GPCR）被激动剂激活后，异源三聚体 G 蛋白 α 亚基置换 GDP→GTP 解离；Gs α 直接刺激腺苷酸环化酶（AC）催化 ATP 生成第二信使 cAMP。cAMP 结合 PKA 调节亚基释放催化亚基，磷酸化 CREB（Ser133）、L 型钙通道等底物；cAMP 亦可经 EPAC/Rap1 通路或 CNG 离子通道发挥作用。PDE 家族水解 cAMP 终止信号（咖啡因/茶碱为 PDE 抑制剂）。',
+    descriptionEn:
+      'Upon agonist binding, GPCRs trigger GDP→GTP exchange and dissociation of heterotrimeric Gα; Gsα directly stimulates adenylyl cyclase (AC) to convert ATP into the second messenger cAMP. cAMP binds PKA regulatory subunits, releasing catalytic subunits that phosphorylate CREB (Ser133), L-type Ca²⁺ channels and other substrates; cAMP can also act via the EPAC/Rap1 route or CNG ion channels. PDE family enzymes hydrolyze cAMP to terminate signaling (caffeine/theophylline are PDE inhibitors).',
     cascade: '肾上腺素 → β2-AR → Gs → AC → cAMP → PKA → pCREB → CRE 元件转录',
+    cascadeEn: 'Epinephrine → β2-AR → Gs → AC → cAMP → PKA → pCREB → CRE-driven transcription',
     seeds: [
       'ADRB1', 'ADRB2', 'ADRA1B', 'DRD1', 'HTR2A', 'GNAS', 'GNAI1', 'GNAI2',
       'ADCY1', 'ADCY3', 'ADCY5', 'ADCY6', 'ADCY8', 'PRKACA', 'PRKACB', 'PRKAR1A',
@@ -129,7 +150,10 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
     category: '环境信息处理 · 信号转导',
     description:
       'Ca²⁺ 是通用第二信使，胞质游离钙浓度从 ~100 nM 升至 μM 级即触发效应。信号源包括电压门控钙通道（Cav）、IP3 受体（GPCR → PLCβ → IP3）、Ryanodine 受体（CICR）以及 Store-Operated 钙内流（STIM1/ORAI1）。钙信号经钙调蛋白（CaM）解码：CaMKII 介导突触可塑性，Calcineurin 去磷酸化 NFAT 入核；SERCA（ATP2A2）与 PMCA 泵负责钙清除。钙峰的振幅-频率编码（spike frequency coding）实现信号多样性。',
+    descriptionEn:
+      'Ca²⁺ is a universal second messenger — cytosolic free calcium rising from ~100 nM into the µM range triggers effectors. Sources include voltage-gated Ca²⁺ channels (Cav), IP3 receptors (GPCR → PLCβ → IP3), ryanodine receptors (CICR) and store-operated entry (STIM1/ORAI1). Calcium signals are decoded by calmodulin (CaM): CaMKII mediates synaptic plasticity, while calcineurin dephosphorylates NFAT for nuclear entry; SERCA (ATP2A2) and PMCA pumps handle Ca²⁺ clearance. Amplitude-frequency encoding of Ca²⁺ spikes yields signal diversity.',
     cascade: 'GPCR → PLCβ → IP3 → IP3R (ER 钙释放) → CaM → CaMKII / Calcineurin → NFAT',
+    cascadeEn: 'GPCR → PLCβ → IP3 → IP3R (ER Ca²⁺ release) → CaM → CaMKII / Calcineurin → NFAT',
     seeds: [
       'ITPR1', 'ITPR2', 'ITPR3', 'RYR2', 'RYR1', 'CALM1', 'CALM2', 'CALM3',
       'CAMK2A', 'CAMK2B', 'CAMK2D', 'CAMKK2', 'PPP3CA', 'PPP3CB', 'NFATC1',
@@ -148,7 +172,10 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
     category: '环境信息处理 · 信号转导',
     description:
       'mTOR 是 atypical 丝/苏氨酸激酶，组装两型复合体：mTORC1（含 Raptor）被 Rheb-GTP 激活，经 S6K1 与 4E-BP1 磷酸化促进核糖体生物合成与蛋白翻译，并经 ULK1 抑制自噬；mTORC2（含 Rictor）磷酸化 Akt Ser473 构成反馈。TSC1/TSC2 复合物作为 GAP 催化 Rheb 失活，是生长因子信号的负调控枢纽；AMPK 在 ATP 匮乏时磷酸化 TSC2 与 Raptor 抑制 mTORC1（二甲双胍作用机制）。',
+    descriptionEn:
+      'mTOR is an atypical serine/threonine kinase assembling two complexes: mTORC1 (containing Raptor) is activated by Rheb-GTP and, via S6K1 and 4E-BP1 phosphorylation, promotes ribosome biogenesis and protein translation while repressing autophagy through ULK1; mTORC2 (containing Rictor) phosphorylates Akt Ser473 in feedback. The TSC1/TSC2 complex acts as a GAP that inactivates Rheb — the negative-control hub for growth-factor signaling; when ATP is scarce, AMPK phosphorylates TSC2 and Raptor to inhibit mTORC1 (the mechanism of metformin).',
     cascade: 'IGF-1/氨基酸 → TSC2 ⊣ RHEB → mTORC1 → S6K/4E-BP1 → 蛋白合成/自噬抑制',
+    cascadeEn: 'IGF-1/amino acids → TSC2 ⊣ RHEB → mTORC1 → S6K/4E-BP1 → protein synthesis / autophagy repression',
     seeds: [
       'MTOR', 'RPTOR', 'RICTOR', 'MLST8', 'MAPKAP1', 'TSC1', 'TSC2', 'RHEB',
       'RRAGA', 'RRAGB', 'RRAGC', 'RRAGD', 'RPS6KB1', 'RPS6', 'EIF4EBP1',
@@ -164,7 +191,10 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
     category: '免疫系统 · 炎症信号',
     description:
       'NF-κB 二聚体（p65/RelA·p50）静息态被 IκBα 锚定于胞质。经典通路：TNF-α/TNF-R1 → TRADD/TRAF2/RIPK1 → IKK 复合体（IKKβ/IKKγ/NEMO）磷酸化 IκBα → β-TrCP 泛素化 → 26S 蛋白酶体降解 IκBα，释放 NF-κB 入核驱动 TNF、IL-1β、IL-6、COX-2 等炎症基因。A20 与 IκBα 自身构成双重负反馈；非经典通路经 NIK/IKKα 处理 p100 生成 p52RelB。',
+    descriptionEn:
+      'NF-κB dimers (p65/RelA·p50) are held in the cytosol by IκBα at rest. Canonical route: TNF-α/TNF-R1 → TRADD/TRAF2/RIPK1 → the IKK complex (IKKβ/IKKγ/NEMO) phosphorylates IκBα → β-TrCP ubiquitination → 26S proteasomal degradation of IκBα, releasing NF-κB to enter the nucleus and drive TNF, IL-1β, IL-6, COX-2 and other inflammatory genes. A20 and IκBα itself form dual negative feedback; the non-canonical route processes p100 via NIK/IKKα to yield p52RelB.',
     cascade: 'TNF-α → TNFR1 → IKK → IκBα 降解 → NF-κB (p65/p50) 入核 → 炎症基因',
+    cascadeEn: 'TNF-α → TNFR1 → IKK → IκBα degradation → NF-κB (p65/p50) nuclear entry → inflammatory genes',
     seeds: [
       'TNF', 'IL1B', 'LTA', 'CD40LG', 'BAFF', 'TLR4', 'TLR2', 'MYD88', 'IRAK1',
       'IRAK4', 'TRAF6', 'TRAF2', 'TRADD', 'RIPK1', 'TAB1', 'TAB2', 'MAP3K7',
@@ -180,7 +210,10 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
     category: '细胞过程 · 程序性细胞死亡',
     description:
       '凋亡经两条汇聚途径执行：外源性（死亡配体 FASL/TNFα 结合 FAS/TNFR1 → FADD 接头 → Procaspase-8 寡集"死亡诱导信号复合体"DISC → Caspase-8 自剪切激活）与内源性线粒体途径（BH3-only 蛋白 BID/BAX/BAK → 线粒体外膜通透化 → 细胞色素 c 释放 → 与 APAF1/Procaspase-9 组装凋亡体）。两条途径汇聚于执行分子 Caspase-3/7，切割 ICAD/PARP 等底物实现程序性拆解。BCL-2（线粒体抗凋亡）与 XIAP（caspase 抑制）为关键调控位点。',
+    descriptionEn:
+      'Apoptosis executes via two converging routes: the extrinsic path (death ligands FASL/TNFα engaging FAS/TNFR1 → FADD adaptors → procaspase-8 oligomerization into the death-inducing signaling complex DISC → caspase-8 auto-cleavage) and the intrinsic mitochondrial path (BH3-only proteins BID/BAX/BAK → mitochondrial outer-membrane permeabilization → cytochrome c release → apoptosome assembly with APAF1/procaspase-9). Both converge on executioner caspase-3/7, cleaving ICAD/PARP and other substrates for programmed dismantling. BCL-2 (anti-apoptotic) and XIAP (caspase inhibition) are key control points.',
     cascade: 'FASL → FAS → CASP8 ∥ BAX → CYCS → APAF1 → CASP9 → CASP3 → 凋亡',
+    cascadeEn: 'FASL → FAS → CASP8 ∥ BAX → CYCS → APAF1 → CASP9 → CASP3 → apoptosis',
     seeds: [
       'FASLG', 'FAS', 'TNFRSF1A', 'TNFRSF10B', 'FADD', 'CASP8', 'CASP10',
       'CFLAR', 'BID', 'BAX', 'BAK1', 'BCL2', 'BCL2L1', 'MCL1', 'BCL2L11',
@@ -195,7 +228,10 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
     category: '细胞过程 · 基因组卫士',
     description:
       'p53（TP53）作为"基因组守卫"，静息态经 MDM2 泛素连接酶持续降解（自反馈环）。DNA 双链断裂激活 ATM → CHK2，复制胁迫激活 ATR → CHK1，两者磷酸化 p53（Ser15/20）与 MDM2 使其解离；癌基因过表达经 ARF（p14^arf）抑制 MDM2。稳定化的 p53 四聚体作为序列特异转录因子，依损伤程度诱导 p21（G1 阻滞）、GADD45（修复）、14-3-3σ、或 PUMA/NOXA/BAX（线粒体凋亡）。约 50% 人类肿瘤存在 TP53 突变。',
+    descriptionEn:
+      'p53 (TP53), the "guardian of the genome", is constitutively degraded at rest by the MDM2 ubiquitin ligase (an autoregulatory loop). DNA double-strand breaks activate ATM → CHK2 and replication stress activates ATR → CHK1; both phosphorylate p53 (Ser15/20) and MDM2 to disengage the complex, while oncogene overexpression inhibits MDM2 via ARF (p14^arf). Stabilized p53 tetramers act as sequence-specific transcription factors, inducing p21 (G1 arrest), GADD45 (repair), 14-3-3σ, or PUMA/NOXA/BAX (mitochondrial apoptosis) according to damage severity. ~50% of human tumors carry TP53 mutations.',
     cascade: 'DNA 损伤 → ATM/CHK2 → p53 稳定 → p21 阻滞 / PUMA·NOXA 凋亡',
+    cascadeEn: 'DNA damage → ATM/CHK2 → p53 stabilization → p21 arrest / PUMA·NOXA apoptosis',
     seeds: [
       'TP53', 'MDM2', 'MDM4', 'ATM', 'ATR', 'CHEK1', 'CHEK2', 'CDKN1A',
       'GADD45A', 'GADD45G', 'CDKN2A', 'BAX', 'BAK1', 'BBC3', 'PMAIP1', 'APAF1',
@@ -210,7 +246,10 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
     category: '环境信息处理 · 能量传感',
     description:
       'AMP 活化蛋白激酶（AMPK）是细胞能量稳态主控传感器。ATP 消耗时 AMP/ADP 与 AMPK γ 亚基结合引发变构激活，并保护 α 亚基 Thr172（LKB1 或 CaMKKβ 磷酸化位点）不被去磷酸化。激活的 AMPK 通过磷酸化 TSC2/Raptor 抑制 mTORC1、磷酸化 ACACC 抑制脂肪酸合成、经 ULK1 启动自噬，整体转向分解代谢；并通过 PGC-1α 促进线粒体生物合成。二甲双胍（metformin）经线粒体复合物 I 抑制间接激活 AMPK。',
+    descriptionEn:
+      'AMP-activated protein kinase (AMPK) is the master sensor of cellular energy homeostasis. As ATP is consumed, AMP/ADP bind the AMPK γ subunit, causing allosteric activation and protecting α-subunit Thr172 (the LKB1 or CaMKKβ phosphorylation site) from dephosphorylation. Active AMPK phosphorylates TSC2/Raptor to inhibit mTORC1, phosphorylates ACACA to curb fatty-acid synthesis and initiates autophagy via ULK1 — an overall switch to catabolism — while promoting mitochondrial biogenesis through PGC-1α. Metformin activates AMPK indirectly via mitochondrial complex-I inhibition.',
     cascade: 'AMP↑ → LKB1/CaMKKβ → pAMPK(Thr172) ⊣ mTORC1 / ACACA → 分解代谢',
+    cascadeEn: 'AMP↑ → LKB1/CaMKKβ → pAMPK(Thr172) ⊣ mTORC1 / ACACA → catabolism',
     seeds: [
       'PRKAA1', 'PRKAA2', 'PRKAB1', 'PRKAB2', 'PRKAG1', 'PRKAG2', 'STK11',
       'CAB39', 'STRADA', 'CAMKK2', 'CAMK2A', 'MTOR', 'RPTOR', 'TSC2', 'RPTOR',

@@ -6,6 +6,7 @@
 import { Check, Dna, Microscope, Zap } from 'lucide-react';
 import { CELL_TYPES, type MorphologyKey } from '@/data/cell-types';
 import { useLabStore } from '@/store/lab-store';
+import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /** 微型细胞形态示意（卡片图标） */
@@ -87,6 +88,7 @@ function CellGlyph({ morph }: { morph: MorphologyKey }) {
 }
 
 export function CellPicker() {
+  const { t, lang } = useLang();
   const cellId = useLabStore((s) => s.cellId);
   const setCell = useLabStore((s) => s.setCell);
 
@@ -118,10 +120,11 @@ export function CellPicker() {
               )}
             </div>
             <div className="mt-2.5">
-              <div className={cn('text-[13.5px] font-semibold', active ? 'text-emerald-200' : 'text-slate-100')}>{c.name}</div>
-              <div className="text-[10.5px] text-slate-500">{c.nameEn}</div>
+              <div className={cn('text-[13.5px] font-semibold', active ? 'text-emerald-200' : 'text-slate-100')}>{lang === 'zh' ? c.name : c.nameEn}</div>
+              {/* 副标题: zh 模式下展示英文名（双语设计）; EN 模式标题已是英文, 副标题隐藏避免中文名泄漏 */}
+              {lang === 'zh' && <div className="text-[10.5px] text-slate-500">{c.nameEn}</div>}
             </div>
-            <p className="mt-1.5 line-clamp-2 text-[11px] leading-4 text-slate-400">{c.tagline}</p>
+            <p className="mt-1.5 line-clamp-2 text-[11px] leading-4 text-slate-400">{lang === 'zh' ? c.tagline : c.taglineEn}</p>
             <div className="mt-2.5 flex flex-wrap gap-1">
               <span className="rounded border border-white/10 bg-white/[0.03] px-1.5 py-px font-mono text-[9px] text-slate-500">
                 <Dna className="mr-0.5 inline h-2.5 w-2.5" />
@@ -131,13 +134,15 @@ export function CellPicker() {
                 'rounded border px-1.5 py-px font-mono text-[9px]',
                 c.mutations ? 'border-rose-500/30 text-rose-300/80' : 'border-white/10 text-slate-500',
               )}>
-                {c.pathways.length} 条通路
+                {c.pathways.length} {t('cells.pathways')}
               </span>
             </div>
             {/* 底部特征条 */}
             <div className="mt-2.5 border-t border-white/5 pt-2">
               <p className="truncate font-mono text-[9.5px] text-slate-600">
-                {c.features[0].label}: {c.features[0].value}
+                {lang === 'zh'
+                  ? `${c.features[0].label}: ${c.features[0].value}`
+                  : `${c.features[0].labelEn}: ${c.features[0].valueEn}`}
               </p>
             </div>
           </button>

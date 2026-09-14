@@ -11,6 +11,7 @@ import { CELL_TYPE_MAP } from '@/data/cell-types';
 import { layoutCellView, CANVAS, type PositionedNode, type LaidOutEdge } from '@/lib/simulation/layout';
 import { CellMorphology } from './morphologies';
 import { useLabStore } from '@/store/lab-store';
+import { useLang } from '@/lib/i18n';
 
 const KIND_COLORS: Record<MoleculeKind, { stroke: string; fill: string; text: string; label: string }> = {
   ligand: { stroke: '#fbbf24', fill: 'rgba(251,191,36,0.13)', text: '#fde68a', label: '配体' },
@@ -42,6 +43,7 @@ function edgeMarker(kind: EdgeKind): string {
 }
 
 export function VirtualCellView() {
+  const { t, lang } = useLang();
   const graph = useLabStore((s) => s.graph);
   const cellId = useLabStore((s) => s.cellId);
   const nodeStates = useLabStore((s) => s.nodeStates);
@@ -117,7 +119,7 @@ export function VirtualCellView() {
   if (!graph || !layout) {
     return (
       <div className="flex h-full min-h-[420px] items-center justify-center text-muted-foreground">
-        通路数据加载中…
+        {t('vc.loading')}
       </div>
     );
   }
@@ -135,7 +137,7 @@ export function VirtualCellView() {
         onPointerUp={onPointerUp}
         onPointerLeave={() => { onPointerUp(); setHover(null); }}
         role="img"
-        aria-label="虚拟细胞信号转导演示画布"
+        aria-label={t('vc.aria')}
       >
         <defs>
           <linearGradient id="sceneBg" x1="0" y1="0" x2="0" y2="1">
@@ -177,9 +179,9 @@ export function VirtualCellView() {
 
         {/* 区室标注 */}
         <g fontSize={12.5} fill="#5b6b7c" fontFamily="var(--font-geist-mono, monospace)" letterSpacing={2}>
-          <text x={20} y={34}>EXTRACELLULAR · 细胞外</text>
-          <text x={20} y={162}>PLASMA MEMBRANE · 质膜</text>
-          <text x={20} y={242}>CYTOPLASM · 细胞质</text>
+          <text x={20} y={34}>{t('vc.zone.extra')}</text>
+          <text x={20} y={162}>{t('vc.zone.membrane')}</text>
+          <text x={20} y={242}>{t('vc.zone.cytoplasm')}</text>
         </g>
 
         {/* 细胞形态学（静态底层） */}
@@ -344,8 +346,8 @@ export function VirtualCellView() {
         <g transform="translate(24 690)" fontSize={11} fontFamily="var(--font-geist-mono, monospace)">
           <rect x={-10} y={-14} width={386} height={88} rx={8} fill="rgba(2,6,23,0.72)" stroke="#1e293b" />
           {[
-            { c: '#fbbf24', t: '配体' }, { c: '#2dd4bf', t: '受体/通道' }, { c: '#34d399', t: '激酶' },
-            { c: '#f472b6', t: '小G蛋白' }, { c: '#fb7185', t: '转录因子' }, { c: '#f59e0b', t: '靶基因' },
+            { c: '#fbbf24', t: t('vc.legend.ligand') }, { c: '#2dd4bf', t: t('vc.legend.receptor') }, { c: '#34d399', t: t('vc.legend.kinase') },
+            { c: '#f472b6', t: t('vc.legend.gtpase') }, { c: '#fb7185', t: t('vc.legend.tf') }, { c: '#f59e0b', t: t('vc.legend.gene') },
           ].map((s, i) => (
             <g key={s.t} transform={`translate(${4 + (i % 3) * 128} ${6 + Math.floor(i / 3) * 24})`}>
               <rect width={9} height={9} rx={2} fill={s.c} opacity={0.85} />
@@ -354,14 +356,14 @@ export function VirtualCellView() {
           ))}
           <g transform="translate(4 56)">
             <line x1={0} y1={4} x2={26} y2={4} stroke="#34d399" strokeWidth={1.6} markerEnd="url(#arrowAct)" />
-            <text x={32} y={8} fill="#94a3b8">激活</text>
+            <text x={32} y={8} fill="#94a3b8">{t('vc.legend.act')}</text>
             <line x1={74} y1={4} x2={100} y2={4} stroke="#fb7185" strokeWidth={1.6} markerEnd="url(#arrowInh)" />
-            <text x={106} y={8} fill="#94a3b8">抑制</text>
+            <text x={106} y={8} fill="#94a3b8">{t('vc.legend.inh')}</text>
             <line x1={148} y1={4} x2={174} y2={4} stroke="#fbbf24" strokeWidth={1.6} strokeDasharray="6 4" markerEnd="url(#arrowExpr)" />
-            <text x={180} y={8} fill="#94a3b8">转录</text>
+            <text x={180} y={8} fill="#94a3b8">{t('vc.legend.expr')}</text>
             <circle cx={252} cy={4} r={4.5} fill="#020617" stroke="#34d399" />
             <text x={252} y={7.5} textAnchor="middle" fontSize={6} fill="#34d399">P</text>
-            <text x={264} y={8} fill="#94a3b8">磷酸化</text>
+            <text x={264} y={8} fill="#94a3b8">{t('vc.legend.phospho')}</text>
           </g>
         </g>
       </svg>
@@ -369,9 +371,9 @@ export function VirtualCellView() {
       {/* 缩放控件 */}
       <div className="absolute right-3 top-3 flex flex-col gap-1">
         {[
-          { label: '＋', fn: () => zoom(0.78), title: '放大' },
-          { label: '－', fn: () => zoom(1.28), title: '缩小' },
-          { label: '⟲', fn: () => setVb({ x: 60, y: 76, w: 1080, h: 700 }), title: '重置视图' },
+          { label: '＋', fn: () => zoom(0.78), title: t('vc.zoomIn') },
+          { label: '－', fn: () => zoom(1.28), title: t('vc.zoomOut') },
+          { label: '⟲', fn: () => setVb({ x: 60, y: 76, w: 1080, h: 700 }), title: t('vc.zoomReset') },
         ].map((b) => (
           <button
             key={b.label}
@@ -390,21 +392,24 @@ export function VirtualCellView() {
         >
           <div className="font-mono text-[13px] font-semibold text-emerald-300">{hover.node.label}</div>
           <div className="mt-0.5 text-[11px] leading-4 text-slate-400">
-            {KIND_COLORS[hover.node.kind]?.label ?? '分子'} · 定位于{compartmentZh(hover.node)} · KEGG {hover.node.keggIds[0] ?? '合成节点'}
+            {(() => {
+              const k = t(`vc.kind.${hover.node.kind}`);
+              const comp = t(`comp.${hover.node.compartment}`);
+              const keggId = hover.node.keggIds[0] ?? t('vc.synthetic');
+              return lang === 'zh'
+                ? `${k} · 定位于${comp} · KEGG ${keggId}`
+                : `${k} · ${t('vc.located')} ${comp} · KEGG ${keggId}`;
+            })()}
           </div>
           <div className="mt-1 flex gap-3 text-[11px] text-slate-500">
-            <span>活性 {Math.round((nodeStates[hover.node.id]?.activity ?? 0) * 100)}%</span>
-            {(nodeStates[hover.node.id]?.phospho ?? 0) > 0.25 && <span className="text-amber-400">磷酸化 {Math.round((nodeStates[hover.node.id]?.phospho ?? 0) * 100)}%</span>}
+            <span>{t('vc.activity')} {Math.round((nodeStates[hover.node.id]?.activity ?? 0) * 100)}%</span>
+            {(nodeStates[hover.node.id]?.phospho ?? 0) > 0.25 && <span className="text-amber-400">{t('vc.phosphoPct')} {Math.round((nodeStates[hover.node.id]?.phospho ?? 0) * 100)}%</span>}
           </div>
-          <div className="mt-1 text-[10px] text-slate-600">点击查看分子档案 →</div>
+          <div className="mt-1 text-[10px] text-slate-600">{t('vc.clickProfile')}</div>
         </div>
       )}
     </div>
   );
-}
-
-function compartmentZh(n: PositionedNode): string {
-  return { extracellular: '细胞外', membrane: '质膜', cytoplasm: '细胞质', nucleus: '细胞核' }[n.compartment] ?? n.compartment;
 }
 
 function truncateLabel(s: string): string {

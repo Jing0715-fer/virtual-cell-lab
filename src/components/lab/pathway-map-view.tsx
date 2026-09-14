@@ -15,6 +15,7 @@ import type { EdgeKind } from '@/types/kegg';
 import { useLabStore } from '@/store/lab-store';
 import { KEGG_FULL_MAP } from '@/data/kegg-full-catalog';
 import { CANVAS } from '@/lib/simulation/layout';
+import { useLang } from '@/lib/i18n';
 
 /** 可点击跳转的联通通路范围：KEGG 全量目录（372 条人类通路） */
 const FULL_CATALOG_IDS = new Set(KEGG_FULL_MAP.keys());
@@ -53,6 +54,7 @@ interface PlacedRel {
 }
 
 export function PathwayMapView() {
+  const { t, lang } = useLang();
   const graph = useLabStore((s) => s.graph);
   const nodeStates = useLabStore((s) => s.nodeStates);
   const signalFlux = useLabStore((s) => s.signalFlux);
@@ -153,7 +155,7 @@ export function PathwayMapView() {
   }, []);
 
   if (!graph || !entries || !rels || !coreByEntry) {
-    return <div className="flex h-full items-center justify-center text-muted-foreground">通路图谱渲染中…</div>;
+    return <div className="flex h-full items-center justify-center text-muted-foreground">{t('pm.loading')}</div>;
   }
 
   // 跨通路失效：仅当 mapPick 属于当前通路时才渲染（避免切换通路后残留旧条目）
@@ -187,7 +189,7 @@ export function PathwayMapView() {
           dragging.current = null;
         }}
         role="img"
-        aria-label="KEGG 通路图谱"
+        aria-label={t('pm.aria')}
       >
         <defs>
           <marker id="mAct" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -304,9 +306,9 @@ export function PathwayMapView() {
 
       <div className="absolute right-3 top-3 flex flex-col gap-1">
         {[
-          { label: '＋', fn: () => zoom(0.78), title: '放大' },
-          { label: '－', fn: () => zoom(1.28), title: '缩小' },
-          { label: '⟲', fn: () => setVb({ x: 0, y: 0, w: CANVAS.w, h: CANVAS.h }), title: '重置' },
+          { label: '＋', fn: () => zoom(0.78), title: t('pm.zoomIn') },
+          { label: '－', fn: () => zoom(1.28), title: t('pm.zoomOut') },
+          { label: '⟲', fn: () => setVb({ x: 0, y: 0, w: CANVAS.w, h: CANVAS.h }), title: t('pm.zoomReset') },
         ].map((b) => (
           <button key={b.label} onClick={b.fn} title={b.title}
             className="h-8 w-8 rounded-md border border-white/10 bg-slate-900/80 text-sm text-slate-300 backdrop-blur transition hover:border-emerald-500/50 hover:text-emerald-300">{b.label}</button>
@@ -314,26 +316,30 @@ export function PathwayMapView() {
       </div>
 
       <div className="absolute left-3 top-3 rounded-md border border-white/10 bg-slate-950/80 px-3 py-2 text-[11px] leading-5 text-slate-400 backdrop-blur">
-        <span className="text-emerald-300 font-semibold">{graph.meta.nameZh}</span>
-        <span className="mx-1 text-slate-600">|</span>KEGG 原始拓扑布局
-        <div className="text-slate-500">{graph.stats.geneCount} 分子 · {graph.stats.relationCount} 关系 · 拖拽平移 / 滚轮缩放</div>
+        <span className="text-emerald-300 font-semibold">{lang === 'zh' ? graph.meta.nameZh : graph.meta.name}</span>
+        <span className="mx-1 text-slate-600">|</span>{t('pm.origLayout')}
+        <div className="text-slate-500">
+          {lang === 'zh'
+            ? `${graph.stats.geneCount} 分子 · ${graph.stats.relationCount} 关系 · 拖拽平移 / 滚轮缩放`
+            : `${graph.stats.geneCount} molecules · ${graph.stats.relationCount} relations · drag to pan / scroll to zoom`}
+        </div>
       </div>
 
       {/* 非核心分子信息卡（点击全图中未进入演示子图的 gene/compound 节点） */}
       {pick && (
         <div
           role="status"
-          aria-label={`分子信息：${pick.label}`}
+          aria-label={`${t('pm.infoAria')}${pick.label}`}
           className="absolute bottom-3 left-3 w-[290px] max-w-[calc(100%-9rem)] rounded-lg border border-teal-500/35 bg-slate-950/90 p-3 text-[11px] backdrop-blur"
         >
           <div className="flex items-center gap-2">
             <span className="font-mono text-[13px] font-semibold text-teal-200">{pick.label}</span>
             <span className="rounded border border-white/10 bg-white/5 px-1.5 py-px text-[9px] text-slate-400">
-              {pick.type === 'compound' ? '化合物' : '基因'}
+              {pick.type === 'compound' ? t('pm.compound') : t('pm.gene')}
             </span>
             <button
               onClick={() => setMapPick(null)}
-              aria-label="关闭分子信息卡"
+              aria-label={t('pm.closePick')}
               className="ml-auto rounded p-1 text-slate-500 transition hover:bg-white/10 hover:text-slate-200"
             >
               <X className="h-3.5 w-3.5" />
@@ -347,7 +353,7 @@ export function PathwayMapView() {
                   href={`https://www.kegg.jp/entry/${kid}`}
                   target="_blank"
                   rel="noreferrer"
-                  title={`在 KEGG 打开 ${kid}`}
+                  title={`${t('pm.openInKegg')} ${kid}`}
                   className="flex items-center gap-0.5 rounded border border-teal-500/25 bg-teal-500/10 px-1.5 py-px font-mono text-[9.5px] text-teal-300 transition hover:border-teal-400/50 hover:text-teal-200"
                 >
                   {kid}
@@ -361,12 +367,12 @@ export function PathwayMapView() {
           )}
           {pick.aliases.length > 0 && (
             <div className="mt-1.5 text-[10px] leading-4 text-slate-500">
-              别名: {pick.aliases.slice(0, 6).join(' · ')}
+              {t('tip.aliases')}: {pick.aliases.slice(0, 6).join(' · ')}
               {pick.aliases.length > 6 ? ` +${pick.aliases.length - 6}` : ''}
             </div>
           )}
           <div className="mt-2 border-t border-white/8 pt-1.5 text-[10px] leading-4 text-slate-500">
-            该分子在全图中，未进入核心演示子图（可在 3D/2D 视图演示的分子集）
+            {t('pm.notInCore')}
           </div>
         </div>
       )}
@@ -376,7 +382,7 @@ export function PathwayMapView() {
         target="_blank"
         rel="noreferrer"
         className="absolute bottom-3 right-3 rounded-md border border-amber-500/30 bg-slate-950/80 px-3 py-1.5 text-[11px] text-amber-300/90 backdrop-blur transition hover:border-amber-400/60"
-      >KEGG 官方通路图 ↗</a>
+      >{t('pm.officialMap')}</a>
     </div>
   );
 }

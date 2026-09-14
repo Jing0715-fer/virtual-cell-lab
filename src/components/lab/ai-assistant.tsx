@@ -8,6 +8,7 @@ import { useRef, useState, useEffect } from 'react';
 import { Sparkles, Send, Loader2, RotateCcw } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
+import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
@@ -17,12 +18,10 @@ interface Msg {
 }
 
 export function AiAssistant() {
-  const [messages, setMessages] = useState<Msg[]>([
-    {
-      role: 'assistant',
-      content: '我是本实验室的分子生物学助手。可以问我当前演示通路中的任何分子机制问题 —— 例如"ERK 磷酸化后进入细胞核发生了什么？"或"为什么癌细胞模型不注射配体 ERK 也会激活？"',
-    },
-  ]);
+  const { t, lang } = useLang();
+  // 欢迎语按当前语言动态渲染（对话历史 state 不含欢迎语，重置后仅回到欢迎语）
+  const welcome: Msg = { role: 'assistant', content: t('ai.welcome') };
+  const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -75,17 +74,17 @@ export function AiAssistant() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: msg,
-          messages: next.slice(1, -1),
+          messages: next.slice(0, -1),
           context: buildContext(),
         }),
       });
       const data = await res.json();
-      if (!res.ok || !data.reply) throw new Error(data.error ?? '请求失败');
+      if (!res.ok || !data.reply) throw new Error(data.error ?? t('ai.reqFail'));
       setMessages([...next, { role: 'assistant', content: data.reply }]);
     } catch (e) {
       setMessages([
         ...next,
-        { role: 'assistant', content: `⚠ ${e instanceof Error ? e.message : 'AI 助手暂时不可用，请稍后重试。'}` },
+        { role: 'assistant', content: `⚠ ${e instanceof Error ? e.message : t('ai.unavailable')}` },
       ]);
     } finally {
       setBusy(false);
@@ -94,31 +93,33 @@ export function AiAssistant() {
 
   const quickPrompts = graph
     ? [
-        `解释 ${graph.meta.nameZh} 的核心级联机制`,
-        phase >= 3 ? '当前已激活的下游信号意味着什么？' : '信号从受体到细胞核需要多久？',
-        cell?.mutations?.length ? '本细胞系的驱动突变如何改变信号流？' : '这条通路的负反馈机制是什么？',
+        lang === 'zh'
+          ? `解释 ${graph.meta.nameZh} 的核心级联机制`
+          : `Explain the core cascade mechanism of ${graph.meta.name}`,
+        phase >= 3 ? t('ai.q.downstream') : t('ai.q.timing'),
+        cell?.mutations?.length ? t('ai.q.mutations') : t('ai.q.feedback'),
       ]
-    : ['MAPK 级联为什么有三层激酶？'];
+    : [t('ai.q.mapk')];
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b border-white/5 px-3 py-2">
         <Sparkles className="h-3.5 w-3.5 text-amber-300" />
-        <span className="text-xs font-medium text-slate-200">AI 分子生物学助手</span>
+        <span className="text-xs font-medium text-slate-200">{t('ai.title')}</span>
         <span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-1.5 py-px text-[9px] text-amber-300/90">
-          带实时上下文
+          {t('ai.ctxBadge')}
         </span>
         <button
-          onClick={() => setMessages(messages.slice(0, 1))}
+          onClick={() => setMessages([])}
           className="ml-auto text-slate-500 transition hover:text-slate-300"
-          title="清空对话"
+          title={t('ai.clear')}
         >
           <RotateCcw className="h-3.5 w-3.5" />
         </button>
       </div>
 
       <div ref={listRef} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-3 lab-scrollbar">
-        {messages.map((m, i) => (
+        {[welcome, ...messages].map((m, i) => (
           <div
             key={i}
             className={cn(
@@ -134,7 +135,7 @@ export function AiAssistant() {
         {busy && (
           <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-slate-900/70 px-3 py-2 text-[11.5px] text-slate-400">
             <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400" />
-            正在结合当前模拟状态分析…
+            {t('ai.thinking')}
           </div>
         )}
       </div>
@@ -162,7 +163,7 @@ export function AiAssistant() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="询问分子机制…"
+            placeholder={t('ai.placeholder')}
             className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-900/60 px-3 py-2 text-[11.5px] text-slate-200 placeholder:text-slate-600 focus:border-emerald-500/50 focus:outline-none"
           />
           <Button

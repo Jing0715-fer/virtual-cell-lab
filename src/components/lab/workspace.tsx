@@ -50,7 +50,7 @@ function EngineLoading() {
 }
 
 export function LabWorkspace() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const pathwayId = useLabStore((s) => s.pathwayId);
   const view = useLabStore((s) => s.view);
   const setView = useLabStore((s) => s.setView);
@@ -70,7 +70,9 @@ export function LabWorkspace() {
       const res = await fetch(`/api/pathways/${pathwayId}`);
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? `通路加载失败 (${res.status})`);
+        throw new Error(
+          body?.error ?? (lang === 'zh' ? `通路加载失败 (${res.status})` : `Failed to load pathway (${res.status})`),
+        );
       }
       return res.json();
     },
@@ -163,13 +165,17 @@ export function LabWorkspace() {
               }}
               disabled={!graph}
               className="flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-[11px] text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-40"
-              title="同一通路在正常 vs 病变细胞中并排对照（单变量实验）"
+              title={t('ws.compareTip')}
             >
               <GitCompare className="h-3.5 w-3.5" />
-              对照实验
+              {t('view.compare')}
             </button>
             <span className="hidden font-mono text-[10px] text-slate-600 sm:inline">
-              {graph ? `${graph.stats.coreCount} 核心节点 · ${graph.stats.geneCount} 全图分子` : '加载中…'}
+              {graph
+                ? lang === 'zh'
+                  ? `${graph.stats.coreCount} 核心节点 · ${graph.stats.geneCount} 全图分子`
+                  : `${graph.stats.coreCount} core nodes · ${graph.stats.geneCount} map molecules`
+                : t('ws.loading')}
             </span>
             <span className={cn(
               'rounded-full border px-2 py-0.5 text-[9px]',
@@ -177,7 +183,7 @@ export function LabWorkspace() {
                 ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
                 : 'border-white/10 text-slate-500',
             )}>
-              阶段 {phase}/4
+              {t('hud.phase')} {phase}/4
             </span>
           </div>
         </div>
@@ -193,16 +199,20 @@ export function LabWorkspace() {
             <div className="flex h-full items-center justify-center">
               <div className="w-64 space-y-3 text-center">
                 <Skeleton className="mx-auto h-8 w-8 rounded-full" />
-                <p className="text-xs text-slate-500">正在从 KEGG REST API 获取 {pathwayId} 图谱…</p>
+                <p className="text-xs text-slate-500">
+                  {lang === 'zh'
+                    ? `正在从 KEGG REST API 获取 ${pathwayId} 图谱…`
+                    : `Fetching ${pathwayId} map from the KEGG REST API…`}
+                </p>
                 <Skeleton className="h-2 w-full" />
               </div>
             </div>
           ) : showError ? (
             <div className="flex h-full items-center justify-center p-6">
               <div className="max-w-sm rounded-xl border border-rose-500/30 bg-rose-950/20 p-4 text-center">
-                <p className="text-sm font-medium text-rose-300">通路数据获取失败</p>
+                <p className="text-sm font-medium text-rose-300">{t('ws.errTitle')}</p>
                 <p className="mt-1 text-xs text-rose-200/70">{(error as Error).message}</p>
-                <p className="mt-2 text-[11px] text-slate-500">KEGG 上游服务可能暂时不可用，请稍后重试</p>
+                <p className="mt-2 text-[11px] text-slate-500">{t('ws.errHint')}</p>
               </div>
             </div>
           ) : view === 'cell3d' ? (
@@ -226,16 +236,16 @@ export function LabWorkspace() {
         <Tabs defaultValue="inspector" className="flex h-full flex-col">
           <TabsList className="mx-3 mt-2 grid h-8 grid-cols-5 bg-white/5">
             <TabsTrigger value="inspector" className="h-6 px-1 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
-              <Boxes className="mr-1 h-3 w-3" />检测
+              <Boxes className="mr-1 h-3 w-3" />{t('ws.tab.inspector')}
             </TabsTrigger>
             <TabsTrigger value="timeline" className="h-6 px-1 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
-              事件流
+              {t('ws.tab.timeline')}
             </TabsTrigger>
             <TabsTrigger value="pharmacology" className="h-6 px-1 text-[11px] data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-300">
-              <Pill className="mr-1 h-3 w-3" />药理
+              <Pill className="mr-1 h-3 w-3" />{t('view.drug')}
             </TabsTrigger>
             <TabsTrigger value="transcriptome" className="h-6 px-1 text-[11px] data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-300">
-              <Activity className="mr-1 h-3 w-3" />转录组
+              <Activity className="mr-1 h-3 w-3" />{t('ws.tab.heatmap')}
             </TabsTrigger>
             <TabsTrigger value="ai" className="h-6 px-1 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
               AI

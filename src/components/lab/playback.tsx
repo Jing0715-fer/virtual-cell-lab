@@ -7,6 +7,7 @@ import { Play, Pause, StepForward, RotateCcw, Droplet, Zap } from 'lucide-react'
 import { useLabStore } from '@/store/lab-store';
 import { PHASES } from '@/lib/simulation/engine';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
+import { useLang } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ReportExportButton } from './report-export';
@@ -14,6 +15,7 @@ import { ReportExportButton } from './report-export';
 const SPEEDS = [0.5, 1, 2, 4];
 
 export function PlaybackControls() {
+  const { t, lang } = useLang();
   const running = useLabStore((s) => s.running);
   const speed = useLabStore((s) => s.speed);
   const tick = useLabStore((s) => s.tick);
@@ -95,15 +97,15 @@ export function PlaybackControls() {
                 'mt-1.5 truncate text-[10px] transition-colors',
                 phase === p.id ? 'font-medium text-emerald-300' : phase > p.id ? 'text-slate-400' : 'text-slate-600',
               )}
-              title={`${p.name} — ${p.desc}`}
+              title={`${lang === 'zh' ? p.name : p.en} — ${lang === 'zh' ? p.desc : t(`pb.phase${p.id}.desc`)}`}
             >
-              {p.name}
+              {lang === 'zh' ? p.name : p.en}
             </div>
           </div>
         ))}
         <div className="ml-2 w-24 shrink-0 text-right font-mono text-[11px] text-slate-400">
           <div className="text-slate-300">T+{(tick * 0.5).toFixed(1)}s</div>
-          <div className="text-[10px] text-slate-500">{activatedCount} 分子事件</div>
+          <div className="text-[10px] text-slate-500">{activatedCount} {t('pb.molEvents')}</div>
         </div>
       </div>
 
@@ -120,7 +122,7 @@ export function PlaybackControls() {
                 ? 'border-amber-500/40 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25'
                 : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 hover:shadow-[0_0_18px_rgba(52,211,153,0.35)]',
             )}
-            title={running ? '暂停' : '播放（自动注射配体）'}
+            title={running ? t('pb.pause') : t('pb.play')}
           >
             {running ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
           </Button>
@@ -130,7 +132,7 @@ export function PlaybackControls() {
             onClick={stepOnce}
             disabled={!graph}
             className="h-9 w-9 rounded-lg border-white/10 bg-white/5 text-slate-300 hover:border-emerald-500/40 hover:text-emerald-300"
-            title="单步推进（1 tick = 0.5s）"
+            title={t('pb.step')}
           >
             <StepForward className="h-3.5 w-3.5" />
           </Button>
@@ -140,7 +142,7 @@ export function PlaybackControls() {
             onClick={resetSim}
             disabled={!graph}
             className="h-9 w-9 rounded-lg border-white/10 bg-white/5 text-slate-300 hover:border-rose-500/40 hover:text-rose-300"
-            title="重置模拟"
+            title={t('pb.reset')}
           >
             <RotateCcw className="h-3.5 w-3.5" />
           </Button>
@@ -169,7 +171,7 @@ export function PlaybackControls() {
           {hasProductiveLigand ? (
             <>
               <Droplet className="h-3.5 w-3.5 text-amber-400/70" />
-              <span className="text-[10px] uppercase tracking-wider text-slate-500">配体注射</span>
+              <span className="text-[10px] uppercase tracking-wider text-slate-500">{t('pb.ligandInject')}</span>
               {ligands.map((l) => {
                 const on = !!injected[l.id];
                 return (
@@ -196,12 +198,12 @@ export function PlaybackControls() {
               <Zap className="h-3.5 w-3.5 text-teal-400/70" />
               <span
                 className="text-[10px] uppercase tracking-wider text-slate-500"
-                title="本通路无有效配体入口（如胞内应激/营养感知通路）—— 直接刺激受体或应激激酶以启动级联（等效生理刺激：LPS/辐照/能量应激/生长因子）"
+                title={t('pb.directStimTip')}
               >
-                直接刺激
+                {t('pb.directStim')}
               </span>
               {stimulables.length === 0 && (
-                <span className="text-[11px] text-slate-600">无可用刺激入口</span>
+                <span className="text-[11px] text-slate-600">{t('pb.noStim')}</span>
               )}
               {stimulables.map(({ n: r, surface }) => {
                 const on = !!injected[r.id];
@@ -217,8 +219,8 @@ export function PlaybackControls() {
                     )}
                     title={
                       surface
-                        ? `${r.label} —— 受体直接刺激（等效配体结合后构象激活）`
-                        : `${r.label} —— 应激刺激入口（等效上游生理激活：DNA 损伤/能量应激/生长因子）`
+                        ? `${r.label} —— ${t('pb.stimReceptorTip')}`
+                        : `${r.label} —— ${t('pb.stimStressTip')}`
                     }
                   >
                     {on ? '◉ ' : '○ '}
@@ -236,7 +238,7 @@ export function PlaybackControls() {
         <div className="flex items-center gap-2 rounded-lg border border-rose-500/25 bg-rose-950/25 px-3 py-1.5 text-[11px] text-rose-300/90">
           <Zap className="h-3.5 w-3.5 shrink-0 text-rose-400" />
           <span className="truncate">
-            本细胞系携带 {cell.mutations.length} 个驱动突变 —— 播放时无需配体即可观察组成性信号转导
+            {t('pb.mutNoticeA')} {cell.mutations.length} {t('pb.mutNoticeB')}
           </span>
         </div>
       )}

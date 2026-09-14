@@ -25,6 +25,10 @@ import type { Node3D } from '@/lib/simulation/layout3d';
 import type { SimSnapshot } from './molecules';
 import { INHIBITORS, type InhibitorSpec } from '@/data/inhibitors';
 import { useLabStore } from '@/store/lab-store';
+import { useLang } from '@/lib/i18n';
+
+/** 判定字符串是否含汉字（药物通用名 zh → EN 展示需切换为 code 首词） */
+const HAS_HAN = /[\u4e00-\u9fff]/;
 
 /** 药物构象动机（由药物类别文本启发式推断） */
 type Motif = 'planar' | 'macrocycle' | 'helical';
@@ -128,6 +132,7 @@ interface DrugMoleculeProps {
 const APPROACH_MS = 2600;
 
 const DrugMolecule3D = memo(function DrugMolecule3D({ drug, target, sim, showLabel, slot }: DrugMoleculeProps) {
+  const { lang } = useLang();
   const groupRef = useRef<THREE.Group>(null);
   const labelRef = useRef<HTMLDivElement>(null);
   const bornAt = useRef(performance.now());
@@ -231,6 +236,10 @@ const DrugMolecule3D = memo(function DrugMolecule3D({ drug, target, sim, showLab
 
   const scale = 0.21;
 
+  // 徽标文案: zh = 中文通用名 + 类别（去括号注记）; en = code 首词（中文通用名时）+ 类别英文字段
+  const badgeName = lang === 'zh' ? drug.name : HAS_HAN.test(drug.name) ? drug.code.split(' ·')[0] : drug.name;
+  const badgeClass = lang === 'zh' ? drug.drugClass.split('（')[0] : drug.drugClassEn;
+
   return (
     <group ref={groupRef} position={[spawn.x, spawn.y, spawn.z]} scale={scale}>
       {/* 原子（球棍模型） */}
@@ -268,8 +277,8 @@ const DrugMolecule3D = memo(function DrugMolecule3D({ drug, target, sim, showLab
         style={{ pointerEvents: 'none', userSelect: 'none' }}
       >
         <div ref={labelRef} className="drug3d-label">
-          <span className="drug3d-name">{drug.name}</span>
-          <span className="drug3d-class">{drug.drugClass.split('（')[0]}</span>
+          <span className="drug3d-name">{badgeName}</span>
+          <span className="drug3d-class">{badgeClass}</span>
         </div>
       </Html>
     </group>

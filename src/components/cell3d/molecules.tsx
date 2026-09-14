@@ -74,9 +74,11 @@ interface MoleculeProps {
 }
 
 const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mutant, onHover }: MoleculeProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const kindColor = KIND_COLORS[node.kind]?.color ?? '#4ade80';
-  const kindZh = t(`kind.${node.kind}`) || (KIND_COLORS[node.kind]?.label ?? '分子');
+  const kindZh =
+    t(`kind.${node.kind}`) ||
+    (lang === 'zh' ? (KIND_COLORS[node.kind]?.label ?? '分子') : 'Molecule');
   const isReceptor = node.kind === 'receptor' || node.kind === 'channel';
 
   const groupRef = useRef<THREE.Group>(null);
@@ -331,7 +333,7 @@ export function MoleculeLayer({
   sim: RefObject<SimSnapshot>;
   showLabels: boolean;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const selectedNode = useLabStore((s) => s.selectedNode);
   const cellId = useLabStore((s) => s.cellId);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -346,7 +348,15 @@ export function MoleculeLayer({
 
   const hoveredNode = nodes.find((n) => n.id === hovered);
   const note = hoveredNode
-    ? NODE_NOTES[hoveredNode.id] ?? NODE_NOTES[hoveredNode.label] ?? fallbackNote(hoveredNode.label, t(`kind.${hoveredNode.kind}`) || (KIND_COLORS[hoveredNode.kind]?.label ?? '分子'), t(`comp.${hoveredNode.compartment}`))
+    ? NODE_NOTES[hoveredNode.id] ??
+      NODE_NOTES[hoveredNode.label] ??
+      fallbackNote(
+        hoveredNode.label,
+        t(`kind.${hoveredNode.kind}`) ||
+          (lang === 'zh' ? (KIND_COLORS[hoveredNode.kind]?.label ?? '分子') : 'Molecule'),
+        t(`comp.${hoveredNode.compartment}`) ||
+          (lang === 'zh' ? (COMPARTMENT_ZH[hoveredNode.compartment] ?? '') : hoveredNode.compartment),
+      )
     : '';
 
   return (
@@ -374,8 +384,16 @@ export function MoleculeLayer({
           <div className="mol3d-tip">
             <div className="mol3d-tip-head">
               <span className="mol3d-tip-sym">{hoveredNode.label}</span>
-              <span className="mol3d-tip-kind">{t(`kind.${hoveredNode.kind}`) || KIND_COLORS[hoveredNode.kind]?.label}</span>
-              <span className="mol3d-tip-comp">{t(`comp.${hoveredNode.compartment}`) || COMPARTMENT_ZH[hoveredNode.compartment] || hoveredNode.compartment}</span>
+              <span className="mol3d-tip-kind">
+                {t(`kind.${hoveredNode.kind}`) ||
+                  (lang === 'zh' ? KIND_COLORS[hoveredNode.kind]?.label : hoveredNode.kind)}
+              </span>
+              <span className="mol3d-tip-comp">
+                {t(`comp.${hoveredNode.compartment}`) ||
+                  (lang === 'zh'
+                    ? COMPARTMENT_ZH[hoveredNode.compartment] || hoveredNode.compartment
+                    : hoveredNode.compartment)}
+              </span>
             </div>
             {hoveredNode.aliases.length > 0 && (
               <div className="mol3d-tip-alias">{hoveredNode.aliases.slice(0, 3).join(' / ')}</div>
