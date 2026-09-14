@@ -2,14 +2,16 @@
 
 /**
  * 轻量 i18n（中/英双语界面切换）
- * - LangProvider: React Context + localStorage 持久化（vcl-lang）
+ * - LangProvider: React Context + cookie（vcl-lang）双端持久化 + localStorage 同步
+ * - 水合安全: 初值由根布局（server）读 cookie 传入 initialLang，服务端 HTML 与客户端首帧一致;
+ *   旧版仅存 localStorage 的用户在挂载后一次性迁移（不触发水合错配，仅一帧重渲染）
  * - useLang(): { lang, setLang, t }
  * - 字典 T: key → { zh, en }; t(key) 查不到时回退 key 本身（开发期可见漏译）
  * 覆盖范围: 页面 chrome（导航/hero/方法卡/页脚）+ 实验台视图切换 + 3D HUD 全量 +
  * 分子类别/区室标签 + 剖面控制; 科学内容（通路描述/分子注释/教学引导文案）
  * 为策划数据层，暂保持中文（后续任务扩展）。
  */
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react';
 
 export type Lang = 'zh' | 'en';
 
@@ -163,27 +165,75 @@ const LangContext = createContext<LangCtx>({
 });
 
 const STORAGE_KEY = 'vcl-lang';
+const COOKIE_KEY = 'vcl-lang';
+const COOKIE_RE = new RegExp(`(?:^|;\\s*)${COOKIE_KEY}=([^;]*)`);
 
-export function LangProvider({ children }: { children: ReactNode }) {
-  // 惰性初始化: 首帧即恢复持久化语言（SSR 安全, 无 effect 级联渲染）
-  const [lang, setLangState] = useState<Lang>(() => {
+/* 外部存储订阅（useSyncExternalStore 标准范式）: setLang 写入后 emit 通知全部消费组件 */
+const listeners = new Set<() => void>();
+function subscribe(cb: () => void) {
+  listeners.add(cb);
+  return () => {
+    listeners.delete(cb);
+  };
+}
+function emit() {
+  listeners.forEach((l) => l());
+}
+
+/** 客户端快照: cookie 优先（新版主存储）→ localStorage 兑底（旧版迁移读取路径） */
+function readClientLang(): Lang {
+  try {
+    const c = document.cookie.match(COOKIE_RE)?.[1];
+    if (c === 'en' || c === 'zh') return c;
+    const s = window.localStorage.getItem(STORAGE_KEY);
+    if (s === 'en' || s === 'zh') return s;
+  } catch {
+    /* localStorage 不可用（隐私模式） */
+  }
+  return 'zh';
+}
+
+/** 写 cookie（1 年）: 服务端与客户端共读同一份数据 → 刷新后无闪烁 */
+function writeCookie(l: Lang) {
+  try {
+    document.cookie = `${COOKIE_KEY}=${l}; path=/; max-age=31536000; samesite=lax`;
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 切换语言（模块级: 纯外部存储写入 + 通知, 不依赖组件生命周期） */
+function setLang(l: Lang) {
+  writeCookie(l);
+  try {
+    window.localStorage.setItem(STORAGE_KEY, l);
+  } catch {
+    /* ignore */
+  }
+  emit();
+}
+
+export function LangProvider({ children, initialLang = 'zh' }: { children: ReactNode; initialLang?: Lang }) {
+  // useSyncExternalStore 水合安全范式:
+  //   水合期返回 server 快照（= 布局传入的 cookie 值）→ 与 SSR HTML 完全一致;
+  //   水合完成后切 client 快照（cookie/localStorage）→ 差异由 React 安全重渲染（无水合错配）
+  const lang = useSyncExternalStore(subscribe, readClientLang, () => initialLang);
+
+  // 挂载后一次性迁移: 旧版仅存 localStorage 的用户把语言提升写入 cookie（此后服务端直读, 无闪烁）
+  useEffect(() => {
     try {
+      const hasCookie = COOKIE_RE.test(document.cookie);
       const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (saved === 'en' || saved === 'zh') return saved;
-    } catch {
-      /* localStorage 不可用（隐私模式） */
-    }
-    return 'zh';
-  });
-
-  const setLang = (l: Lang) => {
-    setLangState(l);
-    try {
-      window.localStorage.setItem(STORAGE_KEY, l);
+      if (!hasCookie && (saved === 'en' || saved === 'zh')) writeCookie(saved);
     } catch {
       /* ignore */
     }
-  };
+  }, []);
+
+  // 语言切换时同步 <html lang>（无障碍 / 屏幕阅读器发音正确）
+  useEffect(() => {
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN';
+  }, [lang]);
 
   const value = useMemo<LangCtx>(
     () => ({ lang, setLang, t: (k: string) => T[k]?.[lang] ?? k }),

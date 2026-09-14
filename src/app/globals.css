@@ -209,28 +209,30 @@
 }
 
 /* ============ 3D 虚拟细胞 ============ */
-/* 3D 分子标签（Html transform 挂载） */
+/* 3D 分子标签（屏幕空间 Html: 原生分辨率清晰, 任意视角可读） */
 .mol3d-label {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 7px;
+  padding: 2.5px 8px;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.28);
   background: rgba(2, 6, 23, 0.78);
   backdrop-filter: blur(3px);
   white-space: nowrap;
   font-family: var(--font-mono, ui-monospace, monospace);
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
   transition: border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
 }
 .mol3d-sym {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: #cbd5e1;
 }
 .mol3d-kind {
-  font-size: 8px;
+  font-size: 9px;
   color: rgba(148, 163, 184, 0.75);
 }
 .mol3d-p {
@@ -332,14 +334,15 @@
   background: rgba(2, 6, 23, 0.66);
   backdrop-filter: blur(2px);
   white-space: nowrap;
+  -webkit-font-smoothing: antialiased;
 }
 .anatomy-zh {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: #cbd5e1;
 }
 .anatomy-latin {
-  font-size: 8px;
+  font-size: 9px;
   font-style: italic;
   color: rgba(148, 163, 184, 0.65);
 }
@@ -377,7 +380,7 @@
   opacity: 0;
 }
 .drug3d-name {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
   color: #e9d5ff;
@@ -402,4 +405,37 @@
   color: rgba(94, 234, 212, 0.62);
   font-size: 7.5px;
   letter-spacing: 0.04em;
+}
+
+/* 移动端（窄视口）3D 标签降噪: 缩小字号/内距, 隐藏次要文本（类别 chip / 拉丁学名）,
+   配合 molecules.tsx 的 smartHide 智能显隐, 避免 390px 宽度下标签互相遮挡 */
+@media (max-width: 639px) {
+  .mol3d-label {
+    padding: 2px 6px;
+    gap: 3px;
+  }
+  .mol3d-sym {
+    font-size: 10px;
+  }
+  .mol3d-kind {
+    display: none;
+  }
+  .anatomy-tag {
+    padding: 2px 6px;
+  }
+  .anatomy-zh {
+    font-size: 9px;
+  }
+  .anatomy-latin {
+    display: none;
+  }
+  .mol3d-tip {
+    width: 172px;
+  }
+  .drug3d-name {
+    font-size: 10px;
+  }
+  .drug3d-class {
+    display: none;
+  }
 }

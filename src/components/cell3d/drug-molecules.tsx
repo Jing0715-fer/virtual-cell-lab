@@ -259,12 +259,10 @@ const DrugMolecule3D = memo(function DrugMolecule3D({ drug, target, sim, showLab
           </mesh>
         );
       })}
-      {/* 药物名徽标（停泊后显示） */}
+      {/* 药物名徽标（停泊后显示; 屏幕空间恒定尺寸清晰可读） */}
       <Html
         position={[0, 1.5, 0]}
         center
-        transform
-        distanceFactor={14}
         zIndexRange={[30, 0]}
         pointerEvents="none"
         style={{ pointerEvents: 'none', userSelect: 'none' }}

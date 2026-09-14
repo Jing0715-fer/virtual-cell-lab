@@ -19,7 +19,7 @@
  */
 import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import type { CellBodySpec, Vec3 } from '@/lib/simulation/layout3d';
 import { displaceGeometry, fbm3, fibSphere, hash01, mergeGeoms, sph } from './procedural';
@@ -1031,6 +1031,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   return { group, update, labels, dispose };
 }
 
+/** 窄视口（移动端）优先保留的主要细胞器标注（前缀匹配 zh）; 其余标签拥挤不可读, 隐藏 */
+const MAJOR_ORGANELLE_ZH = ['质膜', '核被膜', '核仁', '线粒体', '高尔基体'];
+
 /** 细胞体组件（仅 dim/规格/画质变化时重建, 动画走 imperative 帧驱动） */
 export const CellBody = ({ spec, tint, dim, showAnatomy, perf }: {
   spec: CellBodySpec;
@@ -1042,6 +1045,12 @@ export const CellBody = ({ spec, tint, dim, showAnatomy, perf }: {
 }) => {
   const build = useMemo(() => buildCellBody(spec, tint, dim, perf ?? false), [spec, tint, dim, perf]);
   useEffect(() => () => build.dispose(), [build]);
+  // 窄视口（<640px）: 解剖标注仅保留主要细胞器, 避免移动端标签互相遮挡
+  const isNarrow = useThree((s) => s.size.width) < 640;
+  const visibleLabels = useMemo(
+    () => (isNarrow ? build.labels.filter((l) => MAJOR_ORGANELLE_ZH.some((m) => l.zh.startsWith(m))) : build.labels),
+    [isNarrow, build],
+  );
 
   useFrame((state) => build.update(state.clock.elapsedTime));
 
@@ -1049,8 +1058,8 @@ export const CellBody = ({ spec, tint, dim, showAnatomy, perf }: {
     <>
       <primitive object={build.group} />
       {showAnatomy &&
-        build.labels.map((l, i) => (
-          <Html key={i} position={[l.pos.x, l.pos.y, l.pos.z]} center transform distanceFactor={16} zIndexRange={[30, 0]} pointerEvents="none" style={{ pointerEvents: 'none' }}>
+        visibleLabels.map((l, i) => (
+          <Html key={i} position={[l.pos.x, l.pos.y, l.pos.z]} center zIndexRange={[30, 0]} pointerEvents="none" style={{ pointerEvents: 'none' }}>
             <div className="anatomy-tag">
               <span className="anatomy-zh">{l.zh}</span>
               <span className="anatomy-latin">{l.latin}</span>

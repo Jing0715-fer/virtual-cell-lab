@@ -148,13 +148,15 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
     const st = sim.current.nodeStates[node.id];
     const a = st?.activity ?? 0;
     const ph = st?.phospho ?? 0;
+    // 世界坐标一次计算（剖切检测 + 标签距离淡出共用; 模块级临时向量避免每帧分配）
+    const grp = groupRef.current;
+    if (grp) grp.getWorldPosition(_wp);
     // 剖面模式: 被剖掉的前半分子 → DOM 标签同步隐藏（mesh 已被 WebGL 全局裁剪）
-    let clipped = false;
     const clipPlane = sim.current.clipPlane;
-    if (clipPlane && groupRef.current) {
-      groupRef.current.getWorldPosition(_wp);
-      clipped = clipPlane.distanceToPoint(_wp) < 0;
-    }
+    const clipped = !!(clipPlane && grp && clipPlane.distanceToPoint(_wp) < 0);
+    // 标签距离淡出: 近距全显 → 远距降至 0.4（深度暗示 + 降低远景标签密度; 概览机位 ≈31 保持高可读）
+    const camDist = grp ? state.camera.position.distanceTo(_wp) : 30;
+    const distFade = camDist <= 26 ? 1 : Math.max(0.4, 1 - (camDist - 26) * (0.6 / 34));
     // 信号抵达闪光（事件脉冲层写入时间戳, 650ms 衰减）
     let flash = 0;
     const pAt = sim.current.pulseAt?.[node.id];
@@ -208,20 +210,24 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
       inhibRingRef.current.rotation.x = -Math.PI / 3;
       inhibMat.opacity = Math.min(0.9, inh * 1.1);
     }
-    // 标签（DOM imperative; 剖切掉的分子不显示标签）
+    // 标签（DOM imperative; 剖切掉的分子不显示; 远距离淡出; 窄视口智能降噪）
     const el = labelRef.current;
     if (el) {
       const bright = a > 0.25 || selected || isTourTarget;
       el.classList.toggle('is-active', bright);
       el.classList.toggle('is-phospho', ph > 0.25);
       el.classList.toggle('is-inhibited', inh > 0.25);
-      el.style.opacity = clipped
-        ? '0'
-        : showLabel
-          ? String(Math.max(0.5 * vis + a * 0.5, bright ? 1 : 0.62))
-          : bright
-            ? '1'
-            : '0';
+      // 窄视口（移动端 <640px）智能降噪: 恒定尺寸标签在 390px 宽度下必然互相遮挡
+      // → 仅保留激活/选中/教学引导相关标签, 其余隐藏（点击分子即选中亮起, 交互可达性不变）
+      const smartHide = state.size.width < 640 && !bright && !isTourNeighbor;
+      el.style.opacity =
+        clipped || smartHide
+          ? '0'
+          : showLabel
+            ? String(Math.max(0.5 * vis + a * 0.5, bright ? 1 : 0.62) * distFade)
+            : bright
+              ? String(distFade)
+              : '0';
     }
   });
 
@@ -295,12 +301,10 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
         </mesh>
       )}
 
-      {/* 分子标签 */}
+      {/* 分子标签（屏幕空间模式: 原生分辨率清晰文字, 任意视角可读; 远距自动淡出保深度感知） */}
       <Html
         position={[0, isReceptor ? 1.35 : node.r + 0.5, 0]}
         center
-        transform
-        distanceFactor={13}
         zIndexRange={[24, 0]}
         pointerEvents="none"
         style={{ pointerEvents: 'none', userSelect: 'none' }}
@@ -358,13 +362,11 @@ export function MoleculeLayer({
           onHover={setHovered}
         />
       ))}
-      {/* 悬停分子卡 */}
+      {/* 悬停分子卡（屏幕空间: 恒定尺寸清晰可读, 不随距离缩放模糊） */}
       {hoveredNode && (
         <Html
           position={[hoveredNode.pos.x, hoveredNode.pos.y + (hoveredNode.tier === 1 ? 1.9 : 1.15), hoveredNode.pos.z]}
           center
-          transform
-          distanceFactor={11}
           zIndexRange={[42, 0]}
           pointerEvents="none"
           style={{ pointerEvents: 'none' }}

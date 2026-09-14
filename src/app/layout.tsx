@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
-import { LangProvider } from "@/lib/i18n";
+import { LangProvider, type Lang } from "@/lib/i18n";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,17 +33,25 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // 服务端读 cookie 决定初始语言 → SSR HTML 与客户端首帧一致（无水合错配、无闪烁）
+  let initialLang: Lang = "zh";
+  try {
+    const saved = (await cookies()).get("vcl-lang")?.value;
+    if (saved === "en" || saved === "zh") initialLang = saved;
+  } catch {
+    /* cookie 不可用时回退中文 */
+  }
   return (
-    <html lang="zh-CN" className="dark" suppressHydrationWarning>
+    <html lang={initialLang === "en" ? "en" : "zh-CN"} className="dark" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
-        <LangProvider>
+        <LangProvider initialLang={initialLang}>
           {children}
           <Toaster />
         </LangProvider>

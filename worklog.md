@@ -518,3 +518,39 @@ Stage Summary:
   1. 数据层/面板层 i18n 扩展（通路描述与分子注释的英文科学文案需逐条策划校对）
   2. 剖面模式联动教学叙事（开剖面自动分层讲解 质膜→细胞质→核）
   3. 对照模式 3D 视图（Task 14 遗留）
+
+---
+Task ID: 18
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户报告三项问题——①i18n 水合错误（Hydration failed: server 中文 vs client 英文）②细胞内标签字分辨率太低 ③标签只能从固定角度看（不智能显示）
+
+Work Log:
+- 根因 1（水合错误）: LangProvider 惰性初始化在客户端首帧读 localStorage（旧值 en）而 SSR 无 window 渲染 zh → 服务端/客户端文本不一致
+  修复（两处）:
+  · i18n.tsx v2: 语言改存 cookie（vcl-lang, 1 年）—— 根布局（server）await cookies() 读初始语言传 initialLang; LangProvider 用 useSyncExternalStore（server 快照 = cookie 值 → 水合期与 SSR HTML 完全一致; 水合后切 client 快照 cookie→localStorage 兜底, 差异由 React 安全重渲染, 零错配）; setLang 写 cookie+localStorage 后 emit() 通知订阅; 挂载一次性迁移旧 localStorage 用户并补写 cookie; 切换时同步 <html lang>（无障碍）
+  · layout.tsx: 改 async RootLayout, cookies() 读 vcl-lang, <html lang> 按 cookie 渲染, LangProvider initialLang 传入
+  · 过程坑: react-hooks/set-state-in-effect 新规则禁止 effect 内 setState → 初版 effect 迁移方案被 lint 拒 → 改 useSyncExternalStore 外部存储范式（更规范且零 lint 问题）
+- 根因 2+3（标签模糊 + 固定角度）: 全部 3D 场景内 Html 标签用 transform 模式（无 sprite）—— 文字被 CSS matrix3d 缩放（概览距离 ≈0.42×, 11px 字渲染为 ~4.6px 模糊不可读）且朝向固定世界 +Z（转到背面/侧面标签侧视/镜像不可读）
+  修复: 分子标签/悬停卡/解剖标注/剖面标注/药物徽标全部转屏幕空间模式（移除 transform+distanceFactor）—— 原生 DOM 分辨率清晰、恒定屏幕尺寸、天然 billboard 任意视角可读; drei v10.7.6 非 transform 模式自动隐藏相机背后标签 + 深度 zIndex 排序
+- 增强（智能显示）:
+  · 分子标签距离淡出: useFrame 每帧相机距离 → 26 内全显, 60 处降至 0.4（深度暗示 + 远景降噪）, 世界坐标单次计算复用（剖切检测 + 距离共用 _wp）
+  · 窄视口（<640px）smartHide: 移动端 33 个恒定尺寸标签必然互叠 → 仅保留激活/选中/教学引导相关标签, 其余隐藏（级联点亮时渐进显现, 点击分子即选中亮起）
+  · 移动端解剖标注降噪: organelles.tsx useThree(size.width) < 640 时仅渲染 MAJOR_ORGANELLE_ZH 前缀匹配的 5 个主要细胞器（质膜/核被膜/核仁/线粒体/高尔基体）
+  · CSS: 标签字号提升（sym 11→12px, kind 8→9px, anatomy-zh 10→11px, drug3d-name 11→12px）+ text-rendering/antialiased; 新增 @media(max-width:639px) 缩小内距字号并隐藏次要文本（mol3d-kind/anatomy-latin/drug3d-class chip）
+- QA 疑云澄清（重要工具经验）: agent-browser 的 mouse wheel 命令不派发 DOM wheel 事件而是直接滚窗口（对 canvas 的 capture 监听为空）→ 曾误判"缩放失效"; 用 dispatchEvent 合成可冒泡 WheelEvent 验证: OrbitControls（drei 绑定在 events.connected 祖先节点上, 非本 canvas）逐事件 preventDefault 10/10、14/14 + VLM 前后对比确认细胞显著拉近/拉远——真实浏览器滚轮缩放正常
+- QA 全过: 水合错误归零（legacy localStorage=en 无 cookie → SSR zh 一致后安全切 EN; 刷新后 cookie 直供 SSR 无闪烁）; lint 0 错误; tsc src 0 错误; 概览 VLM"标签锐利 12+ 可读全部面向相机"; 拖拽旋转两轮 VLM 确认方位显著变化且无侧视/镜像标签（15-20 可读）; 缩放 VLM 确认显著拉近（核区聚焦）; 远距淡出生效（平均 0.61）; 剖面视图标注清晰; 移动端 390px 无横向溢出, 解剖标签 8→5、级联点亮前 0 标签 → 注 EGF 后 4 标签渐进显现, 居中视图 VLM 确认"细胞为视觉焦点、标签间距合理、无词云式堆叠"; 语言切换 EN↔zh 即时生效 + cookie 持久化; 0 console/page errors
+- 过程风险记录: QA 环境 SwiftShader 下视口突变（1280→390）触发 WebGL contextlost 且不自动恢复（真实设备不存在此场景; ctxLost 遮罩与刷新指引按设计工作）
+
+Stage Summary:
+- 项目状态: 三项用户问题全部修复并验证; UI chrome 层双语且水合安全; 3D 场景内全部标签清晰锐利、任意视角可读、移动端智能降噪
+- 本轮产出: i18n.tsx 重构（cookie+useSyncExternalStore）、layout.tsx 服务端 cookie 注入、5 个 3D 组件标签转屏幕空间、距离淡出 + 窄视口 smartHide + 移动端解剖标注精简、CSS 字号/移动端媒体查询
+- 关键技术决策: ① 语言持久化从 localStorage 升级为 cookie（服务端可读 → SSR 直渲染, 无闪烁无错配; localStorage 保留为迁移源） ② useSyncExternalStore 是外部可变状态水合安全的标准范式（server 快照 props 注入） ③ 3D 标签用屏幕空间 Html 而非 transform 模式（DOM 原生分辨率 vs matrix3d 缩放栅格化; billboard vs 固定朝向） ④ 移动端降噪用"重要性过滤"而非缩小字号（恒定尺寸标签在 390px 下必然互叠, 数量才是根因） ⑤ agent-browser wheel 不可信, 需合成事件验证 OrbitControls
+- 未解决问题/风险:
+  1. 移动端极近缩放时密集分子标签仍可能局部重叠（smartHide 已大幅缓解; 专注模式可进一步降密度）
+  2. QA 环境 SwiftShader 视口突变触发 contextlost 不自动恢复（仅测试环境现象, 已有遮罩兜底）
+  3. i18n 数据层（通路描述/分子注释/教学引导/各面板）仍为中文（前轮遗留, 量大需策划校对）
+  4. drei OrbitControls 绑定在 events.connected 祖先而非 canvas 本体——行为正常但与直觉不同, 排障时勿走弯路
+- 下一阶段建议:
+  1. 数据层/面板层 i18n 扩展（inspector/timeline/pathway-library/药理/对照/热图/AI 助手 + 通路 nameZh/description EN 文案策划）
+  2. 剖面模式联动教学叙事（开剖面自动分层讲解 质膜→细胞质→核）
+  3. 对照模式 3D 视图（Task 14 遗留）+ 药物浓度时程曲线（前轮遗留）

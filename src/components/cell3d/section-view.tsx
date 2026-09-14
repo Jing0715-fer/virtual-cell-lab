@@ -557,8 +557,6 @@ export function SectionClipController({
                 key={a.text}
                 position={[a.local[0] * R, a.local[1] * R, a.local[2]]}
                 center
-                transform
-                distanceFactor={15}
                 zIndexRange={[30, 0]}
                 pointerEvents="none"
                 style={{ pointerEvents: 'none', userSelect: 'none' }}
