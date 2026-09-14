@@ -489,3 +489,32 @@ Stage Summary:
   1. 用户确认加载问题是否解决（询问环境: 桌面/移动/浏览器型号）
   2. 剖面模式联动引导叙事（开剖面时自动播放"由外向内"分层讲解: 质膜→细胞质→核）
   3. 对照模式 3D 视图（Task 14 遗留）与药物浓度时程曲线（前轮遗留）
+
+---
+Task ID: 17
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户反馈三项修复——①不能自由转动/缩放 ②剖深显示异常 ③中/英文界面切换
+
+Work Log:
+- 根因 1（交互对抗）: CameraRig useFrame 每帧强制收敛相机（overview 下距离拉回 31 + 方位 lerp 回标准方位），用户拖拽/滚轮被逐帧抵消
+  修复: ① 模式切换仅前 2s 过渡期收敛（modeSince 时间戳）② 画布 pointerdown/wheel 交互后 4s 内完全让位（lastUser 时间戳, 直接监听 gl.domElement 不依赖 controls 实例时序）③ follow/tour 持续跟随但用户交互优先 ④ 稳态无跟随任务时直接 return 完全交给 OrbitControls（autoRotate 不受影响）
+- 根因 2（剖深几何错误）: 剖面填充盘以固定半径 R*1.055 渲染 + 位置随 constant 线性外推 → 浅剖时盘悬空在细胞外前部
+  修复（section-view.tsx v2 完全重写）: ① 深度映射改对称扫掠 constant = R - depth*2R（前缘 +R → 过心 0.5 → 后缘 -R, 与显微切片语义一致）② 盘拆双层几何精确: 细胞质盘 scale=√(R²-h²)/R + 核盘 scale=√(N²-h²)/N（h=|constant|, h<N 渐入）——严格贴合剖切相交圆, 两盘同心（膜/核球同心, 切面垂足即公共圆心）③ 纹理拆两张: makeCytoplasmTexture（核区不挖空, 全域细胞器剖面散布）+ makeNucleusTexture（核被膜/染色质/核仁/核孔, 基准半径 N）④ 每帧 useFrame 同步盘缩放/可见性（rc>R*0.08 与 rn>N*0.12 阈值）
+- 新功能（中/EN 界面切换）: 新文件 src/lib/i18n.tsx——LangProvider（React Context + localStorage vcl-lang 持久化 + 惰性初始化 SSR 安全）+ 字典 T 约 90 键 + useLang()/t()
+  覆盖: page.tsx（header 导航/hero/stats/METHOD 4 卡双语重写/页脚 + LangSwitch 切换按钮 中/EN 高亮）+ workspace.tsx（视图切换/空状态/EngineLoading）+ virtual-cell-3d.tsx（HUD 全量: 教学引导/辉光/流畅/解剖/标签/专注/剖面/自动环视/方位/剖深/相机预设/图例 18 项/底部提示/错误卡/ctxLost 遮罩/教学引导卡框架）+ molecules.tsx（分子 kind 标签/区室/悬停卡）+ section-view.tsx（SECTION_ORIENTS 双语 label/hint + 剖面标注 labels prop）
+- LangProvider 架构修正: 初版放 page.tsx 内层导致 Home 组件自身消费默认 context（t 返回 key 本身）——提升至 app/layout.tsx 根布局（server layout 渲染 client provider, Toaster 一并包裹）
+- 过程 bug 修复: ① molecules.tsx || 与 ?? 混用语法错误（需括号） ② bunx eslint --fix 误删必要的 react-hooks/immutability disable 指令（R3F 命令式材质更新范式）——恢复并加详细注释 ③ dev server OOM 崩溃（多实例并存 1.86GB RSS 被 OOM killer 杀死）——单实例 + setsid 脱离会话重启
+- QA: lint 零错误 ✓; EN 切换 h1/nav/stats/METHOD 全英文 ✓; 3D HUD 全英文（Guided Tour/Bloom/Fast/Anatomy/Labels/Focus/Section/Auto-rotate/Overview/Membrane/Nucleus/Follow）✓; 拖拽旋转 VLM 确认方位明显变化 ✓; 滚轮缩放 VLM 确认拉近放大且页面不滚走 ✓（此前误测: 鼠标在 canvas 外时页面滚动属正常）; 剖深 15%/50%/65%/90% VLM 确认盘大小符合 √(R²-h²) 几何规律且无悬空 ✓; 俯剖水平切面正确 ✓; 切回中文正常 ✓; 0 console/page errors ✓
+
+Stage Summary:
+- 项目状态: 三项用户反馈全部修复验证; 交互自由度恢复（拖拽/缩放不再被对抗）; 剖面几何精确化; UI chrome 层中英双语可切换（localStorage 持久化）
+- 本轮产出: 1 新文件（i18n.tsx ~90 键字典）+ section-view.tsx 完全重写（几何精确版）+ 5 文件 i18n 化改造 + CameraRig 交互让位机制
+- 关键技术决策: ① 相机让位用「过渡期时间窗 + 用户交互时间窗」双时间戳（不依赖 OrbitControls 事件, 直接监听 canvas 原生事件规避 R3F ref 时序） ② 剖面盘双层同心缩放（√(R²-h²)/√(N²-h²)）数学严格且渲染廉价（circleGeometry 单位圆 + scale） ③ LangProvider 提升至根布局（消费组件可在任意层, 避免 provider-in-page 的自消费陷阱） ④ 数据层文案（通路描述/分子注释/教学引导文本）暂不翻译——量级大且科学文案需专业校对, 记录为后续任务
+- 未解决问题/风险:
+  1. i18n 未覆盖: inspector/timeline/pathway-library/pharmacology/compare/heatmap/ai-assistant 面板 + 通路 nameZh/description + NODE_NOTES + tourStep 文案 + cell-types 数据（EN 模式下显示中文）
+  2. dev server 对内存敏感（单实例 1.5GB RSS, 3.9GB 机器 + 浏览器 QA 并行时余量有限——避免多实例, 已在流程中注意）
+  3. 剖面盘正圆 vs 膜 FBM 位移 ±0.17: 极浅深度时盘边缘可能略窄于膜切口（示意可接受）
+- 下一阶段建议:
+  1. 数据层/面板层 i18n 扩展（通路描述与分子注释的英文科学文案需逐条策划校对）
+  2. 剖面模式联动教学叙事（开剖面自动分层讲解 质膜→细胞质→核）
+  3. 对照模式 3D 视图（Task 14 遗留）

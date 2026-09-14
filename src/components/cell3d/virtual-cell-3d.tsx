@@ -28,6 +28,7 @@ import { EdgeLayer } from './signal-edges';
 import { MrnaFlow } from './mrna-flow';
 import { EventPulses } from './event-pulses';
 import { SectionClipController, SECTION_ORIENTS, type SectionAxis } from './section-view';
+import { useLang } from '@/lib/i18n';
 
 type CamMode = 'free' | 'overview' | 'membrane' | 'nucleus' | 'follow' | 'tour';
 
@@ -90,7 +91,9 @@ class Cell3DErrorBoundary extends Component<
   }
 }
 
-/** 相机驱动器: 预设机位（含标准观察方位） + 信号跟随 + 教学聚焦（阻尼插值） */
+/** 相机驱动器: 预设机位（含标准观察方位） + 信号跟随 + 教学聚焦（阻尼插值）
+ *  自由交互保障: 模式切换仅在前 2s 过渡期内收敛机位; 用户拖拽/滚轮后 4s 内完全让位
+ *  （OrbitControls 全权接管, 含 autoRotate） —— 之后的旋转/缩放不再被对抗 */
 function CameraRig({ mode, layout, spec, controlsRef, tourTarget }: {
   mode: CamMode;
   layout: ReturnType<typeof layout3D> | null;
@@ -99,15 +102,32 @@ function CameraRig({ mode, layout, spec, controlsRef, tourTarget }: {
   /** 教学引导: 当前聚焦分子世界坐标 */
   tourTarget: Vec3 | null;
 }) {
-  const { camera } = useThree();
+  const { camera, gl } = useThree();
   const desired = useRef({ target: new THREE.Vector3(), dist: 30, dir: new THREE.Vector3(0, 0.33, 0.94) });
   const smoothTarget = useRef(new THREE.Vector3());
   const lastTracked = useRef<string | null>(null);
+  /** 模式切换时间戳（过渡期内才收敛机位） */
+  const modeSince = useRef(0);
+  /** 用户最近一次交互（拖拽/滚轮/触摸）时间戳 */
+  const lastUser = useRef(-1e9);
 
   const toWorld = (p: Vec3): THREE.Vector3 =>
     new THREE.Vector3(p.x * spec.scale[0], p.y * spec.scale[1], p.z * spec.scale[2]);
 
+  // 用户交互检测（直接监听画布事件, 不依赖 controls 实例时序）
   useEffect(() => {
+    const el = gl.domElement;
+    const onInteract = () => { lastUser.current = performance.now(); };
+    el.addEventListener('pointerdown', onInteract);
+    el.addEventListener('wheel', onInteract, { passive: true });
+    return () => {
+      el.removeEventListener('pointerdown', onInteract);
+      el.removeEventListener('wheel', onInteract);
+    };
+  }, [gl]);
+
+  useEffect(() => {
+    modeSince.current = performance.now();
     if (mode === 'overview') desired.current = { target: new THREE.Vector3(0, 0, 0), dist: 31, dir: new THREE.Vector3(0, 0.33, 0.94) };
     else if (mode === 'nucleus') desired.current = { target: new THREE.Vector3(0, 0, 0), dist: 3.4, dir: new THREE.Vector3(0.35, 0.25, 0.9) };
     else if (mode === 'membrane') {
@@ -120,6 +140,16 @@ function CameraRig({ mode, layout, spec, controlsRef, tourTarget }: {
   useFrame(() => {
     const controls = controlsRef.current;
     if (!controls) return;
+
+    const now = performance.now();
+    const userRecently = now - lastUser.current < 4000; // 用户 4s 内交互过 → 让位
+    const transitional = now - modeSince.current < 2000; // 模式切换 2s 过渡期
+    const following = (mode === 'follow' || mode === 'tour') && !userRecently;
+
+    // 稳态且无跟随任务: 完全交给 OrbitControls（用户自由旋转/缩放/autoRotate）
+    if (!transitional && !following) return;
+    // 过渡期内用户开始交互 → 立即让位
+    if (transitional && userRecently) return;
 
     if (mode === 'follow') {
       const target = trackedMolecule(layout);
@@ -137,9 +167,9 @@ function CameraRig({ mode, layout, spec, controlsRef, tourTarget }: {
     smoothTarget.current.lerp(dt.target, 0.045);
     controls.target.copy(smoothTarget.current);
 
-    // 观察方位阻尼（预设机位恢复标准方位；follow/free/tour 保留用户视角）
+    // 观察方位阻尼（预设机位过渡期恢复标准方位；follow/tour 保留用户视角）
     const dir = camera.position.clone().sub(controls.target).normalize();
-    if (dt.dir && mode !== 'follow' && mode !== 'free' && mode !== 'tour') {
+    if (dt.dir && mode !== 'follow' && mode !== 'tour') {
       dir.lerp(dt.dir, 0.06).normalize();
     }
 
@@ -240,6 +270,7 @@ function SceneCapture() {
 }
 
 export function VirtualCell3D() {
+  const { t, lang } = useLang();
   const graph = useLabStore((s) => s.graph);
   const cellId = useLabStore((s) => s.cellId);
   const running = useLabStore((s) => s.running);
@@ -375,7 +406,7 @@ export function VirtualCell3D() {
   if (!graph) {
     return (
       <div className="flex h-full items-center justify-center text-slate-500 text-sm">
-        正在装配虚拟细胞…
+        {t('loading.cell')}
       </div>
     );
   }
@@ -391,9 +422,9 @@ export function VirtualCell3D() {
                 <AlertTriangle className="h-5 w-5 text-rose-400" />
               </div>
               <div>
-                <p className="text-[13px] font-semibold text-slate-200">3D 渲染引擎异常</p>
+                <p className="text-[13px] font-semibold text-slate-200">{t('err.title')}</p>
                 <p className="mt-1 max-w-xs text-[11px] leading-relaxed text-slate-500">
-                  图形加速不可用或渲染资源不足。可切换到 2D 切面视图继续实验，或刷新页面重试。
+                  {t('err.desc')}
                 </p>
                 {typeof error?.message === 'string' && error.message.length < 90 && (
                   <p className="mt-1 font-mono text-[9px] text-slate-600">{error.message}</p>
@@ -404,13 +435,13 @@ export function VirtualCell3D() {
                   onClick={() => useLabStore.getState().setView('cell')}
                   className="rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 text-[11px] text-emerald-200 transition hover:bg-emerald-500/25"
                 >
-                  切换 2D 切面视图
+                  {t('err.fallback2d')}
                 </button>
                 <button
                   onClick={() => window.location.reload()}
                   className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] text-slate-300 transition hover:text-slate-100"
                 >
-                  刷新重试
+                  {t('err.reload')}
                 </button>
               </div>
             </div>
@@ -452,7 +483,20 @@ export function VirtualCell3D() {
           </Environment>
           <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} sim={sim} />
           <SceneCapture />
-          <SectionClipController enabled={clipView} depth={clipDepth} axis={clipAxis} spec={layout?.spec ?? FALLBACK_SPEC} showAnatomy={showAnatomy} sim={sim} />
+          <SectionClipController
+            enabled={clipView}
+            depth={clipDepth}
+            axis={clipAxis}
+            spec={layout?.spec ?? FALLBACK_SPEC}
+            showAnatomy={showAnatomy}
+            sim={sim}
+            labels={{
+              nucleus: t('sec.nucleus'),
+              cytosol: t('sec.cytosol'),
+              membrane: t('sec.membrane'),
+              section: t('hud.section'),
+            }}
+          />
           <CameraRig mode={camMode} layout={layout} spec={layoutSpec} controlsRef={controlsRef} tourTarget={tourTarget} />
           <OrbitControls
             ref={controlsRef}
@@ -480,8 +524,8 @@ export function VirtualCell3D() {
       {ctxLost && (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-slate-950/80 backdrop-blur-sm">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-teal-500/30 border-t-teal-400" />
-          <p className="text-[12px] text-teal-200">图形上下文丢失 · 正在尝试自动恢复…</p>
-          <p className="text-[10px] text-slate-500">若长时间未恢复，请刷新页面</p>
+          <p className="text-[12px] text-teal-200">{t('ctx.lost')}</p>
+          <p className="text-[10px] text-slate-500">{t('ctx.lostHint')}</p>
         </div>
       )}
 
@@ -491,41 +535,41 @@ export function VirtualCell3D() {
         <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-slate-950/70 px-2.5 py-1.5 backdrop-blur-md">
           <Shell className="h-3.5 w-3.5 text-emerald-400" />
           <div>
-            <div className="text-[11px] font-medium text-emerald-300">{cell?.name ?? "细胞"}</div>
-            <div className="text-[9px] text-slate-500">{graph.meta.nameZh} · 3D 沉浸视图</div>
+            <div className="text-[11px] font-medium text-emerald-300">{cell?.name ?? t('loading.cell')}</div>
+            <div className="text-[9px] text-slate-500">{graph.meta.nameZh} · {t('hud.3dview')}</div>
           </div>
         </div>
         <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-white/10 bg-slate-950/70 px-2.5 py-1 backdrop-blur-md font-mono text-[9px] text-slate-400">
           <span className={running ? 'text-emerald-400' : 'text-slate-600'}>●</span>
           <span>T+{(tick * 0.5).toFixed(1)}s</span>
           <span className="text-slate-600">|</span>
-          <span>阶段 {phase}/4</span>
+          <span>{t('hud.phase')} {phase}/4</span>
           <span className="text-slate-600">|</span>
-          <span>{graph.stats.coreCount} 分子</span>
+          <span>{graph.stats.coreCount} {t('hud.molecules')}</span>
         </div>
         <div className="pointer-events-auto flex items-center gap-1.5 rounded-lg border border-white/10 bg-slate-950/70 px-2.5 py-1 backdrop-blur-md text-[9px] text-slate-500">
           <Ruler className="h-3 w-3 text-slate-400" />
           <span>⌀ {cell?.diameter ?? '—'}</span>
-          <span className="text-slate-600">(非等比示意)</span>
+          <span className="text-slate-600">{t('hud.scale')}</span>
         </div>
       </div>
 
       {/* 右上: 显示开关 */}
       <div className="absolute right-3 top-3 z-10 flex flex-col gap-1.5">
-        <HudToggle active={tourOpen} onClick={() => openTour(!tourOpen)} icon={BookOpen} label="教学引导" highlight
+        <HudToggle active={tourOpen} onClick={() => openTour(!tourOpen)} icon={BookOpen} label={t('hud.tour')} highlight
           disabled={tour.length === 0} />
-        <HudToggle active={glow} onClick={() => setGlow(!glow)} icon={Sparkles} label="辉光渲染" />
-        <HudToggle active={perfMode} onClick={() => setPerfMode(!perfMode)} icon={Gauge} label={perfMode ? '流畅模式' : '高清模式'} />
-        <HudToggle active={showAnatomy} onClick={() => setShowAnatomy(!showAnatomy)} icon={Tags} label="解剖标注" />
-        <HudToggle active={showLabels} onClick={() => setShowLabels(!showLabels)} icon={Eye} label="全部标签" />
-        <HudToggle active={focus} onClick={() => setFocus(!focus)} icon={Focus} label="专注模式" />
-        <HudToggle active={clipView} onClick={() => setClipView(!clipView)} icon={Layers} label="剖面展示" highlight={false} />
-        <HudToggle active={autoRotate} onClick={() => setAutoRotate(!autoRotate)} icon={RotateCw} label="自动环视" />
+        <HudToggle active={glow} onClick={() => setGlow(!glow)} icon={Sparkles} label={t('hud.glow')} />
+        <HudToggle active={perfMode} onClick={() => setPerfMode(!perfMode)} icon={Gauge} label={perfMode ? t('hud.perf') : t('hud.hd')} />
+        <HudToggle active={showAnatomy} onClick={() => setShowAnatomy(!showAnatomy)} icon={Tags} label={t('hud.anatomy')} />
+        <HudToggle active={showLabels} onClick={() => setShowLabels(!showLabels)} icon={Eye} label={t('hud.labels')} />
+        <HudToggle active={focus} onClick={() => setFocus(!focus)} icon={Focus} label={t('hud.focus')} />
+        <HudToggle active={clipView} onClick={() => setClipView(!clipView)} icon={Layers} label={t('hud.section')} highlight={false} />
+        <HudToggle active={autoRotate} onClick={() => setAutoRotate(!autoRotate)} icon={RotateCw} label={t('hud.rotate')} />
         {clipView && (
           <div className="pointer-events-auto w-44 space-y-2 rounded-lg border border-teal-500/25 bg-slate-950/80 p-2.5 backdrop-blur-md">
             <div className="flex items-center gap-1.5">
               <Scissors className="h-3 w-3 shrink-0 text-teal-400" />
-              <span className="text-[9px] font-medium text-slate-300">剖面方位</span>
+              <span className="text-[9px] font-medium text-slate-300">{t('hud.axis')}</span>
               <span className="ml-auto font-mono text-[8px] text-teal-400/70">{SECTION_ORIENTS[clipAxis].latin}</span>
             </div>
             <div className="grid grid-cols-3 gap-1">
@@ -533,19 +577,19 @@ export function VirtualCell3D() {
                 <button
                   key={ax}
                   onClick={() => setClipAxis(ax)}
-                  title={SECTION_ORIENTS[ax].hint}
+                  title={SECTION_ORIENTS[ax].hint[lang]}
                   className={`rounded-md border px-1 py-1 text-[9px] transition ${
                     clipAxis === ax
                       ? 'border-teal-400/60 bg-teal-500/20 text-teal-200'
                       : 'border-white/10 bg-white/[0.03] text-slate-500 hover:text-slate-300'
                   }`}
                 >
-                  {SECTION_ORIENTS[ax].label}
+                  {SECTION_ORIENTS[ax].label[lang]}
                 </button>
               ))}
             </div>
             <div className="flex items-center gap-2">
-              <span className="shrink-0 text-[9px] text-slate-400">剖深</span>
+              <span className="shrink-0 text-[9px] text-slate-400">{t('hud.depth')}</span>
               <input
                 type="range"
                 min={0}
@@ -554,21 +598,21 @@ export function VirtualCell3D() {
                 value={Math.round(clipDepth * 100)}
                 onChange={(e) => setClipDepth(Number(e.target.value) / 100)}
                 className="h-1 w-full cursor-pointer accent-teal-400"
-                aria-label="剖面深度"
+                aria-label={t('hud.depth')}
               />
               <span className="w-7 shrink-0 text-right font-mono text-[9px] text-teal-300">{Math.round(clipDepth * 100)}%</span>
             </div>
-            <p className="text-[8px] leading-relaxed text-slate-500">{SECTION_ORIENTS[clipAxis].hint} · 剖开处已填充剖面标本图</p>
+            <p className="text-[8px] leading-relaxed text-slate-500">{SECTION_ORIENTS[clipAxis].hint[lang]}</p>
           </div>
         )}
       </div>
 
       {/* 右下: 相机预设 */}
       <div className="absolute bottom-3 right-3 z-10 flex flex-wrap justify-end gap-1.5">
-        <CamBtn active={camMode === 'overview'} onClick={() => setCamMode('overview')} icon={Maximize} label="全景" />
-        <CamBtn active={camMode === 'membrane'} onClick={() => setCamMode('membrane')} icon={Crosshair} label="质膜近景" />
-        <CamBtn active={camMode === 'nucleus'} onClick={() => setCamMode('nucleus')} icon={Atom} label="核内视角" />
-        <CamBtn active={camMode === 'follow'} onClick={() => setCamMode(camMode === 'follow' ? 'free' : 'follow')} icon={Focus} label={camMode === 'follow' ? '跟随中·点击停止' : '跟随信号'} />
+        <CamBtn active={camMode === 'overview'} onClick={() => setCamMode('overview')} icon={Maximize} label={t('cam.overview')} />
+        <CamBtn active={camMode === 'membrane'} onClick={() => setCamMode('membrane')} icon={Crosshair} label={t('cam.membrane')} />
+        <CamBtn active={camMode === 'nucleus'} onClick={() => setCamMode('nucleus')} icon={Atom} label={t('cam.nucleus')} />
+        <CamBtn active={camMode === 'follow'} onClick={() => setCamMode(camMode === 'follow' ? 'free' : 'follow')} icon={Focus} label={camMode === 'follow' ? t('cam.following') : t('cam.follow')} />
       </div>
 
       {/* 左下: 图例 */}
@@ -576,24 +620,24 @@ export function VirtualCell3D() {
         {legendOpen ? (
           <div className="rounded-lg border border-white/10 bg-slate-950/75 p-2.5 backdrop-blur-md">
             <div className="mb-1.5 flex items-center justify-between gap-3">
-              <span className="text-[9px] font-medium text-slate-300">分子类别</span>
-              <button className="text-[9px] text-slate-500 hover:text-slate-300" onClick={() => setLegendOpen(false)}>收起</button>
+              <span className="text-[9px] font-medium text-slate-300">{t('legend.title')}</span>
+              <button className="text-[9px] text-slate-500 hover:text-slate-300" onClick={() => setLegendOpen(false)}>{t('legend.collapse')}</button>
             </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-1">
               {Object.entries(KIND_COLORS).map(([k, v]) => (
                 <div key={k} className="flex items-center gap-1.5">
                   <span className="h-2 w-2 rounded-full" style={{ background: v.color, boxShadow: `0 0 6px ${v.color}` }} />
-                  <span className="text-[9px] text-slate-400">{v.label}</span>
+                  <span className="text-[9px] text-slate-400">{t(`kind.${k}`)}</span>
                 </div>
               ))}
             </div>
             <div className="mt-2 space-y-1 border-t border-white/8 pt-1.5">
-              <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-emerald-400" /><span className="text-[9px] text-slate-400">激活/磷酸化</span></div>
-              <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-dashed border-rose-400" /><span className="text-[9px] text-slate-400">抑制/负反馈</span></div>
-              <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-amber-400" /><span className="text-[9px] text-slate-400">转录表达</span></div>
-              <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full border border-amber-400" /><span className="text-[9px] text-slate-400">磷酸化 (P)</span></div>
-              <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-400/80 shadow-[0_0_6px_rgba(251,191,36,0.8)]" /><span className="text-[9px] text-slate-400">mRNA 出核</span></div>
-              <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.9)]" /><span className="text-[9px] text-slate-400">信号事件脉冲</span></div>
+              <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-emerald-400" /><span className="text-[9px] text-slate-400">{t('legend.activation')}</span></div>
+              <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-dashed border-rose-400" /><span className="text-[9px] text-slate-400">{t('legend.inhibition')}</span></div>
+              <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-amber-400" /><span className="text-[9px] text-slate-400">{t('legend.expression')}</span></div>
+              <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full border border-amber-400" /><span className="text-[9px] text-slate-400">{t('legend.phospho')}</span></div>
+              <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-400/80 shadow-[0_0_6px_rgba(251,191,36,0.8)]" /><span className="text-[9px] text-slate-400">{t('legend.mrna')}</span></div>
+              <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.9)]" /><span className="text-[9px] text-slate-400">{t('legend.pulse')}</span></div>
             </div>
           </div>
         ) : (
@@ -601,7 +645,7 @@ export function VirtualCell3D() {
             onClick={() => setLegendOpen(true)}
             className="rounded-lg border border-white/10 bg-slate-950/75 px-2.5 py-1.5 text-[9px] text-slate-400 backdrop-blur-md hover:text-slate-200"
           >
-            图例
+            {t('legend.expand')}
           </button>
         )}
       </div>
@@ -620,7 +664,7 @@ export function VirtualCell3D() {
               <span className="ml-auto hidden font-mono text-[8px] text-slate-500 sm:inline">{tourStep.phaseTag}</span>
               <button
                 onClick={() => openTour(false)}
-                aria-label="退出教学引导"
+                aria-label={t('hud.tour')}
                 className="shrink-0 rounded-md border border-white/10 bg-white/5 p-1 text-slate-500 transition hover:text-rose-300"
               >
                 <X className="h-3 w-3" />
@@ -630,7 +674,7 @@ export function VirtualCell3D() {
             {/* 级联注解（上一站 → 本站） */}
             {tourStep.edgeNote && (
               <p className="mt-2 rounded-lg border border-amber-500/20 bg-amber-950/15 px-2.5 py-1.5 text-[10.5px] leading-relaxed text-amber-200/90">
-                <span className="mr-1 font-mono text-[9px] text-amber-400">级联 ⟶</span>
+                <span className="mr-1 font-mono text-[9px] text-amber-400">{lang === 'zh' ? '级联 ⟶' : 'Cascade ⟶'}</span>
                 {tourStep.edgeNote}
               </p>
             )}
@@ -644,7 +688,7 @@ export function VirtualCell3D() {
                 {tour.map((s, i) => (
                   <button
                     key={s.nodeId}
-                    aria-label={`跳转到 ${s.label}`}
+                    aria-label={`${lang === 'zh' ? '跳转到' : 'Jump to'} ${s.label}`}
                     onClick={() => setTourIdx(i)}
                     className={`h-1.5 shrink-0 rounded-full transition-all ${
                       i === tourIdx
@@ -665,12 +709,12 @@ export function VirtualCell3D() {
                 }`}
               >
                 <CirclePlay className={`h-3 w-3 ${tourAuto ? 'animate-pulse' : ''}`} />
-                自动
+                {lang === 'zh' ? '自动' : 'Auto'}
               </button>
               <button
                 onClick={() => setTourIdx(Math.max(0, tourIdx - 1))}
                 disabled={tourIdx === 0}
-                aria-label="上一站"
+                aria-label={lang === 'zh' ? '上一站' : 'Previous'}
                 className="flex shrink-0 items-center rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-slate-400 transition hover:text-slate-200 disabled:opacity-30"
               >
                 <ChevronLeft className="h-3 w-3" />
@@ -678,10 +722,10 @@ export function VirtualCell3D() {
               <button
                 onClick={() => setTourIdx(Math.min(tour.length - 1, tourIdx + 1))}
                 disabled={tourIdx >= tour.length - 1}
-                aria-label="下一站"
+                aria-label={lang === 'zh' ? '下一站' : 'Next'}
                 className="flex shrink-0 items-center gap-1 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-[10px] text-emerald-300 transition hover:bg-emerald-500/25 disabled:opacity-30"
               >
-                下一站
+                {lang === 'zh' ? '下一站' : 'Next'}
                 <ChevronRight className="h-3 w-3" />
               </button>
             </div>
@@ -699,11 +743,11 @@ export function VirtualCell3D() {
           {clipView ? (
             <>
               <Layers className="h-3 w-3 text-teal-400" />
-              <span className="text-teal-300/90">剖面模式 · {SECTION_ORIENTS[clipAxis].label}（{SECTION_ORIENTS[clipAxis].latin}）</span>
-              <span className="text-slate-600">—— 剖面填充盘展示质膜/细胞质/细胞器/核的切面结构，旋转视角观察纵深</span>
+              <span className="text-teal-300/90">{t('hud.section')} · {SECTION_ORIENTS[clipAxis].label[lang]}（{SECTION_ORIENTS[clipAxis].latin}）</span>
+              <span className="text-slate-600">—— {t('hud.tip.section')}</span>
             </>
           ) : (
-            <span>拖拽旋转 · 滚轮缩放 · 点击分子查看档案 · 悬停显示分子卡</span>
+            <span>{t('hud.tip.free')}</span>
           )}
         </div>
       )}

@@ -1,6 +1,6 @@
 'use client';
 
-/* eslint-disable react-hooks/immutability -- R3F 命令式材质更新是标准范式（项目未启用 React Compiler） */
+/* eslint-disable react-hooks/immutability -- R3F 命令式材质更新是标准范式（useFrame 内直改 uniform/材质属性, 项目未启用 React Compiler） */
 
 /**
  * 3D 分子层 —— 核心子图分子的 3D 表征
@@ -19,6 +19,7 @@ import type { Node3D } from '@/lib/simulation/layout3d';
 import { NODE_NOTES, fallbackNote } from '@/lib/simulation/molecular-notes';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
+import { useLang } from '@/lib/i18n';
 
 export const KIND_COLORS: Record<string, { color: string; label: string }> = {
   ligand: { color: '#fbbf24', label: '配体' },
@@ -73,8 +74,9 @@ interface MoleculeProps {
 }
 
 const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mutant, onHover }: MoleculeProps) {
+  const { t } = useLang();
   const kindColor = KIND_COLORS[node.kind]?.color ?? '#4ade80';
-  const kindZh = KIND_COLORS[node.kind]?.label ?? '分子';
+  const kindZh = t(`kind.${node.kind}`) || (KIND_COLORS[node.kind]?.label ?? '分子');
   const isReceptor = node.kind === 'receptor' || node.kind === 'channel';
 
   const groupRef = useRef<THREE.Group>(null);
@@ -325,6 +327,7 @@ export function MoleculeLayer({
   sim: RefObject<SimSnapshot>;
   showLabels: boolean;
 }) {
+  const { t } = useLang();
   const selectedNode = useLabStore((s) => s.selectedNode);
   const cellId = useLabStore((s) => s.cellId);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -339,7 +342,7 @@ export function MoleculeLayer({
 
   const hoveredNode = nodes.find((n) => n.id === hovered);
   const note = hoveredNode
-    ? NODE_NOTES[hoveredNode.id] ?? NODE_NOTES[hoveredNode.label] ?? fallbackNote(hoveredNode.label, KIND_COLORS[hoveredNode.kind]?.label ?? '分子', COMPARTMENT_ZH[hoveredNode.compartment])
+    ? NODE_NOTES[hoveredNode.id] ?? NODE_NOTES[hoveredNode.label] ?? fallbackNote(hoveredNode.label, t(`kind.${hoveredNode.kind}`) || (KIND_COLORS[hoveredNode.kind]?.label ?? '分子'), t(`comp.${hoveredNode.compartment}`))
     : '';
 
   return (
@@ -369,8 +372,8 @@ export function MoleculeLayer({
           <div className="mol3d-tip">
             <div className="mol3d-tip-head">
               <span className="mol3d-tip-sym">{hoveredNode.label}</span>
-              <span className="mol3d-tip-kind">{KIND_COLORS[hoveredNode.kind]?.label}</span>
-              <span className="mol3d-tip-comp">{COMPARTMENT_ZH[hoveredNode.compartment]}</span>
+              <span className="mol3d-tip-kind">{t(`kind.${hoveredNode.kind}`) || KIND_COLORS[hoveredNode.kind]?.label}</span>
+              <span className="mol3d-tip-comp">{t(`comp.${hoveredNode.compartment}`) || COMPARTMENT_ZH[hoveredNode.compartment] || hoveredNode.compartment}</span>
             </div>
             {hoveredNode.aliases.length > 0 && (
               <div className="mol3d-tip-alias">{hoveredNode.aliases.slice(0, 3).join(' / ')}</div>

@@ -3,43 +3,76 @@
 import { motion } from 'framer-motion';
 import {
   FlaskConical, Dna, Activity, Database, MousePointerClick, Cpu,
-  ArrowDown, ShieldCheck, BookOpen, Layers,
+  ArrowDown, ShieldCheck, BookOpen, Layers, Languages,
 } from 'lucide-react';
 import { CellPicker } from '@/components/lab/cell-picker';
 import { LabWorkspace } from '@/components/lab/workspace';
 import { QueryProvider } from '@/components/lab/providers';
+import { LangProvider, useLang } from '@/lib/i18n';
+// LangProvider 已提升至根布局（layout.tsx）——本文件直接消费 useLang
 
-const STATS = [
-  { icon: Dna, label: '虚拟细胞系', value: '7 种' },
-  { icon: Activity, label: 'KEGG 信号通路', value: '13 条' },
-  { icon: Database, label: '通路分子条目', value: '1,700+' },
-  { icon: Cpu, label: '分子事件注释', value: '200+' },
-];
-
-const METHOD = [
+/** 方法卡（双语） */
+const METHOD: { icon: typeof Dna; title: { zh: string; en: string }; desc: { zh: string; en: string } }[] = [
   {
     icon: Database,
-    title: 'KEGG 实时数据源',
-    desc: '通路拓扑经 KEGG REST API（rest.kegg.jp）实时获取 KGML 并解析为结构化信号网络：entry（分子/化合物）→ relation（激活/抑制/磷酸化/转录表达），Prisma 持久化缓存，二次访问 <10ms。',
+    title: { zh: 'KEGG 实时数据源', en: 'Live KEGG data' },
+    desc: {
+      zh: '通路拓扑经 KEGG REST API（rest.kegg.jp）实时获取 KGML 并解析为结构化信号网络：entry（分子/化合物）→ relation（激活/抑制/磷酸化/转录表达），Prisma 持久化缓存，二次访问 <10ms。',
+      en: 'Pathway topology is fetched live as KGML from the KEGG REST API (rest.kegg.jp) and parsed into a structured signaling network: entries (molecules/compounds) → relations (activation / inhibition / phosphorylation / transcription), persisted with Prisma for <10 ms repeat access.',
+    },
   },
   {
     icon: Layers,
-    title: '分子区室定位',
-    desc: '每个信号分子按功能注释定位到细胞区室：配体（细胞外）→ 受体/通道（磷脂双分子层）→ 激酶/接头蛋白/第二信使（细胞质）→ 转录因子/靶基因（细胞核），并按信号层级（tier 0–6）排布。',
+    title: { zh: '分子区室定位', en: 'Compartmental mapping' },
+    desc: {
+      zh: '每个信号分子按功能注释定位到细胞区室：配体（细胞外）→ 受体/通道（磷脂双分子层）→ 激酶/接头蛋白/第二信使（细胞质）→ 转录因子/靶基因（细胞核），并按信号层级（tier 0–6）排布。',
+      en: 'Every signaling molecule is localized by functional annotation: ligands (extracellular) → receptors/channels (lipid bilayer) → kinases/adapters/second messengers (cytoplasm) → transcription factors/target genes (nucleus), arranged by signaling tier (0–6).',
+    },
   },
   {
     icon: Activity,
-    title: '离散动力学模型',
-    desc: '节点活性沿信号边传播：激活/磷酸化边提升目标活性，抑制边产生衰减；磷酸化修饰、转录延迟、配体洗脱与负反馈（如 DUSP1-ERK、SOCS-JAK）均纳入模型；突变等位基因（KRAS G12D）锁定组成性活性。',
+    title: { zh: '离散动力学模型', en: 'Discrete kinetics' },
+    desc: {
+      zh: '节点活性沿信号边传播：激活/磷酸化边提升目标活性，抑制边产生衰减；磷酸化修饰、转录延迟、配体洗脱与负反馈（如 DUSP1-ERK、SOCS-JAK）均纳入模型；突变等位基因（KRAS G12D）锁定组成性活性。',
+      en: 'Node activity propagates along edges: activation/phosphorylation raises target activity while inhibition decays it; phosphorylation marks, transcriptional delay, ligand washout and negative feedback (DUSP1–ERK, SOCS–JAK) are modeled; mutant alleles (KRAS G12D) lock constitutive activity.',
+    },
   },
   {
     icon: BookOpen,
-    title: '分子级精确注释',
-    desc: '关键级联步骤精确到残基与结构域：例如 "MEK1 双磷酸化 ERK2 Thr185/Tyr187"、"GRB2 SH2 域结合 EGFR pY1068"、"Calcineurin 去磷酸化 NFAT SRR1 区暴露 NLS"——全部基于 KEGG hsa 图谱与经典生化教材策划。',
+    title: { zh: '分子级精确注释', en: 'Residue-level annotation' },
+    desc: {
+      zh: '关键级联步骤精确到残基与结构域：例如 "MEK1 双磷酸化 ERK2 Thr185/Tyr187"、"GRB2 SH2 域结合 EGFR pY1068"、"Calcineurin 去磷酸化 NFAT SRR1 区暴露 NLS"——全部基于 KEGG hsa 图谱与经典生化教材策划。',
+      en: 'Key cascade steps resolve to residues and domains — e.g. "MEK1 dual-phosphorylates ERK2 Thr185/Tyr187", "GRB2 SH2 binds EGFR pY1068", "calcineurin dephosphorylates NFAT SRR1 exposing NLS" — curated from KEGG hsa maps and canonical biochemistry texts.',
+    },
   },
 ];
 
+/** 语言切换按钮（中/EN） */
+function LangSwitch() {
+  const { lang, setLang } = useLang();
+  return (
+    <button
+      onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+      aria-label={lang === 'zh' ? 'Switch to English' : '切换到中文'}
+      title={lang === 'zh' ? 'Switch to English' : '切换到中文'}
+      className="flex items-center gap-1.5 rounded-full border border-white/12 bg-white/[0.04] px-2.5 py-1 font-mono text-[10.5px] text-slate-400 transition hover:border-teal-400/40 hover:text-teal-200"
+    >
+      <Languages className="h-3.5 w-3.5" />
+      <span className={lang === 'zh' ? 'text-emerald-300' : 'text-slate-500'}>中</span>
+      <span className="text-slate-600">/</span>
+      <span className={lang === 'en' ? 'text-emerald-300' : 'text-slate-500'}>EN</span>
+    </button>
+  );
+}
+
 export default function Home() {
+  const { t, lang } = useLang();
+  const stats = [
+    { icon: Dna, label: t('stat.cellLines'), value: '7' },
+    { icon: Activity, label: t('stat.pathways'), value: '13' },
+    { icon: Database, label: t('stat.entries'), value: '1,700+' },
+    { icon: Cpu, label: t('stat.notes'), value: '200+' },
+  ];
   return (
     <QueryProvider>
     <div className="flex min-h-screen flex-col bg-[#030812]">
@@ -51,28 +84,27 @@ export default function Home() {
               <Dna className="h-4.5 w-4.5 text-emerald-400" />
               <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
             </div>
-            <div>
-              <div className="text-[15px] font-semibold leading-tight tracking-tight text-slate-100">
-                VirtualCell <span className="text-emerald-400">Lab</span>
+              <div>
+                <div className="text-[15px] font-semibold leading-tight tracking-tight text-slate-100">
+                  VirtualCell <span className="text-emerald-400">Lab</span>
+                </div>
+                <div className="text-[9.5px] uppercase tracking-[0.22em] text-slate-500">{t('app.title')}</div>
               </div>
-              <div className="text-[9.5px] uppercase tracking-[0.22em] text-slate-500">虚拟细胞实验室</div>
-            </div>
           </div>
 
           <nav className="ml-6 hidden items-center gap-5 text-[12.5px] text-slate-400 md:flex">
-            <a href="#cells" className="transition hover:text-emerald-300">细胞系</a>
-            <a href="#lab" className="transition hover:text-emerald-300">模拟实验台</a>
-            <a href="#method" className="transition hover:text-emerald-300">数据与方法</a>
+            <a href="#cells" className="transition hover:text-emerald-300">{t('nav.cells')}</a>
+            <a href="#lab" className="transition hover:text-emerald-300">{t('nav.lab')}</a>
+            <a href="#method" className="transition hover:text-emerald-300">{t('nav.method')}</a>
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
             <span className="hidden items-center gap-1.5 rounded-full border border-emerald-500/25 bg-emerald-500/[0.07] px-2.5 py-1 text-[10.5px] text-emerald-300/90 sm:flex">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-              KEGG REST · 在线
+              {t('status.online')}
             </span>
-            <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 font-mono text-[10px] text-slate-500">
-              hsa · 13 pathways
-            </span>
+            <span className="hidden rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 font-mono text-[10px] text-slate-500 md:inline">hsa · 13 {t('status.pathways')}</span>
+            <LangSwitch />
           </div>
         </div>
       </header>
@@ -92,7 +124,7 @@ export default function Home() {
                 className="inline-flex items-center gap-2 rounded-full border border-emerald-500/25 bg-emerald-500/[0.07] px-3.5 py-1.5 text-[11px] text-emerald-300/90"
               >
                 <FlaskConical className="h-3.5 w-3.5" />
-                分子级信号转导演示 · KEGG 数据驱动
+                {t('hero.badge')}
               </motion.div>
 
               <motion.h1
@@ -101,10 +133,10 @@ export default function Home() {
                 transition={{ duration: 0.6, delay: 0.08 }}
                 className="mt-5 text-4xl font-bold leading-[1.12] tracking-tight text-slate-50 sm:text-5xl lg:text-[56px]"
               >
-                在虚拟细胞中
+                {t('hero.h1a')}
                 <br />
                 <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-emerald-400 bg-clip-text text-transparent">
-                  观看信号的旅程
+                  {t('hero.h1b')}
                 </span>
               </motion.h1>
 
@@ -114,10 +146,7 @@ export default function Home() {
                 transition={{ duration: 0.6, delay: 0.16 }}
                 className="mt-5 max-w-xl text-[15px] leading-7 text-slate-400"
               >
-                从 KEGG 通路数据库实时获取信号转导图谱，映射到可交互的虚拟细胞：
-                配体扩散 → 受体二聚化 → 胞质激酶级联 → 转录因子入核 → 靶基因表达。
-                每一步都精确到<span className="text-emerald-300">磷酸化残基与结构域</span>——
-                这是教科书插图无法给予的动态直觉。
+                {t('hero.p')}
               </motion.p>
 
               <motion.div
@@ -131,14 +160,14 @@ export default function Home() {
                   className="group inline-flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-5 py-2.5 text-[13.5px] font-medium text-emerald-200 transition-all hover:bg-emerald-500/25 hover:shadow-[0_0_24px_rgba(52,211,153,0.3)]"
                 >
                   <MousePointerClick className="h-4 w-4" />
-                  进入模拟实验台
+                  {t('hero.cta1')}
                   <ArrowDown className="h-3.5 w-3.5 transition-transform group-hover:translate-y-0.5" />
                 </a>
                 <a
                   href="#cells"
                   className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-5 py-2.5 text-[13.5px] text-slate-300 transition hover:border-emerald-500/30 hover:text-emerald-200"
                 >
-                  浏览细胞系
+                  {t('hero.cta2')}
                 </a>
               </motion.div>
 
@@ -148,7 +177,7 @@ export default function Home() {
                 transition={{ duration: 0.8, delay: 0.35 }}
                 className="mt-9 grid max-w-lg grid-cols-2 gap-3 sm:grid-cols-4"
               >
-                {STATS.map((s) => (
+                {stats.map((s) => (
                   <div key={s.label} className="rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2.5">
                     <s.icon className="h-3.5 w-3.5 text-emerald-400/80" />
                     <div className="mt-1.5 font-mono text-[15px] font-semibold text-slate-100">{s.value}</div>
@@ -199,15 +228,15 @@ export default function Home() {
           <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-xl font-semibold tracking-tight text-slate-100">
-                选择虚拟<span className="text-emerald-400">细胞系</span>
+                {t('cells.h2a')}<span className="text-emerald-400">{t('cells.h2b')}</span>
               </h2>
               <p className="mt-1.5 text-[13px] text-slate-500">
-                每种细胞携带不同的受体组与通路网络 —— 癌细胞模型内置驱动突变，无需配体即可观察失控的信号转导
+                {t('cells.p')}
               </p>
             </div>
             <div className="flex items-center gap-2 text-[11px] text-slate-600">
               <ShieldCheck className="h-3.5 w-3.5 text-emerald-500/60" />
-              形态学参数参照 Alberts MBoC / Ross Histology
+              {t('cells.ref')}
             </div>
           </div>
           <CellPicker />
@@ -218,10 +247,10 @@ export default function Home() {
           <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-xl font-semibold tracking-tight text-slate-100">
-                模拟<span className="text-emerald-400">实验台</span>
+                {t('lab.h2a')}<span className="text-emerald-400">{t('lab.h2b')}</span>
               </h2>
               <p className="mt-1.5 text-[13px] text-slate-500">
-                注射配体启动信号级联 · 双视图（细胞 / KEGG 图谱）联动 · 点击分子查看档案 · 时间线实时输出分子事件
+                {t('lab.p')}
               </p>
             </div>
           </div>
@@ -232,16 +261,16 @@ export default function Home() {
         <section id="method" className="mx-auto max-w-[1680px] scroll-mt-20 px-4 pb-14 lg:px-6">
           <div className="mb-5">
             <h2 className="text-xl font-semibold tracking-tight text-slate-100">
-              数据与<span className="text-emerald-400">方法</span>
+              {t('nav.method')}
             </h2>
-            <p className="mt-1.5 text-[13px] text-slate-500">科学性与可复现性说明</p>
+            <p className="mt-1.5 text-[13px] text-slate-500">{lang === 'zh' ? '科学性与可复现性说明' : 'Scientific rigor & reproducibility'}</p>
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             {METHOD.map((m) => (
-              <div key={m.title} className="rounded-2xl border border-white/8 bg-slate-950/40 p-4 transition-colors hover:border-emerald-500/25">
+              <div key={m.title.en} className="rounded-2xl border border-white/8 bg-slate-950/40 p-4 transition-colors hover:border-emerald-500/25">
                 <m.icon className="h-5 w-5 text-emerald-400" />
-                <h3 className="mt-3 text-[13.5px] font-semibold text-slate-100">{m.title}</h3>
-                <p className="mt-2 text-[11.5px] leading-[19px] text-slate-400">{m.desc}</p>
+                <h3 className="mt-3 text-[13.5px] font-semibold text-slate-100">{m.title[lang]}</h3>
+                <p className="mt-2 text-[11.5px] leading-[19px] text-slate-400">{m.desc[lang]}</p>
               </div>
             ))}
           </div>

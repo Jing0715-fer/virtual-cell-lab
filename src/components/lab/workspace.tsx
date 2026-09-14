@@ -24,6 +24,7 @@ import { TranscriptomicHeatmap } from './transcriptomic-heatmap';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { useLang } from '@/lib/i18n';
 
 const TICK_MS = 100;
 
@@ -32,18 +33,24 @@ const VirtualCell3D = dynamic(
   () => import('@/components/cell3d/virtual-cell-3d').then((m) => ({ default: m.VirtualCell3D })),
   {
     ssr: false,
-    loading: () => (
-      <div className="flex h-full items-center justify-center bg-[radial-gradient(ellipse_at_center,#04211d_0%,#020617_60%)]">
-        <div className="text-center">
-          <div className="mx-auto mb-3 h-10 w-10 animate-spin rounded-full border-2 border-emerald-500/30 border-t-emerald-400" />
-          <p className="text-xs text-slate-500">正在初始化 3D 渲染引擎…</p>
-        </div>
-      </div>
-    ),
+    loading: () => <EngineLoading />,
   },
 );
 
+function EngineLoading() {
+  const { t } = useLang();
+  return (
+    <div className="flex h-full items-center justify-center bg-[radial-gradient(ellipse_at_center,#04211d_0%,#020617_60%)]">
+      <div className="text-center">
+        <div className="mx-auto mb-3 h-10 w-10 animate-spin rounded-full border-2 border-emerald-500/30 border-t-emerald-400" />
+        <p className="text-xs text-slate-500">{t('loading.engine')}</p>
+      </div>
+    </div>
+  );
+}
+
 export function LabWorkspace() {
+  const { t } = useLang();
   const pathwayId = useLabStore((s) => s.pathwayId);
   const view = useLabStore((s) => s.view);
   const setView = useLabStore((s) => s.setView);
@@ -100,7 +107,7 @@ export function LabWorkspace() {
       <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-white/5 bg-slate-950/40 text-slate-500">
         <div className="text-center">
           <FlaskConical className="mx-auto mb-3 h-8 w-8 text-slate-700" />
-          <p className="text-sm">从左侧通路库选择一条 KEGG 信号通路开始实验</p>
+          <p className="text-sm">{t('lab.empty.title')}</p>
         </div>
       </div>
     );
@@ -126,7 +133,7 @@ export function LabWorkspace() {
               )}
             >
               <Orbit className="h-3.5 w-3.5" />
-              3D 沉浸
+              {t('view.3d')}
             </button>
             <button
               onClick={() => setView('cell')}
@@ -136,7 +143,7 @@ export function LabWorkspace() {
               )}
             >
               <Microscope className="h-3.5 w-3.5" />
-              2D 切面
+              {t('view.2d')}
             </button>
             <button
               onClick={() => setView('map')}
@@ -146,7 +153,7 @@ export function LabWorkspace() {
               )}
             >
               <MapIcon className="h-3.5 w-3.5" />
-              KEGG 图谱
+              {t('view.map')}
             </button>
           </div>
           <div className="ml-auto flex items-center gap-2">

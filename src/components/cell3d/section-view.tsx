@@ -1,19 +1,20 @@
 'use client';
 
 /**
- * 细胞剖面展示模块（增强版）
+ * 细胞剖面展示模块（v2 —— 剖切几何精确化）
  * ============ 科学定位 ============
  * 基于 Three.js 全局裁剪平面（clippingPlanes）剖切细胞前半部：
- *   1. 剖切深度可调（表面 → 深剖近后半）
- *   2. 剖切方位三预设：正剖（冠状面观）/ 俯剖（水平面观）/ 侧剖（矢状面观）——
- *      对应显微解剖学三个标准切面（coronal / horizontal / sagittal）
- *   3. 剖面填充盘（Section Cap）：程序化 Canvas 纹理绘制"剖面标本图"——
- *      质膜双层线 · 细胞质颗粒基质 · 细胞器剖面散布（线粒体/高尔基/囊泡/ER）
- *      · 核被膜双线 · 异染色质边集 · 常染色质纤维 · 核仁，科学参照
- *      Alberts MBoC 6th Fig.1-8 / Ross Histology 电镜剖面风格
- *   4. 剖面方位平滑过渡（四元数阻尼插值）
+ *   1. 剖切深度 0-1 线性扫掠: 切平面从质膜前缘 (constant=+R) 推进到后缘 (-R)，
+ *      途中经过球心 (depth=0.5) —— 与显微切片"逐层切片"语义一致
+ *   2. 剖面填充双层盘（几何精确）:
+ *      - 细胞质盘半径 = √(R²-h²)（h = 切面到球心距离）—— 严格贴合剖切相交圆
+ *      - 核盘半径 = √(N²-h²)（h < N 时才显示）—— 切面触核后渐入、掠过核心最大
+ *      两盘同心（膜与核球同心, 切面垂足即公共圆心）
+ *   3. 剖面填充纹理（程序化 Canvas 双纹理, 电镜切片风格）:
+ *      - 细胞质纹理: 质膜双层线/糖被/颗粒基质/线粒体剖面(双层膜+嵴)/高尔基池弧/ER 波浪线/囊泡
+ *      - 核纹理: 核被膜双线+核孔短杆/常染色质纤维/异染色质边集/核仁(纤维中心+颗粒组分)
+ *   4. 剖切方位三预设: 正剖 Coronal / 俯剖 Horizontal / 侧剖 Sagittal（解剖学标准切面）
  *   5. 被剖掉的前半分子 DOM 标签同步隐藏（SimSnapshot.clipPlane 快照广播）
- *   6. 剖面结构 Html 标注（联动解剖标注开关）
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
@@ -27,25 +28,34 @@ export type SectionAxis = 'front' | 'top' | 'side';
 
 export const SECTION_ORIENTS: Record<
   SectionAxis,
-  { normal: THREE.Vector3; label: string; latin: string; hint: string }
+  { normal: THREE.Vector3; label: { zh: string; en: string }; latin: string; hint: { zh: string; en: string } }
 > = {
   front: {
     normal: new THREE.Vector3(0, -0.22, -1).normalize(),
-    label: '正剖',
+    label: { zh: '正剖', en: 'Front' },
     latin: 'Coronal',
-    hint: '冠状面 · 剖开前半部，正对观察者',
+    hint: {
+      zh: '冠状面 · 剖开前半部，正对观察者',
+      en: 'Coronal plane — anterior half removed, facing viewer',
+    },
   },
   top: {
     normal: new THREE.Vector3(0.04, -1, -0.14).normalize(),
-    label: '俯剖',
+    label: { zh: '俯剖', en: 'Top' },
     latin: 'Horizontal',
-    hint: '水平面 · 自上而下剖开上半部',
+    hint: {
+      zh: '水平面 · 自上而下剖开上半部',
+      en: 'Horizontal plane — superior half removed',
+    },
   },
   side: {
     normal: new THREE.Vector3(-1, -0.14, -0.32).normalize(),
-    label: '侧剖',
+    label: { zh: '侧剖', en: 'Side' },
     latin: 'Sagittal',
-    hint: '矢状面 · 自左侧剖开，纵切细胞长轴',
+    hint: {
+      zh: '矢状面 · 自左侧剖开，纵切细胞长轴',
+      en: 'Sagittal plane — lateral section along major axis',
+    },
   },
 };
 
@@ -62,13 +72,10 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-/* ============ 程序化剖面纹理（剖面标本图） ============ */
+/* ============ 程序化剖面纹理（双层） ============ */
 
-/**
- * 绘制剖面填充盘纹理：模拟光学显微镜下细胞切片的染色风格
- * （细胞质 teal 基底 → 紫红色核染色质 → 玫瑰核仁，保持应用主题色系）
- */
-function makeSectionTexture(R: number, N: number, seed = 42): THREE.CanvasTexture | null {
+/** 细胞质剖面纹理（核区挖空透明; 基准半径 = R, 盘缩放后 UV 随动） */
+function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null {
   if (typeof document === 'undefined') return null;
   const SIZE = 640;
   const c = document.createElement('canvas');
@@ -78,29 +85,22 @@ function makeSectionTexture(R: number, N: number, seed = 42): THREE.CanvasTextur
   const rnd = mulberry32(seed);
   const cx = SIZE / 2;
   const cy = SIZE / 2;
-  /** 世界半径 → 像素半径（贴盘边） */
-  const px = (world: number): number => (world / (R * 1.05)) * (SIZE / 2 - 4);
-  const rMem = px(R);
-  const rNuc = px(N);
+  const rMem = SIZE / 2 - 4;
 
   /* --- 细胞质基质（径向渐变, 外深内浅） --- */
-  const cyto = ctx.createRadialGradient(cx, cy, rNuc * 0.9, cx, cy, rMem);
-  cyto.addColorStop(0, 'rgba(13, 74, 68, 0.78)');
-  cyto.addColorStop(0.55, 'rgba(10, 56, 52, 0.72)');
-  cyto.addColorStop(1, 'rgba(6, 34, 32, 0.88)');
+  const cyto = ctx.createRadialGradient(cx, cy, rMem * 0.3, cx, cy, rMem);
+  cyto.addColorStop(0, 'rgba(13, 74, 68, 0.80)');
+  cyto.addColorStop(0.55, 'rgba(10, 56, 52, 0.74)');
+  cyto.addColorStop(1, 'rgba(6, 34, 32, 0.90)');
   ctx.fillStyle = cyto;
   ctx.beginPath();
   ctx.arc(cx, cy, rMem, 0, Math.PI * 2);
   ctx.fill();
 
-  /* --- 细胞质颗粒基质（核糖体/糖原弥散点） --- */
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(cx, cy, rMem, 0, Math.PI * 2);
-  ctx.clip();
-  for (let i = 0; i < 420; i++) {
+  /* --- 细胞质颗粒基质（核糖体/糖原弥散点, 全域散布; 核盘将叠于其上） --- */
+  for (let i = 0; i < 460; i++) {
     const a = rnd() * Math.PI * 2;
-    const rr = rNuc + 12 + rnd() * (rMem - rNuc - 18);
+    const rr = rMem * (0.18 + rnd() * 0.8);
     const x = cx + Math.cos(a) * rr;
     const y = cy + Math.sin(a) * rr * 0.96;
     ctx.fillStyle = rnd() > 0.7 ? 'rgba(94, 234, 212, 0.10)' : 'rgba(45, 212, 191, 0.055)';
@@ -109,19 +109,18 @@ function makeSectionTexture(R: number, N: number, seed = 42): THREE.CanvasTextur
   }
 
   /* --- 线粒体剖面（椭圆 · 双层膜 + 板层嵴） --- */
-  const mitoCount = 7;
+  const mitoCount = 8;
   for (let i = 0; i < mitoCount; i++) {
     const a = rnd() * Math.PI * 2;
-    const rr = rNuc + 26 + rnd() * (rMem - rNuc - 58);
+    const rr = rMem * (0.44 + rnd() * 0.48);
     const x = cx + Math.cos(a) * rr;
     const y = cy + Math.sin(a) * rr * 0.94;
-    const rx = 16 + rnd() * 13;
+    const rx = 17 + rnd() * 13;
     const ry = rx * (0.56 + rnd() * 0.2);
     const rot = rnd() * Math.PI;
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rot);
-    // 外膜
     ctx.beginPath();
     ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(26, 46, 5, 0.85)';
@@ -129,7 +128,6 @@ function makeSectionTexture(R: number, N: number, seed = 42): THREE.CanvasTextur
     ctx.lineWidth = 1.6;
     ctx.strokeStyle = 'rgba(132, 204, 22, 0.6)';
     ctx.stroke();
-    // 内膜 + 嵴（波浪短弧）
     ctx.beginPath();
     ctx.ellipse(0, 0, rx - 2.6, ry - 2.6, 0, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(101, 163, 13, 0.5)';
@@ -152,7 +150,7 @@ function makeSectionTexture(R: number, N: number, seed = 42): THREE.CanvasTextur
   /* --- 高尔基体剖面（顺→反 3-4 池弧线堆叠） --- */
   for (let g = 0; g < 2; g++) {
     const a = rnd() * Math.PI * 2;
-    const rr = rNuc + 30 + rnd() * (rMem - rNuc - 62);
+    const rr = rMem * (0.5 + rnd() * 0.4);
     const x = cx + Math.cos(a) * rr;
     const y = cy + Math.sin(a) * rr * 0.94;
     ctx.save();
@@ -168,10 +166,10 @@ function makeSectionTexture(R: number, N: number, seed = 42): THREE.CanvasTextur
     ctx.restore();
   }
 
-  /* --- 内质网剖面（波浪长线） --- */
-  for (let e = 0; e < 3; e++) {
+  /* --- 内质网剖面（波浪长线 + 膜旁核糖体） --- */
+  for (let e = 0; e < 4; e++) {
     const a = rnd() * Math.PI * 2;
-    const rr = rNuc + 20 + rnd() * (rMem - rNuc - 40);
+    const rr = rMem * (0.42 + rnd() * 0.5);
     ctx.save();
     ctx.translate(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr * 0.92);
     ctx.rotate(rnd() * Math.PI);
@@ -184,7 +182,6 @@ function makeSectionTexture(R: number, N: number, seed = 42): THREE.CanvasTextur
     ctx.strokeStyle = 'rgba(13, 148, 136, 0.5)';
     ctx.lineWidth = 1.8;
     ctx.stroke();
-    // 膜旁核糖体点
     for (let x = -32; x <= 32; x += 6) {
       const y = Math.sin(x * 0.22 + e * 2) * 5 + 3.4;
       ctx.fillStyle = 'rgba(45, 212, 191, 0.35)';
@@ -194,9 +191,9 @@ function makeSectionTexture(R: number, N: number, seed = 42): THREE.CanvasTextur
   }
 
   /* --- 转运囊泡（小圆环） --- */
-  for (let v = 0; v < 18; v++) {
+  for (let v = 0; v < 20; v++) {
     const a = rnd() * Math.PI * 2;
-    const rr = rNuc + 14 + rnd() * (rMem - rNuc - 20);
+    const rr = rMem * (0.3 + rnd() * 0.66);
     const x = cx + Math.cos(a) * rr;
     const y = cy + Math.sin(a) * rr * 0.94;
     const r = 2.2 + rnd() * 2.8;
@@ -208,92 +205,8 @@ function makeSectionTexture(R: number, N: number, seed = 42): THREE.CanvasTextur
     ctx.lineWidth = 1;
     ctx.stroke();
   }
-  ctx.restore();
 
-  /* --- 核区 --- */
-  // 常染色质基底（中心浅 → 边缘异染色质深）
-  const nuc = ctx.createRadialGradient(cx, cy, rNuc * 0.1, cx, cy, rNuc);
-  nuc.addColorStop(0, 'rgba(107, 33, 168, 0.66)');
-  nuc.addColorStop(0.62, 'rgba(88, 28, 135, 0.74)');
-  nuc.addColorStop(0.86, 'rgba(59, 7, 100, 0.86)');
-  nuc.addColorStop(1, 'rgba(46, 16, 101, 0.94)');
-  ctx.fillStyle = nuc;
-  ctx.beginPath();
-  ctx.arc(cx, cy, rNuc, 0, Math.PI * 2);
-  ctx.fill();
-
-  // 异染色质边集环带（核周缘致密, 符合间期核型）
-  ctx.beginPath();
-  ctx.arc(cx, cy, rNuc - 5, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(46, 16, 101, 0.55)';
-  ctx.lineWidth = 9;
-  ctx.stroke();
-
-  // 常染色质纤维（细弧线网）
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(cx, cy, rNuc - 10, 0, Math.PI * 2);
-  ctx.clip();
-  for (let f = 0; f < 9; f++) {
-    const a0 = rnd() * Math.PI * 2;
-    const rr = rNuc * (0.2 + rnd() * 0.55);
-    ctx.beginPath();
-    ctx.arc(cx + Math.cos(a0) * rr * 0.4, cy + Math.sin(a0) * rr * 0.4, rr, a0, a0 + Math.PI * (0.7 + rnd() * 0.9));
-    ctx.strokeStyle = 'rgba(168, 85, 247, 0.16)';
-    ctx.lineWidth = 1.3;
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  /* --- 核仁（1-2 个 · 纤维中心 + 颗粒组分） --- */
-  const nucleoli = 1 + (rnd() > 0.55 ? 1 : 0);
-  for (let k = 0; k < nucleoli; k++) {
-    const a = rnd() * Math.PI * 2;
-    const rr = rNuc * (0.3 + rnd() * 0.24);
-    const nx = cx + Math.cos(a) * rr;
-    const ny = cy + Math.sin(a) * rr;
-    const nr = rNuc * (0.16 + rnd() * 0.07);
-    const gr = ctx.createRadialGradient(nx, ny, 1, nx, ny, nr);
-    gr.addColorStop(0, 'rgba(251, 113, 133, 0.85)');
-    gr.addColorStop(0.55, 'rgba(159, 18, 57, 0.88)');
-    gr.addColorStop(1, 'rgba(76, 5, 25, 0.92)');
-    ctx.fillStyle = gr;
-    ctx.beginPath();
-    ctx.arc(nx, ny, nr, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(244, 63, 94, 0.4)';
-    ctx.lineWidth = 1.4;
-    ctx.stroke();
-  }
-
-  /* --- 核被膜双线（外膜 + 内膜 + 核周间隙） --- */
-  ctx.beginPath();
-  ctx.arc(cx, cy, rNuc, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(244, 114, 182, 0.72)';
-  ctx.lineWidth = 2.2;
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(cx, cy, rNuc - 6.5, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(190, 24, 93, 0.5)';
-  ctx.lineWidth = 1.3;
-  ctx.stroke();
-  // 核孔复合体剖面（周缘放射短杆）
-  const npores = Math.floor((rNuc * 2 * Math.PI) / 26);
-  for (let p = 0; p < npores; p++) {
-    const a = (p / npores) * Math.PI * 2;
-    const x1 = cx + Math.cos(a) * (rNuc + 3.5);
-    const y1 = cy + Math.sin(a) * (rNuc + 3.5);
-    const x2 = cx + Math.cos(a) * (rNuc - 9);
-    const y2 = cy + Math.sin(a) * (rNuc - 9);
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.strokeStyle = 'rgba(226, 232, 240, 0.4)';
-    ctx.lineWidth = 1.6;
-    ctx.stroke();
-  }
-
-  /* --- 质膜剖面（双层磷脂线 + 膜间腔） --- */
+  /* --- 质膜剖面（双层磷脂线 + 膜间腔 + 糖被短须） --- */
   ctx.beginPath();
   ctx.arc(cx, cy, rMem, 0, Math.PI * 2);
   ctx.strokeStyle = 'rgba(45, 212, 191, 0.9)';
@@ -304,7 +217,6 @@ function makeSectionTexture(R: number, N: number, seed = 42): THREE.CanvasTextur
   ctx.strokeStyle = 'rgba(15, 118, 110, 0.66)';
   ctx.lineWidth = 1.7;
   ctx.stroke();
-  // 膜外微绒毛/糖被短须
   const glyco = Math.floor((rMem * 2 * Math.PI) / 14);
   for (let p = 0; p < glyco; p++) {
     const a = (p / glyco) * Math.PI * 2 + rnd() * 0.05;
@@ -326,15 +238,107 @@ function makeSectionTexture(R: number, N: number, seed = 42): THREE.CanvasTextur
   return tex;
 }
 
-/* ============ 剖面标注点 ============ */
+/** 核剖面纹理（基准半径 = N; 盘缩放后核孔/核仁等随动） */
+function makeNucleusTexture(N: number, seed = 7): THREE.CanvasTexture | null {
+  if (typeof document === 'undefined') return null;
+  const SIZE = 320;
+  const c = document.createElement('canvas');
+  c.width = c.height = SIZE;
+  const ctx = c.getContext('2d');
+  if (!ctx) return null;
+  const rnd = mulberry32(seed);
+  const cx = SIZE / 2;
+  const cy = SIZE / 2;
+  const rNuc = SIZE / 2 - 4;
 
-const SECTION_ANNOTATIONS = [
-  { local: [0, 0.4, 0], zh: '细胞核（剖面）', latin: 'Nucleus, sectioned' },
-  { local: [0.52, 0.26, 0], zh: '细胞质基质', latin: 'Cytosol' },
-  { local: [0.965, 0.12, 0], zh: '质膜（剖面）', latin: 'Plasma membrane' },
-] as const;
+  /* --- 常染色质基底（中心浅 → 边缘异染色质深） --- */
+  const nuc = ctx.createRadialGradient(cx, cy, rNuc * 0.08, cx, cy, rNuc);
+  nuc.addColorStop(0, 'rgba(107, 33, 168, 0.72)');
+  nuc.addColorStop(0.62, 'rgba(88, 28, 135, 0.80)');
+  nuc.addColorStop(0.86, 'rgba(59, 7, 100, 0.9)');
+  nuc.addColorStop(1, 'rgba(46, 16, 101, 0.96)');
+  ctx.fillStyle = nuc;
+  ctx.beginPath();
+  ctx.arc(cx, cy, rNuc, 0, Math.PI * 2);
+  ctx.fill();
 
-/* ============ 剖面控制器 ============ */
+  /* --- 异染色质边集环带（核周缘致密, 符合间期核型） --- */
+  ctx.beginPath();
+  ctx.arc(cx, cy, rNuc - 4.5, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(46, 16, 101, 0.5)';
+  ctx.lineWidth = 8;
+  ctx.stroke();
+
+  /* --- 常染色质纤维（细弧线网） --- */
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, rNuc - 9, 0, Math.PI * 2);
+  ctx.clip();
+  for (let f = 0; f < 10; f++) {
+    const a0 = rnd() * Math.PI * 2;
+    const rr = rNuc * (0.2 + rnd() * 0.55);
+    ctx.beginPath();
+    ctx.arc(cx + Math.cos(a0) * rr * 0.4, cy + Math.sin(a0) * rr * 0.4, rr, a0, a0 + Math.PI * (0.7 + rnd() * 0.9));
+    ctx.strokeStyle = 'rgba(168, 85, 247, 0.17)';
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  /* --- 核仁（1-2 个 · 纤维中心 + 颗粒组分） --- */
+  const nucleoli = 1 + (rnd() > 0.55 ? 1 : 0);
+  for (let k = 0; k < nucleoli; k++) {
+    const a = rnd() * Math.PI * 2;
+    const rr = rNuc * (0.3 + rnd() * 0.24);
+    const nx = cx + Math.cos(a) * rr;
+    const ny = cy + Math.sin(a) * rr;
+    const nr = rNuc * (0.16 + rnd() * 0.07);
+    const gr = ctx.createRadialGradient(nx, ny, 1, nx, ny, nr);
+    gr.addColorStop(0, 'rgba(251, 113, 133, 0.88)');
+    gr.addColorStop(0.55, 'rgba(159, 18, 57, 0.9)');
+    gr.addColorStop(1, 'rgba(76, 5, 25, 0.94)');
+    ctx.fillStyle = gr;
+    ctx.beginPath();
+    ctx.arc(nx, ny, nr, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(244, 63, 94, 0.4)';
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+  }
+
+  /* --- 核被膜双线（外膜 + 内膜 + 核周间隙） + 核孔复合体剖面 --- */
+  ctx.beginPath();
+  ctx.arc(cx, cy, rNuc, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(244, 114, 182, 0.78)';
+  ctx.lineWidth = 2.4;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, rNuc - 6.5, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(190, 24, 93, 0.55)';
+  ctx.lineWidth = 1.3;
+  ctx.stroke();
+  const npores = Math.floor((rNuc * 2 * Math.PI) / 22);
+  for (let p = 0; p < npores; p++) {
+    const a = (p / npores) * Math.PI * 2;
+    const x1 = cx + Math.cos(a) * (rNuc + 3);
+    const y1 = cy + Math.sin(a) * (rNuc + 3);
+    const x2 = cx + Math.cos(a) * (rNuc - 8.5);
+    const y2 = cy + Math.sin(a) * (rNuc - 8.5);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.strokeStyle = 'rgba(226, 232, 240, 0.42)';
+    ctx.lineWidth = 1.7;
+    ctx.stroke();
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+/* ============ 剖面控制器（几何精确版） ============ */
 
 /* eslint-disable react-hooks/immutability -- renderer.clippingPlanes 为 three.js 全局渲染器命令式 API（R3F 标准用法） */
 export function SectionClipController({
@@ -344,9 +348,10 @@ export function SectionClipController({
   spec,
   showAnatomy,
   sim,
+  labels,
 }: {
   enabled: boolean;
-  /** 剖切深度 0-1（0 = 触及表面, 1 = 深剖近后半） */
+  /** 剖切深度 0-1（切平面从前缘 +R 线性扫到后缘 -R; 0.5 过球心） */
   depth: number;
   axis: SectionAxis;
   spec: CellBodySpec;
@@ -354,6 +359,8 @@ export function SectionClipController({
   showAnatomy: boolean;
   /** 模拟快照引用（广播 clipPlane → 分子标签层同步隐藏被剖掉的前半分子标签） */
   sim: { current: { clipPlane?: THREE.Plane | null } };
+  /** 剖面结构标注文案（i18n） */
+  labels: { nucleus: string; cytosol: string; membrane: string; section: string };
 }) {
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
@@ -361,31 +368,36 @@ export function SectionClipController({
   const R = spec.membraneR;
   const N = spec.nucleusR;
 
-  const plane = useMemo(() => new THREE.Plane(SECTION_ORIENTS.front.normal.clone(), 0.9), []);
+  const plane = useMemo(() => new THREE.Plane(SECTION_ORIENTS.front.normal.clone(), R * 0.35), []);
   const targetNormal = useRef(plane.normal.clone());
-  const targetConstant = useRef(0.9);
+  const targetConstant = useRef(R * 0.35);
   const origSides = useRef<Map<THREE.Material, THREE.Side>>(new Map());
   const discGroupRef = useRef<THREE.Group | null>(null);
+  const cytoDiscRef = useRef<THREE.Mesh | null>(null);
+  const cytoRingRef = useRef<THREE.Mesh | null>(null);
+  const nucDiscRef = useRef<THREE.Mesh | null>(null);
   const [ready, setReady] = useState(false);
 
-  const capTex = useMemo(() => makeSectionTexture(R, N), [R, N]);
+  const cytoTex = useMemo(() => makeCytoplasmTexture(R), [R]);
+  const nucTex = useMemo(() => makeNucleusTexture(N), [N]);
   useEffect(() => {
-    if (!capTex) return;
+    if (!cytoTex || !nucTex) return;
     setReady(true);
     return () => {
-      capTex.dispose();
+      cytoTex.dispose();
+      nucTex.dispose();
     };
-  }, [capTex]);
+  }, [cytoTex, nucTex]);
 
   /* 方位变化 → 目标法向（平滑过渡在 useFrame 中完成） */
   useEffect(() => {
     targetNormal.current.copy(SECTION_ORIENTS[axis].normal);
   }, [axis]);
 
-  /* 深度 → 平面常数（10 = 保留全部 → -4 = 深剖） */
+  /* 深度 → 平面常数（+R 前缘 → -R 后缘, 0.5 过球心 = 最大剖面） */
   useEffect(() => {
-    targetConstant.current = 10 - depth * 14;
-  }, [depth]);
+    targetConstant.current = R - depth * 2 * R;
+  }, [depth, R]);
 
   /* 开/关剖切: 全局裁剪平面挂载 + 结构材质临时双面化（记忆原 side 以还原） */
   useEffect(() => {
@@ -447,7 +459,11 @@ export function SectionClipController({
     return () => cancelAnimationFrame(raf);
   }, [enabled, scene]);
 
-  /* 帧驱动: 方位/深度阻尼 + 盘位姿同步 + clipPlane 广播 */
+  /* 帧驱动: 方位/深度阻尼 + 双层盘几何同步 + clipPlane 广播
+   * 几何: h = |constant|（切面到球心距离）
+   *   细胞质盘 scale = √(R²-h²)/R   （剖切相交圆, 严格贴合）
+   *   核盘     scale = √(N²-h²)/N   （h < N 才可见, 切面触核渐入）
+   *   盘组位置 = -constant·normal + normal·0.035（切面中心 + 保留侧微偏移） */
   useFrame(() => {
     // 法向阻尼插值
     plane.normal.lerp(targetNormal.current, 0.07);
@@ -456,7 +472,9 @@ export function SectionClipController({
     // 常数阻尼
     plane.constant += (targetConstant.current - plane.constant) * 0.12;
 
-    // 剖面填充盘位姿: 平面中心 + 保留侧微偏移, 朝向 = 平面法向
+    const h = Math.abs(plane.constant);
+
+    // 剖面双层盘位姿: 切面中心 + 保留侧偏移
     if (discGroupRef.current) {
       discGroupRef.current.position
         .copy(plane.normal)
@@ -465,22 +483,45 @@ export function SectionClipController({
         new THREE.Vector3(0, 0, 1),
         plane.normal,
       );
+
+      // 细胞质盘: 相交圆半径 √(R²-h²)
+      const rc = h < R ? Math.sqrt(R * R - h * h) : 0;
+      const cytoScale = Math.max(0.001, rc / R);
+      if (cytoDiscRef.current) cytoDiscRef.current.scale.setScalar(cytoScale);
+      if (cytoRingRef.current) cytoRingRef.current.scale.setScalar(cytoScale);
+      const discVisible = rc > R * 0.08;
+      if (cytoDiscRef.current) cytoDiscRef.current.visible = discVisible;
+      if (cytoRingRef.current) cytoRingRef.current.visible = discVisible;
+
+      // 核盘: 相交圆半径 √(N²-h²), h < N 时渐入
+      const rn = h < N ? Math.sqrt(N * N - h * h) : 0;
+      if (nucDiscRef.current) {
+        nucDiscRef.current.scale.setScalar(Math.max(0.001, rn / N));
+        nucDiscRef.current.visible = rn > N * 0.12;
+      }
     }
     // 广播裁剪平面（分子标签层读取; 关闭时置 null）
     sim.current.clipPlane = enabled ? plane : null;
   });
 
-  const discR = R * 1.055;
+  const annos = useMemo(
+    () => [
+      { local: [0, 0.06, 0.14], text: labels.nucleus, show: true },
+      { local: [0.58, 0.34, 0], text: labels.cytosol, show: true },
+      { local: [1.0, 0.18, 0], text: labels.membrane, show: true },
+    ],
+    [labels],
+  );
 
   return (
     <>
-      {enabled && ready && capTex && (
+      {enabled && ready && cytoTex && nucTex && (
         <group ref={discGroupRef}>
-          {/* 剖面填充盘（程序化剖面标本纹理） */}
-          <mesh renderOrder={96}>
-            <circleGeometry args={[discR, 96]} />
+          {/* 细胞质剖面填充盘（相交圆半径动态缩放） */}
+          <mesh ref={cytoDiscRef} renderOrder={96}>
+            <circleGeometry args={[R, 96]} />
             <meshBasicMaterial
-              map={capTex}
+              map={cytoTex}
               transparent
               opacity={0.94}
               side={THREE.DoubleSide}
@@ -490,21 +531,31 @@ export function SectionClipController({
               polygonOffsetFactor={-4}
             />
           </mesh>
-          {/* 剖面发光边缘（切割亮线） */}
-          <mesh renderOrder={97}>
-            <ringGeometry args={[discR - 0.1, discR, 96]} />
-            <meshBasicMaterial color="#5eead4" transparent opacity={0.6} side={THREE.DoubleSide} depthWrite={false} fog={false} />
+          {/* 剖面发光边缘（切割亮线, 随相交圆缩放） */}
+          <mesh ref={cytoRingRef} renderOrder={97}>
+            <ringGeometry args={[R - 0.12, R, 96]} />
+            <meshBasicMaterial color="#5eead4" transparent opacity={0.65} side={THREE.DoubleSide} depthWrite={false} fog={false} />
           </mesh>
-          <mesh renderOrder={97}>
-            <ringGeometry args={[discR * 0.415, discR * 0.415 + 0.05, 64]} />
-            <meshBasicMaterial color="#f472b6" transparent opacity={0.14} side={THREE.DoubleSide} depthWrite={false} fog={false} />
+          {/* 核剖面盘（切面触核后渐入, 半径 √(N²-h²)） */}
+          <mesh ref={nucDiscRef} renderOrder={98}>
+            <circleGeometry args={[N, 64]} />
+            <meshBasicMaterial
+              map={nucTex}
+              transparent
+              opacity={0.97}
+              side={THREE.DoubleSide}
+              depthWrite={false}
+              fog={false}
+              polygonOffset
+              polygonOffsetFactor={-6}
+            />
           </mesh>
           {/* 剖面结构标注（联动解剖标注开关） */}
           {showAnatomy &&
-            SECTION_ANNOTATIONS.map((a) => (
+            annos.map((a) => (
               <Html
-                key={a.zh}
-                position={[(a.local[0] as number) * R, (a.local[1] as number) * R, (a.local[2] as number) + 0.12]}
+                key={a.text}
+                position={[a.local[0] * R, a.local[1] * R, a.local[2]]}
                 center
                 transform
                 distanceFactor={15}
@@ -513,8 +564,7 @@ export function SectionClipController({
                 style={{ pointerEvents: 'none', userSelect: 'none' }}
               >
                 <div className="mol3d-label is-active section-anno" style={{ whiteSpace: 'nowrap' }}>
-                  <span className="mol3d-sym">{a.zh}</span>
-                  <span className="mol3d-kind">{a.latin}</span>
+                  <span className="mol3d-sym">{a.text}</span>
                 </div>
               </Html>
             ))}
