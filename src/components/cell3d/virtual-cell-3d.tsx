@@ -295,8 +295,9 @@ export function VirtualCell3D() {
   // 初始化函数立即探测 → Canvas 首次创建即使用正确参数（避免低端设备以重参数初始化后无法降级）
   const [perfMode, setPerfMode] = useState(false);
   // 剖面展示: 全局裁剪平面剖切细胞 + 剖面填充盘 + 方位/深度控制
-  const [clipView, setClipView] = useState(false);
-  const [clipDepth, setClipDepth] = useState(0.65);
+  // 默认开启（完整质膜会遮挡内部结构, 剖面下核 + 细胞器同现）; 深度 0.5 = 过心剖面
+  const [clipView, setClipView] = useState(true);
+  const [clipDepth, setClipDepth] = useState(0.5);
   const [clipAxis, setClipAxis] = useState<SectionAxis>('front');
   // WebGL 上下文丢失提示（自动恢复尝试中）
   const [ctxLost, setCtxLost] = useState(false);

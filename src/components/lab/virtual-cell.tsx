@@ -64,7 +64,8 @@ export function VirtualCellView() {
   );
 
   // ---- 缩放/平移 ----
-  const [vb, setVb] = useState({ x: 0, y: 0, w: CANVAS.w, h: CANVAS.h });
+  // 初始视域聚焦细胞主体（配体带→基底膜），较全画布约 1.1× 放大，分子标签更易读
+  const [vb, setVb] = useState({ x: 60, y: 76, w: 1080, h: 700 });
   const svgRef = useRef<SVGSVGElement>(null);
   const dragging = useRef<{ x: number; y: number; vb: typeof vb } | null>(null);
 
@@ -175,10 +176,10 @@ export function VirtualCellView() {
         </g>
 
         {/* 区室标注 */}
-        <g fontSize={11} fill="#475569" fontFamily="var(--font-geist-mono, monospace)" letterSpacing={2}>
-          <text x={16} y={30}>EXTRACELLULAR · 细胞外</text>
-          <text x={16} y={158}>PLASMA MEMBRANE · 质膜</text>
-          <text x={16} y={238}>CYTOPLASM · 细胞质</text>
+        <g fontSize={12.5} fill="#5b6b7c" fontFamily="var(--font-geist-mono, monospace)" letterSpacing={2}>
+          <text x={20} y={34}>EXTRACELLULAR · 细胞外</text>
+          <text x={20} y={162}>PLASMA MEMBRANE · 质膜</text>
+          <text x={20} y={242}>CYTOPLASM · 细胞质</text>
         </g>
 
         {/* 细胞形态学（静态底层） */}
@@ -285,14 +286,15 @@ export function VirtualCellView() {
                     fill="none" stroke={color.stroke} className="node-pulse" />
                 )}
 
-                {/* 标签 */}
+                {/* 标签（深色描边 halo：在繁忙底图上保持可读） */}
                 <text
-                  y={n.kind === 'compound' ? 3.5 : 4}
+                  y={n.kind === 'compound' ? 4.2 : 4.4}
                   textAnchor="middle"
-                  fontSize={n.kind === 'receptor' ? 10 : 10.5}
+                  fontSize={n.kind === 'receptor' ? 11.5 : 12.5}
                   fontFamily="var(--font-geist-mono, monospace)"
-                  fill={active || isInjected ? color.text : '#94a3b8'}
-                  fontWeight={active || isInjected ? 600 : 400}
+                  fill={active || isInjected ? color.text : '#c7d2de'}
+                  fontWeight={active || isInjected ? 700 : 500}
+                  style={{ paintOrder: 'stroke', stroke: '#020617', strokeWidth: 3, strokeLinejoin: 'round' }}
                 >
                   {truncateLabel(n.label)}
                 </text>
@@ -339,7 +341,7 @@ export function VirtualCellView() {
         </g>
 
         {/* 图例 */}
-        <g transform="translate(24 690)" fontSize={10} fontFamily="var(--font-geist-mono, monospace)">
+        <g transform="translate(24 690)" fontSize={11} fontFamily="var(--font-geist-mono, monospace)">
           <rect x={-10} y={-14} width={386} height={88} rx={8} fill="rgba(2,6,23,0.72)" stroke="#1e293b" />
           {[
             { c: '#fbbf24', t: '配体' }, { c: '#2dd4bf', t: '受体/通道' }, { c: '#34d399', t: '激酶' },
@@ -369,7 +371,7 @@ export function VirtualCellView() {
         {[
           { label: '＋', fn: () => zoom(0.78), title: '放大' },
           { label: '－', fn: () => zoom(1.28), title: '缩小' },
-          { label: '⟲', fn: () => setVb({ x: 0, y: 0, w: CANVAS.w, h: CANVAS.h }), title: '重置视图' },
+          { label: '⟲', fn: () => setVb({ x: 60, y: 76, w: 1080, h: 700 }), title: '重置视图' },
         ].map((b) => (
           <button
             key={b.label}
@@ -406,7 +408,7 @@ function compartmentZh(n: PositionedNode): string {
 }
 
 function truncateLabel(s: string): string {
-  return s.length > 10 ? s.slice(0, 9) + '…' : s;
+  return s.length > 11 ? s.slice(0, 10) + '…' : s;
 }
 
 function midpointOf(e: LaidOutEdge): string {

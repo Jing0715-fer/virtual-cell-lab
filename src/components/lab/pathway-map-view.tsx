@@ -4,15 +4,20 @@
  * KEGG 通路图谱视图 —— 使用 KGML 原始坐标渲染完整通路拓扑
  * 与虚拟细胞视图共享模拟状态（同一信号引擎，双视图联动）
  * 垂直参考条目（如 Cell cycle）旋转文字渲染；TITLE 条目净化为图谱标题；
- * 关联通路条目可点击跳转（收录范围内）或打开 KEGG 官方页
+ * 关联通路条目可点击跳转（KEGG 全量目录 372 条内）或打开 KEGG 官方页
+ *
+ * 非核心分子（未进入演示子图的 KGML 节点）也可点击：弹出 mapPick 信息卡
+ * （主符号 / KEGG entry 链接 / 别名 / 分子类型），点空白处清除。
  */
-import { useMemo, useRef, useState, useCallback, useEffect } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { X, ExternalLink } from 'lucide-react';
 import type { EdgeKind } from '@/types/kegg';
 import { useLabStore } from '@/store/lab-store';
-import { PATHWAY_CATALOG } from '@/data/pathway-catalog';
+import { KEGG_FULL_MAP } from '@/data/kegg-full-catalog';
 import { CANVAS } from '@/lib/simulation/layout';
 
-const CATALOG_IDS = new Set(PATHWAY_CATALOG.map((p) => p.id));
+/** 可点击跳转的联通通路范围：KEGG 全量目录（372 条人类通路） */
+const FULL_CATALOG_IDS = new Set(KEGG_FULL_MAP.keys());
 
 function edgeColor(kind: EdgeKind | undefined): string {
   if (!kind) return '#34d399';
@@ -31,6 +36,10 @@ interface PlacedEntry {
   y: number;
   w: number;
   h: number;
+  /** KEGG entry id 列表（如 hsa:5594 / cpd:C00338），mapPick 信息卡链接用 */
+  keggIds: string[];
+  /** 别名（graphics.name 其余项 / 合并 entry 成员符号） */
+  aliases: string[];
   /** 关联通路 id（type=map 且 keggIds 携带 path:hsaXXXX 时存在） */
   linkedPathway?: string;
 }
@@ -54,6 +63,8 @@ export function PathwayMapView() {
   const [vb, setVb] = useState({ x: 0, y: 0, w: CANVAS.w, h: CANVAS.h });
   const svgRef = useRef<SVGSVGElement>(null);
   const dragging = useRef<{ x: number; y: number; vb: typeof vb } | null>(null);
+  /** 非核心分子点击卡（附带所属通路 id：切换通路后自动失效，不渲染旧数据） */
+  const [mapPick, setMapPick] = useState<{ pathway: string; entry: PlacedEntry } | null>(null);
 
   // KGML 坐标 → 画布（保持纵横比 fit）
   const transform = useMemo(() => {
@@ -82,6 +93,7 @@ export function PathwayMapView() {
           : undefined;
       const e: PlacedEntry = {
         id: n.entryId, label: n.label, type: n.type,
+        keggIds: n.keggIds, aliases: n.aliases,
         x: n.x * t.scale + t.ox, y: n.y * t.scale + t.oy,
         w: Math.max(14, n.w * t.scale), h: Math.max(9, n.h * t.scale),
         linkedPathway: linked,
@@ -144,6 +156,9 @@ export function PathwayMapView() {
     return <div className="flex h-full items-center justify-center text-muted-foreground">通路图谱渲染中…</div>;
   }
 
+  // 跨通路失效：仅当 mapPick 属于当前通路时才渲染（避免切换通路后残留旧条目）
+  const pick = mapPick && mapPick.pathway === graph.meta.id ? mapPick.entry : null;
+
   const zoom = (factor: number) => {
     const cx = vb.x + vb.w / 2, cy = vb.y + vb.h / 2;
     const nw = Math.min(CANVAS.w * 1.6, Math.max(CANVAS.w * 0.22, vb.w * factor));
@@ -164,7 +179,13 @@ export function PathwayMapView() {
           const rect = svg.getBoundingClientRect();
           setVb({ ...d.vb, x: d.vb.x - ((e.clientX - d.x) / rect.width) * d.vb.w, y: d.vb.y - ((e.clientY - d.y) / rect.height) * d.vb.h });
         }}
-        onPointerUp={() => { dragging.current = null; }}
+        onPointerUp={(e) => {
+          // 位移 < 4px 视为点击（非拖拽）→ 清除非核心分子信息卡
+          // （节点点击的 click 事件在 pointerup 之后触发，会重新设置选中，顺序安全）
+          const d = dragging.current;
+          if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 4) setMapPick(null);
+          dragging.current = null;
+        }}
         role="img"
         aria-label="KEGG 通路图谱"
       >
@@ -215,10 +236,12 @@ export function PathwayMapView() {
             const isCompound = e.type === 'compound';
             const isTitle = e.type === 'map' && e.label.startsWith('TITLE:');
             const isLinkedMap = e.type === 'map' && !isTitle;
+            const isMolecule = e.type === 'gene' || isCompound;
             const vertical = !isTitle && e.h / Math.max(1, e.w) >= 2.2;
             const fill = active ? (isCompound ? 'rgba(250,204,21,0.35)' : 'rgba(52,211,153,0.35)') : isCompound ? 'rgba(250,204,21,0.1)' : 'rgba(30,41,59,0.85)';
-            const stroke = active ? (isCompound ? '#facc15' : '#34d399') : isCompound ? '#a16207' : '#334155';
+            const stroke = active ? (isCompound ? '#facc15' : '#34d399') : isCompound ? '#b45309' : '#475569';
             const selected = coreId && selectedNode === coreId;
+            const picked = pick?.id === e.id;
 
             // KEGG 图谱标题（原位净化渲染，无框）
             if (isTitle) {
@@ -236,35 +259,42 @@ export function PathwayMapView() {
 
             const label = e.label.length > 12 ? e.label.slice(0, 11) + '…' : e.label;
             const fontSize = vertical
-              ? Math.max(6, Math.min(e.w * 0.52, e.h / Math.max(4, label.length) * 1.7))
-              : Math.max(6.5, Math.min(e.h * 0.62, e.w / Math.max(4.5, label.length * 0.72)));
+              ? Math.max(7, Math.min(e.w * 0.52, e.h / Math.max(4, label.length) * 1.7))
+              : Math.max(7.5, Math.min(e.h * 0.62, e.w / Math.max(4.5, label.length * 0.72)));
 
             return (
               <g key={e.id}
-                className={coreId || (isLinkedMap && e.linkedPathway) ? 'cursor-pointer' : undefined}
+                className={isMolecule || (isLinkedMap && e.linkedPathway) ? 'cursor-pointer' : undefined}
                 onClick={(ev) => {
                   ev.stopPropagation();
                   if (coreId) { selectNode(coreId); return; }
-                  if (isLinkedMap && e.linkedPathway && CATALOG_IDS.has(e.linkedPathway)) {
-                    selectPathway(e.linkedPathway);
+                  if (isLinkedMap) {
+                    // 全量目录内的联通通路可点击跳转（372 条）
+                    if (e.linkedPathway && FULL_CATALOG_IDS.has(e.linkedPathway)) {
+                      selectPathway(e.linkedPathway);
+                    }
+                    return;
                   }
+                  if (isMolecule) setMapPick({ pathway: graph.meta.id, entry: e });
                 }}
                 style={active ? { filter: 'drop-shadow(0 0 5px rgba(52,211,153,0.7))' } : undefined}>
                 <rect
                   x={e.x - e.w / 2} y={e.y - e.h / 2} width={e.w} height={e.h}
                   rx={isCompound ? Math.min(e.w, e.h) / 2 : 3}
-                  fill={isLinkedMap ? 'rgba(13,148,136,0.10)' : fill}
-                  stroke={selected ? '#f0fdfa' : isLinkedMap ? '#0d9488' : stroke}
-                  strokeWidth={selected ? 1.6 : isLinkedMap ? 1 : active ? 1.6 : 0.9}
+                  fill={isLinkedMap ? 'rgba(13,148,136,0.16)' : fill}
+                  stroke={selected || picked ? '#f0fdfa' : isLinkedMap ? '#0d9488' : stroke}
+                  strokeWidth={selected || picked ? 1.6 : isLinkedMap ? 1 : active ? 1.6 : 0.9}
                   strokeDasharray={isLinkedMap ? '4 3' : undefined}
                 />
                 <text
                   x={e.x} y={e.y + (vertical ? 0 : 3.2)}
                   textAnchor="middle" dominantBaseline={vertical ? 'middle' : undefined}
                   fontSize={fontSize}
-                  fill={isLinkedMap ? '#5eead4' : active ? '#a7f3d0' : '#64748b'}
-                  fontWeight={active || isLinkedMap ? 600 : 400}
+                  fill={isLinkedMap ? '#5eead4' : active ? '#a7f3d0' : picked ? '#e2e8f0' : '#b6c2cf'}
+                  fontWeight={active || isLinkedMap ? 600 : 500}
                   transform={vertical ? `rotate(-90 ${e.x} ${e.y})` : undefined}
+                  // 文字描边背景（halo）：提升暗底图上的文字对比度
+                  style={{ paintOrder: 'stroke', stroke: '#020617', strokeWidth: 3, strokeLinejoin: 'round' }}
                 >{label}</text>
               </g>
             );
@@ -288,6 +318,58 @@ export function PathwayMapView() {
         <span className="mx-1 text-slate-600">|</span>KEGG 原始拓扑布局
         <div className="text-slate-500">{graph.stats.geneCount} 分子 · {graph.stats.relationCount} 关系 · 拖拽平移 / 滚轮缩放</div>
       </div>
+
+      {/* 非核心分子信息卡（点击全图中未进入演示子图的 gene/compound 节点） */}
+      {pick && (
+        <div
+          role="status"
+          aria-label={`分子信息：${pick.label}`}
+          className="absolute bottom-3 left-3 w-[290px] max-w-[calc(100%-9rem)] rounded-lg border border-teal-500/35 bg-slate-950/90 p-3 text-[11px] backdrop-blur"
+        >
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[13px] font-semibold text-teal-200">{pick.label}</span>
+            <span className="rounded border border-white/10 bg-white/5 px-1.5 py-px text-[9px] text-slate-400">
+              {pick.type === 'compound' ? '化合物' : '基因'}
+            </span>
+            <button
+              onClick={() => setMapPick(null)}
+              aria-label="关闭分子信息卡"
+              className="ml-auto rounded p-1 text-slate-500 transition hover:bg-white/10 hover:text-slate-200"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          {pick.keggIds.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {pick.keggIds.slice(0, 6).map((kid) => (
+                <a
+                  key={kid}
+                  href={`https://www.kegg.jp/entry/${kid}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={`在 KEGG 打开 ${kid}`}
+                  className="flex items-center gap-0.5 rounded border border-teal-500/25 bg-teal-500/10 px-1.5 py-px font-mono text-[9.5px] text-teal-300 transition hover:border-teal-400/50 hover:text-teal-200"
+                >
+                  {kid}
+                  <ExternalLink className="h-2.5 w-2.5" />
+                </a>
+              ))}
+              {pick.keggIds.length > 6 && (
+                <span className="self-center font-mono text-[9.5px] text-slate-500">+{pick.keggIds.length - 6}</span>
+              )}
+            </div>
+          )}
+          {pick.aliases.length > 0 && (
+            <div className="mt-1.5 text-[10px] leading-4 text-slate-500">
+              别名: {pick.aliases.slice(0, 6).join(' · ')}
+              {pick.aliases.length > 6 ? ` +${pick.aliases.length - 6}` : ''}
+            </div>
+          )}
+          <div className="mt-2 border-t border-white/8 pt-1.5 text-[10px] leading-4 text-slate-500">
+            该分子在全图中，未进入核心演示子图（可在 3D/2D 视图演示的分子集）
+          </div>
+        </div>
+      )}
 
       <a
         href={graph.meta.keggLink}

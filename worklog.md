@@ -554,3 +554,107 @@ Stage Summary:
   1. 数据层/面板层 i18n 扩展（inspector/timeline/pathway-library/药理/对照/热图/AI 助手 + 通路 nameZh/description EN 文案策划）
   2. 剖面模式联动教学叙事（开剖面自动分层讲解 质膜→细胞质→核）
   3. 对照模式 3D 视图（Task 14 遗留）+ 药物浓度时程曲线（前轮遗留）
+
+---
+Task ID: 19-a
+Agent: full-stack-developer 子代理
+Task: KEGG 全量 372 条人类通路接入平台 —— 后端按需抓取任意通路（getCatalogEntry 合成目录条目 + stats 缓存性能修复）+ 通路库 UI 重构（搜索/策划组/全量分组折叠）+ KEGG 图谱视图点击与文字清晰度修复
+
+Work Log:
+- 读 worklog（Task 2-a/17/18 KEGG 架构）与现状代码（kegg-client/subgraph/API 路由/pathway-library/pathway-map-view/kegg-full-catalog）
+- [subgraph 空种子验证] bun 临时脚本（/tmp 运行后删除）直接 import src/lib/kegg 模块对 3 条非策划通路 fetch KGML + parseKgml + extractCoreSubgraph（seeds=[]）：
+  · hsa00010 糖酵解：101 entries/84 relations → core 21 节点 42 边，全 cytoplasm/enzyme tier3（代谢通路特征），度 0 非配体节点 0，无异常 ✓
+  · hsa04916 黑色素生成：50/31 → core 30 节点 27 边，kind 分布 ligand2/receptor5/kinase5/tf5/gene3/gtpase4/adapter1/enzyme5，tier 0-6 完整分层 ✓
+  · hsa05010 阿尔茨海默病：171/109 → core 30 节点 26 边，含 compound（C00076 Ca²⁺）/channel（RYR3/ITPR1/CACNA1C/GRIN1）/配体（TNF/IL6/IL1A/CSF1）✓
+  · 结论：空 seeds 时"不足 MIN_SEEDS=15 按度数补齐 → 邻接扩展"路径自动选 hub，无需修改 subgraph.ts；enrichEntries 的 seeds.find 对空数组安全；syntheticLigands ?? [] 与种子配体补全 for-of 空数组自然跳过
+- [后端 kegg-client.ts] ① 新增导出 getCatalogEntry(id)：策划 13 条返回 PATHWAY_MAP 原条目；其余 KEGG_FULL_MAP 命中合成条目（name/nameZh/category=categoryZh/description="KEGG 分类：{categoryEn}。全量目录通路：按 KGML 拓扑度数自动提取核心演示子图…"/cascade="KEGG 全图 · 自动提取核心子图"/seeds=[]）；都不在返回 null。② getPathwayGraph 改用 getCatalogEntry 验证（错误文案"不在 KEGG 全量目录中"）。③ CACHE_VERSION v6→v7（meta 结构变化，内存缓存失效）。④ getCachedStats 性能修复：globalThis 增 statsCache{version,map}，fetchLiveGraph upsert 成功后 statsVersion++（失效），getCachedStats 命中有效 version 直接返回缓存 map，DB 失败不缓存失败结果（下次重试）
+- [API] GET /api/pathways 改返回 KEGG_FULL_LIST 全量 372 条（id/name/nameZh/categoryZh/categoryEn/curated/stats），stats 沿用 getCachedStats；GET /api/pathways/[id] 用 getCatalogEntry 做 404 校验（文案"不在 KEGG 全量目录 372 条人类通路中"），maxDuration=30 不变
+- [通路库 pathway-library.tsx 重构] 顶部细胞卡不动；新增搜索框（name/nameZh/id 大小写不敏感过滤，命中计数 + 清除按钮 + 空态提示）；列表拆两部分：a) 策划级 13 条保持原样式（适配/教学徽标、active 级联展开、stats）按原 category 分组；b) KEGG 全量目录（排除 curated 后 359 条）按 categoryZh 顶级分类分组（KEGG_CATEGORY_ORDER 排序），组标题带数量徽标、默认折叠（ChevronDown 旋转指示），组内再按子类小标题分组、条目为紧凑单行按钮（名称 + id + 已缓存时 coreCount），当前选中 emerald 高亮；搜索时全部组强制展开且跨策划+全量展示命中项；数据源 KEGG_FULL_LIST 静态 import + useQuery stats 合并（staleTime 5min）；非策划通路同样调 selectPathway(id)
+- [图谱视图 pathway-map-view.tsx] ① 点击修复：CATALOG_IDS→FULL_CATALOG_IDS（KEGG_FULL_MAP 全部 372 条 key，linked map 全可点击跳转）；新增 mapPick state{pathway,entry}——非核心 gene/compound 节点点击弹信息卡（左下角 absolute：主符号/类型徽标/keggIds 前 6 个转 https://www.kegg.jp/entry/{id} 新标签链接/别名前 6/"该分子在全图中，未进入核心演示子图"提示），PlacedEntry 增 keggIds/aliases 字段；svg onPointerUp 位移 <4px 视为点击清除 mapPick（节点 click 在 pointerup 后触发，顺序安全）；mapPick.pathway≠当前通路 id 时渲染层自动失效（免 effect setState，规避 react-hooks/set-state-in-effect 新规则）；picked 节点白框高亮；全部 gene/compound 节点 cursor-pointer。② 文字清晰度：节点 <text> 加 style{paintOrder:'stroke',stroke:'#020617',strokeWidth:3,strokeLinejoin:'round'} 文字 halo；非激活非 map 文字 fill #64748b→#b6c2cf、fontWeight 400→500；fontSize 下限 horizontal 6.5→7.5 / vertical 6→7；普通节点边框 #334155→#475569；化合物非激活 #a16207→#b45309；linked map 填充 0.10→0.16
+- [验证] curl /api/pathways → 372 条（13 curated/13 stats）；curl /api/pathways/hsa00010 → 200，source=kegg-live，core 21 节点（3.6s 首抓）→ 复请求 50ms；hsa05010 → 200，core 30 节点（816ms）；stats 版本失效实测：upsert 后下一次 /api/pathways 触发重解析并缓存，其后 10-17ms；hsa99999 → 404 新文案；bun run lint 零错误；bunx tsc --noEmit src/ 零错误（examples/skills 的预存错误不在边界内）；dev.log 无异常
+- 禁改文件（cell3d/**、virtual-cell.tsx、layout.ts、pathway-catalog.ts）零触碰；临时验证脚本运行后已删除
+
+Stage Summary:
+- 产出：kegg-client.ts（getCatalogEntry+statsCache+v7）、index.ts（导出 getCatalogEntry）、/api/pathways（全量 372）、/api/pathways/[id]（404 文案）、pathway-library.tsx（搜索+双区列表）、pathway-map-view.tsx（全量点击+mapPick 卡+清晰度）；subgraph.ts 无需修改（空种子路径验证通过）
+- 关键决策：① 空种子子图依赖既有"MIN_SEEDS 度数补齐 + 邻接扩展"机制自动选 hub，零算法改动；② stats 缓存用 version 失效（upsert 计数）而非 TTL，DB 失败不缓存；③ mapPick 用 {pathway,entry} 附通路 id 的渲染层守卫替代 effect setState（规避 react-hooks v7 set-state-in-effect 规则）；④ 全量目录条目紧凑行内联显示 coreCount（已缓存指示）；⑤ 策划条目在全量组跳过避免重复展示
+- 验证结果：372 目录返回 ✓ / 非策划通路按需抓取 ✓（hsa00010 21n、hsa04916 30n、hsa05010 30n，均在 20~42）/ lint+tsc(src) 零错误 ✓ / dev.log 无报错 ✓
+- 遗留风险：① 非策划通路无教学引导/策划药物（药理面板空态）——语义正常；② 代谢类通路子图全为 enzyme/tier3（无核内事件，模拟阶段上限低，KEGG 数据结构限制，与 mTOR 阶段 3 同类）；③ 全量组展开"人类疾病"96 条/代谢 95 条时一次渲染较多 DOM 行（折叠默认缓解）；④ 首次抓取每条 1-4s（在线 KGML+符号表已进程级缓存，372 条全预热需 ~10-20 分钟，可后续用 seed 脚本扩展批量预热）；⑤ 图谱视图 mapPick 信息卡的 keggIds 链接对 6 个以上截断显示
+
+---
+Task ID: 19-b
+Agent: 前端 3D 子代理
+Task: 3D 细胞器形态精雕（线粒体/高尔基/RER 对齐 2D 教科书形态语言）+ 默认开启剖面模式（用户反馈: 3D 精度差、细胞器都显示为圆球与 2D 无法对应、默认看不到内部）
+
+Work Log:
+- 读 worklog Task 15/16/18（高精度建模路线/剖面系统/标签屏幕空间化）+ organelles.tsx(1071 行)/section-view.tsx/virtual-cell-3d.tsx/procedural.ts/textures.ts/materials.ts + lab/morphologies.tsx（2D 形态语言参照: Mitochondrion 椭圆 rx54/ry22 波浪嵴、Golgi 4 层递减弧、RoughER 多行波浪线+核糖体点）
+- [线粒体重塑] organelles.tsx:
+  · 外膜 CapsuleGeometry(0.5,1.05,8,22)+FBM0.045 → (0.4,1.5,10,24)+FBM0.028（总长 2.3/半径 0.4 ≈ 2.9:1 长条豆状, 接近 2D 椭圆 2.45:1）; z 压扁 0.76→0.82（三 mesh 同步）
+  · 每颗随机长度 g.scale.set(1, 0.85+hash*0.35, 1)（update 动画只改 position.y/rotation.y 不覆盖）
+  · 基质胶囊 0.44/0.95 → 0.35/1.38 随外膜匹配
+  · 嵴 9→12 条（perf 5→7）: 拓扑重构为 6 x 槽×双排（T·S 矩阵序使 x 槽平移不受 0.55 压扁缩放）; TubeGeometry 半径 0.048→0.062、管段 32→24（每颗总段数持平, 满足 ~15% 几何红线）; 波形频率 2~4.4 波/全长 → 0.55~0.95 波/全长（板层感+间距拉开）
+  · 嵴发光 emissiveIntensity 0.62→0.85、color #6ee7b7→#99f6e4、emissive #2dd4bf→#5eead4; 外膜 transmission 0.5→0.34（减"洗白"）、emissiveIntensity 0.28→0.36; ATP 合酶颗粒保留
+- [高尔基重塑] organelles.tsx:
+  · 池数 6→5; TorusGeometry(0.92+i*0.075, 0.2, 12, 46, π1.22) → (1.06+i*0.06, 0.165, 12, 46, π1.28)（更薄囊+更大弧）
+  · scaleY 0.34→0.22（更扁）、层距 0.265→0.30（层间分离清晰）、rotationZ i*0.26→0.30（扇形展开更明显）
+  · 顶点色改非线性极性 LUT [0, 0.16, 0.5, 0.84, 1]: 前 2 层 teal 系→第 3 层过渡→后 2 层琥珀系（顺/反极性读感）
+  · 池间小管半径/层距同步新几何; 反面 buds 保留（y 1.75→1.62 贴新顶池）; 新增顺面 3 个 teal 运输小泡（perf 2）; g.scale.setScalar(1.15)（position 不变）
+- [RER 强化] organelles.tsx: 囊池行数 spec.erSheets+2（纯渲染层, 不改 layout3d 契约; perf ×0.6 缩减）; lat 展开 -0.75+s*0.4 适配 6 行; 波浪振幅 0.3→0.34/0.2→0.24; 核糖体半径 0.055→0.064、emissiveIntensity 0.5→0.62、每曲线密度 22→26（k%2 双排分支保留）; 囊池 flow 强度 0.14→0.2
+- [全局微调] 胞质颗粒透明度 0.42→0.33（降低糊感突出细胞器轮廓）; 质膜外叶脂头 0.78→0.72; detail/perf 逻辑不动
+- [剖面纹理同步] section-view.tsx makeCytoplasmTexture: 线粒体剖面短椭圆(rx 17-30, 比率~1.7) → 长椭圆 rx 22-29/ry=0.42rx（≈2.4:1）+ 内部 4-5 条沿长轴波浪嵴线（椭圆 clip 内绘制, 与 2D 形态学/3D 板层嵴同构）; 高尔基 2 组嵌套弧 → 3 组×4 条平行弧线堆（同半径沿 y 平移）+ 反面琥珀出芽小点; makeNucleusTexture 与剖面 HTML 标注不动
+- [默认剖面] virtual-cell-3d.tsx: clipView useState(false)→(true)、clipDepth 0.65→0.5（过心剖面, 核+细胞器同现）; HUD 剖面开关/深度滑杆/底部提示全部由 state 派生, 无硬编码冲突; FALLBACK_SPEC 兜底路径（graph 未装配时 R=10/N=4.1）下 clipView=true 安全（控制器几何独立有效 + 500ms 双面化节流补丁覆盖晚到 mesh）
+- [QA] bunx tsc --noEmit src 零错误（examples/skills 4 条为存量非本任务范围）; bun run lint（eslint .）零错误; dev.log 无运行时错误（Fast Refresh 重建成功）; agent-browser 实测: 页面加载 0 console/page errors, VLM 两轮视觉验证（概览+滚轮拉近）确认——①剖面默认开启且核剖面/细胞器可见 ②线粒体清晰呈长条豆状+内部亮线嵴（无圆球化残留, 端面透视呈圆形属 3D 几何正常）③高尔基 5 层扁平弧囊堆+teal→琥珀梯度 ④ER 多条波浪囊池+核糖体点 ⑤剖面填充盘上可见长椭圆线粒体剖面 ⑥HUD 剖面开关激活、深度 50% ⑦无破面/黑块
+
+Stage Summary:
+- 用户三项反馈全部解决: 3D 细胞器与 2D 形态语言一一对应（线粒体长条豆状+板层嵴、高尔基层叠扁平囊+极性梯度、RER 多行波浪囊池+核糖体）; 剖面模式默认开启（过心 50%）解决"内部被细胞膜挡住"
+- 关键决策: ① 嵴槽位用 T·S 矩阵顺序（平移不受压扁缩放）实现 6 板层×双排, 波形频率降半增强"板层"读感 ② 嵴管段 32→24 抵消 12 条数量增长（几何总量与旧版持平, 合规 ~15% 红线）③ 高尔基极性用非线性 LUT 而非线性性插值（前 2 teal/中过渡/后 2 琥珀的分明梯度）④ ER +2 行为纯渲染层（layout3d 契约零改动）⑤ 剖面纹理与 3D 新形态严格同构（长椭圆+波浪嵴线 / 平行弧堆）
+- 未解决问题/风险: 线粒体端面朝相机时投影为圆形（3D 旋转几何必然, 侧视/多数角度均为豆状）; perf 模式嵴 7 条/ER 行数 ×0.6 已缩减但低端机帧率未实测
+- 下一阶段建议: ① 剖面模式联动教学叙事（开剖面自动分层讲解）② 对照模式 3D 视图（Task 14 遗留）③ 低端设备实机 perf 模式帧率验证
+
+---
+Task ID: 19
+Agent: 主协调 Agent (Z.ai Code) + 2 并行子代理（19-a 全栈 / 19-b 前端 3D）
+Task: 用户四项反馈——①KEGG pathway 全量获取（不止一部分）②2D section 文字看不清 ③3D 精度差且与 2D 细胞形状有出入（细胞器都显示为圆球）④默认打开 section 模式（膜挡住内部）
+
+Work Log:
+- [数据层] 编写 scripts/gen-kegg-full.mjs：rest.kegg.jp list/pathway/hsa（372 条）+ get 批量取 CLASS 分类（363/372，9 条全局图手动归类 Global and overview maps）+ 术语词典机械翻译（~350 词条三轮迭代：语法词残留 99→42→8，剩余 8 条均为 Notch/Hedgehog/Hippo/Toll-like 等正确保留英文的蛋白名规范）→ 生成 src/data/kegg-full-catalog.ts（81KB：id/name/nameZh/categoryZh/categoryEn/curated，13 条策划保留人工文案）
+- [19-a 子代理] KEGG 全量接入：
+  · kegg-client.ts: getCatalogEntry()（策划 13 条原样 + 359 条合成目录条目/空 seeds）；CACHE_VERSION v6→v7；getCachedStats 加 globalThis {version,map} 缓存（upsert 时失效，目录接口从全表 JSON.parse 降为 8-17ms）
+  · subgraph 空种子路径验证通过（MIN_SEEDS=15 度数补齐自动选 hub）：hsa00010 糖酵解 21 节点/42 边、hsa04916 黑色素 30/27、hsa05010 阿尔茨海默 30/26（含 ligand→receptor→kinase→tf→gene 完整 tier 分层）
+  · pathway-library.tsx 重构：搜索框（name/nameZh/id 过滤）+ 策划级 13 条原样式 + 全量目录 6 顶级分类分组折叠（代谢 95/遗传 33/环境 26/细胞过程 23/有机体 86/人类疾病 96）+ curated 不重复
+  · pathway-map-view.tsx：全部 372 条 linked map 可跳转；非核心 gene/compound 节点点击弹 mapPick 信息卡（主符号/类型/keggIds→KEGG entry 链接/别名；pointerup 位移 <4px 判定点击 vs 拖拽）；文字清晰度（halo paintOrder stroke/非激活文字 #b6c2cf+500/字号下限 7.5/边框加亮）
+- [19-b 子代理] 3D 细胞器形态精雕：
+  · 线粒体：Capsule(0.40, 1.5) ≈ 2.9:1 长条豆状（对应 2D 椭圆 2.45:1）+ FBM 降至 0.028 + 每颗随机长度 0.85-1.2× + 嵴 9→12 条重构（6 x 槽×双排板层、管径 0.062、发光 0.85）+ transmission 0.5→0.34 防洗白
+  · 高尔基：5 池扁平囊（管径 0.165、scaleY 0.22、层距 0.30）+ 非线性极性 LUT（前 2 teal→第 3 过渡→后 2 琥珀）+ 顺面新增 3 个 teal 运输小泡 + 整组 1.15×
+  · RER：行数 +2、核糖体 0.064/发光 0.62、flow 0.2
+  · 全局：胞质颗粒 0.33（去糊）、外叶脂头 0.72
+  · section-view.tsx 剖面纹理同步：线粒体剖面改长椭圆 rx26/ry11+4-5 条波浪嵴线、高尔基改 3 组×4 条平行弧线堆
+  · virtual-cell-3d.tsx：clipView 默认 true、clipDepth 默认 0.5（过心剖面）
+- [主代理] 2D 切面文字清晰度：
+  · layout.ts NODE_SIZE 放大（ligand 92×33/receptor 76×58/tf 98×33/default 104×33）
+  · virtual-cell.tsx：字号 10.5→12.5（受体 10→11.5）、非激活文字 #94a3b8→#c7d2de+fontWeight 500、深色描边 halo（paintOrder stroke #020617/3px）、初始 viewBox 聚焦细胞主体（60,76,1080×700 ≈1.1× 放大）、截断 10→11 字符、区室标注 12.5px、图例 11px
+- [QA agent-browser + VLM]：
+  · 3D 默认剖面开启（VLM 确认剖切+核+内部可见；首帧截图稍早于材质剖切补丁，稳定后确认正常）
+  · 全景机位 VLM：高尔基层叠扁平囊堆+渐变 ✓ / 内质网波浪囊池+核糖体点 ✓ / 线粒体长条豆状+发光嵴 ✓ / 轮廓分明非糊球团 ✓；拉近验证线粒体 2.5-3:1 + 板层嵴 ✓
+  · 2D 视图 VLM：标签清晰可读 ✓ / halo 生效 ✓ / 视野聚焦 ✓
+  · 全量目录：分组折叠展开 ✓ / 搜索 "alzheimer" 命中 hsa05010 ✓ / 糖酵解(非策划)选中→在线抓取→21 核心节点装配 ✓ / 阿尔茨海默 30 核心 133 全图 ✓
+  · KEGG 图谱：文字高对比+描边 ✓ / 非核心节点(ATG101)点击→信息卡+KEGG entry 链接 ✓
+  · MAPK 回归：模拟 12s 达阶段 2/4、剖面+发光+标签正常 ✓
+  · 移动端 390px：无横向溢出 ✓
+  · 0 console/page errors；lint 零错误；tsc src 零错误；dev.log 全 200
+- [工具经验] agent-browser eval 派发合成 WheelEvent/PointerEvent 可靠驱动 OrbitControls 缩放旋转（wheel 命令不可信，Task 18 经验复用）；VLM 判读 3D 需给明确机位/缩放引导，概览距离下剖面盘纹理会被误判为"2D 示意图"
+
+Stage Summary:
+- 项目状态: KEGG 通路库从 13 条扩展到全量 372 条（按需在线抓取 + SQLite 缓存 + 拓扑度数自动子图）；3D 细胞器形态完成教科书级重塑（长豆状线粒体/层叠囊堆高尔基/波浪囊池 RER，与 2D 视图一一对应）；剖面模式默认开启（过心 50%）；2D 与图谱视图文字清晰度全面修复
+- 本轮产出: 1 新数据文件（kegg-full-catalog.ts 372 条）+ 1 生成脚本 + 7 文件修改（kegg-client/index/api×2/pathway-library/pathway-map-view/organelles/section-view/virtual-cell-3d/virtual-cell/layout）
+- 关键技术决策: ① 全量目录走"静态清单 + 按需 KGML 抓取"而非全量预热（372 条预热 10-20 分钟不值得，单条首抓 1-4s 可接受）② 非策划通路子图用空 seeds + MIN_SEEDS 度数补齐（零改动复用现有算法）③ getCachedStats 版本号失效缓存（避免 372 行 JSON 全量解析）④ 中文译名采用术语词典机械翻译（质量经三轮审计收敛，剩余英文残留均为规范蛋白命名）
+- 未解决问题/风险:
+  1. 非策划通路无教学引导/策划药物/中文描述文案（模拟可运行但体验弱于策划 13 条）；代谢类通路无配体节点→模拟阶段停在 0（结构限制，同 mTOR 问题）
+  2. 全局总览图（hsa01100 等）KGML 巨大（数千节点），首抓可能超 15s 超时
+  3. nameZh 为机械翻译，部分生僻通路译名待人工校对（如 "lacto and neolacto series"→"乳糖系与新乳糖系"）
+  4. 剖面盘正圆 vs 膜 FBM 位移的极浅深度边缘误差（前轮遗留，示意可接受）
+  5. i18n 数据层未覆盖（EN 模式下新文案仍显示中文，前轮遗留）
+- 下一阶段建议:
+  1. 非策划通路的自动教学引导（按 tier 分层生成通用级联讲解）/ 自动配体检测（KGML 含配体时提示可注射）
+  2. 热门通路预热脚本（Top 50 按需预取，改善首抓延迟）
+  3. 数据层 i18n 扩展 + 译名人工校对
+  4. 对照模式 3D 视图（Task 14 遗留）

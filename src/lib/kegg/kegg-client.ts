@@ -15,6 +15,7 @@
 
 import { db } from '@/lib/db';
 import { PATHWAY_MAP } from '@/data/pathway-catalog';
+import { KEGG_FULL_MAP } from '@/data/kegg-full-catalog';
 import type { KeggEntry, PathwayCatalogEntry, PathwayGraph, PathwayMeta } from '@/types/kegg';
 import { parseKgml } from './kgml-parser';
 import { extractCoreSubgraph, mergeDuplicateNodes } from './subgraph';
@@ -32,6 +33,10 @@ interface KeggGlobalCache {
   hsaSymbols?: Map<string, string> | null;
   hsaSymbolsPromise?: Promise<Map<string, string>> | null;
   inflight?: Map<string, Promise<PathwayGraph>>;
+  /** 目录统计缓存（避免每次 /api/pathways 全量 JSON.parse 大表） */
+  statsCache?: { version: number; map: Map<string, PathwayGraph['stats']> };
+  /** 缓存行数据版本（每次成功 upsert 新通路 +1，使 statsCache 失效） */
+  statsVersion?: number;
 }
 const g = globalThis as unknown as KeggGlobalCache;
 
@@ -39,10 +44,11 @@ const g = globalThis as unknown as KeggGlobalCache;
  * 代码版本标记：classify/subgraph 算法迭代后递增版本号使内存缓存自动失效，
  * 避免 dev 热重载后 globalThis 仍持有旧算法产物（生产环境版本恒定无影响）
  */
-const CACHE_VERSION = '2025-01-v6';
+const CACHE_VERSION = '2025-01-v7';
 if (g.cacheVersion !== CACHE_VERSION) {
   g.memCache?.clear();
   g.inflight?.clear();
+  g.statsCache = undefined;
   g.cacheVersion = CACHE_VERSION;
 }
 
@@ -146,6 +152,29 @@ function buildMeta(catalog: PathwayCatalogEntry, keggTitle: string): PathwayMeta
   };
 }
 
+/**
+ * 解析目录条目（对外导出）：
+ *   - 策划 13 条 → 返回 PATHWAY_MAP 原始条目（保留 seeds/syntheticLigands/教学文案）
+ *   - 其余 KEGG 全量目录通路（372）→ 合成空种子条目，由 subgraph 的
+ *     度数补齐逻辑自动提取核心子图（hub 驱动，可正常模拟信号传播）
+ *   - 不在全量目录中 → null
+ */
+export function getCatalogEntry(id: string): PathwayCatalogEntry | null {
+  const curated = PATHWAY_MAP.get(id);
+  if (curated) return curated;
+  const entry = KEGG_FULL_MAP.get(id);
+  if (!entry) return null;
+  return {
+    id: entry.id,
+    name: entry.name,
+    nameZh: entry.nameZh,
+    category: entry.categoryZh,
+    description: `KEGG 分类：${entry.categoryEn}。全量目录通路：按 KGML 拓扑度数自动提取核心演示子图（无人工策划种子与教学文案，可正常模拟信号传播）。`,
+    cascade: 'KEGG 全图 · 自动提取核心子图',
+    seeds: [],
+  };
+}
+
 /** 从 Prisma 缓存行恢复 PathwayGraph（source 标记为 db-cache） */
 async function readDbCache(id: string): Promise<PathwayGraph | null> {
   try {
@@ -183,7 +212,7 @@ async function fetchLiveGraph(catalog: PathwayCatalogEntry): Promise<PathwayGrap
     source: 'kegg-live',
   };
 
-  // 写库（SQLite 本地写，失败不阻塞响应）
+  // 写库（SQLite 本地写，失败不阻塞响应）；成功后使 stats 缓存失效
   try {
     await db.pathwayCache.upsert({
       where: { id: catalog.id },
@@ -200,6 +229,7 @@ async function fetchLiveGraph(catalog: PathwayCatalogEntry): Promise<PathwayGrap
         source: 'kegg-live',
       },
     });
+    g.statsVersion = (g.statsVersion ?? 0) + 1;
   } catch {
     // 缓存写失败可容忍（下次重新在线抓取）
   }
@@ -216,9 +246,9 @@ export async function getPathwayGraph(id: string): Promise<PathwayGraph> {
   const cached = memCache.get(id);
   if (cached) return cached;
 
-  const catalog = PATHWAY_MAP.get(id);
+  const catalog = getCatalogEntry(id);
   if (!catalog) {
-    throw new Error(`未知通路 id: ${id}（不在目录中）`);
+    throw new Error(`未知通路 id: ${id}（不在 KEGG 全量目录中）`);
   }
 
   // 并发去重：同一通路只允许一个在途请求
@@ -272,8 +302,20 @@ export async function getPathwayGraph(id: string): Promise<PathwayGraph> {
   return task;
 }
 
-/** 读取目录中全部通路的缓存统计（无缓存的通路返回 null，不触发在线抓取） */
+/**
+ * 读取目录中全部通路的缓存统计（无缓存的通路返回 null，不触发在线抓取）
+ *
+ * 性能：DB 缓存行未来可能达到 372 条 × 数百 KB —— 全表 findMany + 逐行
+ * JSON.parse 在每次 /api/pathways 请求上都执行会成为性能灾难。因此在
+ * globalThis 上维护 { version, map } 统计缓存：fetchLiveGraph 每次
+ * upsert 成功后 version++ 使其失效，本函数命中有效 version 时直接
+ * 返回缓存 map，否则才做一次全量解析并缓存。
+ */
 export async function getCachedStats(): Promise<Map<string, PathwayGraph['stats']>> {
+  const version = g.statsVersion ?? 0;
+  if (g.statsCache && g.statsCache.version === version) {
+    return g.statsCache.map;
+  }
   const out = new Map<string, PathwayGraph['stats']>();
   try {
     const rows = await db.pathwayCache.findMany({
@@ -288,8 +330,10 @@ export async function getCachedStats(): Promise<Map<string, PathwayGraph['stats'
       }
     }
   } catch {
-    // DB 不可用时返回空 map
+    // DB 不可用时返回空 map（不缓存失败结果，下次重试）
+    return out;
   }
+  g.statsCache = { version, map: out };
   return out;
 }
 

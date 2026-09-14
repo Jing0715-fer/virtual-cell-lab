@@ -81,13 +81,13 @@ export interface LaidOutEdge extends CoreEdge {
 }
 
 const NODE_SIZE: Record<string, { w: number; h: number }> = {
-  ligand: { w: 88, h: 30 },
-  receptor: { w: 70, h: 56 },
-  channel: { w: 62, h: 56 },
-  compound: { w: 66, h: 30 },
-  tf: { w: 92, h: 30 },
-  gene: { w: 84, h: 28 },
-  default: { w: 100, h: 30 },
+  ligand: { w: 92, h: 33 },
+  receptor: { w: 76, h: 58 },
+  channel: { w: 68, h: 58 },
+  compound: { w: 72, h: 33 },
+  tf: { w: 98, h: 33 },
+  gene: { w: 90, h: 31 },
+  default: { w: 104, h: 33 },
 };
 
 /** 胞质分带 y（tier 2/3/4 → y 轴带） */

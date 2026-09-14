@@ -11,7 +11,7 @@
  *      - 核盘半径 = √(N²-h²)（h < N 时才显示）—— 切面触核后渐入、掠过核心最大
  *      两盘同心（膜与核球同心, 切面垂足即公共圆心）
  *   3. 剖面填充纹理（程序化 Canvas 双纹理, 电镜切片风格）:
- *      - 细胞质纹理: 质膜双层线/糖被/颗粒基质/线粒体剖面(双层膜+嵴)/高尔基池弧/ER 波浪线/囊泡
+ *      - 细胞质纹理: 质膜双层线/糖被/颗粒基质/线粒体剖面(长椭圆+波浪嵴线, 对应 3D 豆状形态)/高尔基平行弧堆/ER 波浪线/囊泡
  *      - 核纹理: 核被膜双线+核孔短杆/常染色质纤维/异染色质边集/核仁(纤维中心+颗粒组分)
  *   4. 剖切方位三预设: 正剖 Coronal / 俯剖 Horizontal / 侧剖 Sagittal（解剖学标准切面）
  *   5. 被剖掉的前半分子 DOM 标签同步隐藏（SimSnapshot.clipPlane 快照广播）
@@ -108,15 +108,15 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
     ctx.fillRect(x, y, s, s);
   }
 
-  /* --- 线粒体剖面（椭圆 · 双层膜 + 板层嵴） --- */
+  /* --- 线粒体剖面（长椭圆 rx≈26 ry≈11 · 双层膜 + 4-5 条沿长轴波浪嵴线，对应 3D 长条豆状新形态） --- */
   const mitoCount = 8;
   for (let i = 0; i < mitoCount; i++) {
     const a = rnd() * Math.PI * 2;
     const rr = rMem * (0.44 + rnd() * 0.48);
     const x = cx + Math.cos(a) * rr;
     const y = cy + Math.sin(a) * rr * 0.94;
-    const rx = 17 + rnd() * 13;
-    const ry = rx * (0.56 + rnd() * 0.2);
+    const rx = 22 + rnd() * 7; // 长椭圆（≈2.4:1, 与 2D Mitochondrion 椭圆同构）
+    const ry = rx * 0.42;
     const rot = rnd() * Math.PI;
     ctx.save();
     ctx.translate(x, y);
@@ -133,22 +133,30 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
     ctx.strokeStyle = 'rgba(101, 163, 13, 0.5)';
     ctx.lineWidth = 1.1;
     ctx.stroke();
-    const cristae = Math.floor(rx / 6);
-    for (let j = 1; j < cristae; j++) {
-      const xx = -rx + (j * 2 * rx) / cristae;
-      const h = ry * (0.55 + 0.3 * Math.sin(j * 1.7 + i));
+    // 波浪嵴线（沿长轴 4-5 条, 裁剪于椭圆内 —— 与 2D 形态学/3D 板层嵴同构）
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rx - 3, ry - 3, 0, 0, Math.PI * 2);
+    ctx.clip();
+    const lines = 4 + (i % 2);
+    for (let j = 0; j < lines; j++) {
+      const yy = -ry * 0.6 + (j * ry * 1.2) / Math.max(1, lines - 1);
       ctx.beginPath();
-      ctx.moveTo(xx, -h);
-      ctx.quadraticCurveTo(xx + 3, 0, xx, h);
-      ctx.strokeStyle = 'rgba(101, 163, 13, 0.42)';
+      for (let xx = -rx + 3; xx <= rx - 3; xx += 3) {
+        const wy = yy + Math.sin(xx * 0.24 + j * 1.9 + i) * ry * 0.3;
+        if (xx === -rx + 3) ctx.moveTo(xx, wy);
+        else ctx.lineTo(xx, wy);
+      }
+      ctx.strokeStyle = 'rgba(101, 163, 13, 0.5)';
       ctx.lineWidth = 1.2;
       ctx.stroke();
     }
     ctx.restore();
+    ctx.restore();
   }
 
-  /* --- 高尔基体剖面（顺→反 3-4 池弧线堆叠） --- */
-  for (let g = 0; g < 2; g++) {
+  /* --- 高尔基体剖面（3 组 × 4 条平行弧线堆 = 层叠扁平囊截面，对应 3D 高尔基重塑） --- */
+  for (let g = 0; g < 3; g++) {
     const a = rnd() * Math.PI * 2;
     const rr = rMem * (0.5 + rnd() * 0.4);
     const x = cx + Math.cos(a) * rr;
@@ -156,12 +164,20 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rnd() * Math.PI * 2);
-    for (let s = 0; s < 4; s++) {
+    const stack = 4; // 每组 4 条平行弧（同半径沿 y 平移 → 平行弧堆）
+    for (let s = 0; s < stack; s++) {
       ctx.beginPath();
-      ctx.arc(0, s * 2.6 - 4, 13 - s * 1.8, Math.PI * 0.15, Math.PI * 0.85);
-      ctx.strokeStyle = `rgba(180, 83, 9, ${0.55 - s * 0.08})`;
-      ctx.lineWidth = 2.4 - s * 0.35;
+      ctx.arc(0, -s * 3.1, 13 - s * 0.6, Math.PI * 0.12, Math.PI * 0.88);
+      ctx.strokeStyle = `rgba(180, 83, 9, ${0.55 - s * 0.07})`;
+      ctx.lineWidth = 2.2 - s * 0.3;
       ctx.stroke();
+    }
+    // 反面出芽小泡（琥珀小点）
+    for (let v = 0; v < 3; v++) {
+      ctx.beginPath();
+      ctx.arc(-13 + v * 5.2, -stack * 3.1 - 3.5, 1.8, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(217, 119, 6, 0.4)';
+      ctx.fill();
     }
     ctx.restore();
   }

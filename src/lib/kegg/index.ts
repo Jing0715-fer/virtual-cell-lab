@@ -15,4 +15,4 @@ export type { Classification } from './classify';
 
 export { extractCoreSubgraph, mergeDuplicateNodes } from './subgraph';
 
-export { getPathwayGraph, getCachedStats, clearMemCache } from './kegg-client';
+export { getPathwayGraph, getCatalogEntry, getCachedStats, clearMemCache } from './kegg-client';
