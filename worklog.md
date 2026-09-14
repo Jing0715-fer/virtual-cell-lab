@@ -725,3 +725,30 @@ Stage Summary:
 - 产出: hero-cell.jpg(新图) + hero-visual.tsx(重写) + 13 lab 组件 + i18n.tsx(+281 行) + cell-types/inhibitors/pathway-catalog(数据 En 字段) + kegg-client/types(meta 双语) + cell-picker/inspector/page(收尾)
 - 风险/遗留: ① VLM 视觉 QA 因限流未完成(下轮补) ② 模拟事件流文本(SimEvent.text)/分子注释(NODE_NOTES)仍为中文数据层(量级大, 未纳入本轮) ③ report-export PDF 内容仍中文 ④ 图源 StockCake 免版税(商用安全)但建议长期替换为自有渲染截图(项目 3D 视图本身可导出)
 - 下阶段建议: ① SimEvent 事件文案双语(引擎层 key 化) ② PDF 报告 EN 版 ③ hero 图可考虑用项目自身 3D 视图高质量截图替代(科学性 100% 可控)
+
+---
+Task ID: 23
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户反馈——①Hero/head 区域重设计: 中间空白过多, 左侧文字不动、右侧图放大、图下条目删除 ②继续打磨项目细节
+
+Work Log:
+- [Hero 重设计] 删除 HeroVisual 的"分裂驱动级联"快捷面板(DRIVERS 三按钮+提示文案)及其 store/jump 逻辑; 图注铭牌与显微比例尺(|— 20µm —|)内嵌为画面底部渐变条, 画面之外零附属条目
+- [图片放大] page.tsx Hero 网格 lg:grid-cols-[minmax(0,1fr)_420px] → lg:grid-cols-[23fr_27fr], gap-8 → lg:gap-12/xl:gap-16; 实测 1280px: 图 420×316 → 629×472(+50%), 1920px: 845×634(主视觉主导), 左列 537px 与段落 max-w-xl 贴合, 中间空白消除; 右栏 474px vs 左栏 453px 高度平衡; Hero 区总高 793→603px
+- [标注修复] 线粒体芯片(82%,34%)右侧溢出画面 13px 被裁切 → chipSide 改 'left'(芯片向左展开), 复测 4 芯片全部在画面内且互不重叠; EN 模式芯片宽度复测也通过
+- [H1 字号阶梯] text-4xl/5xl/56px → lg:44px/xl:54px/2xl:58px, 适配较窄左列的折行
+- [区块间距收紧] cells py-12→py-10(lg:py-12), lab pb-12→pb-10(lg:pb-12), method pb-14→pb-12(lg:pb-14); Hero py-14/20→py-12/16; CTA mt-7→mt-6, stats mt-9→mt-8
+- [细节打磨 ① 导航滚动高亮] IntersectionObserver(rootMargin -30%/-55%) 跟踪 cells/lab/method 区块 → 导航链接常亮下划线+emerald 文字; hero 进入观察带自动清空(回到顶部不残留); 注意测试需用 classList.contains 精确 token 匹配(contains("text-emerald-300") 会被 hover: 前缀 token 干扰)
+- [细节打磨 ② 动态标题] useEffect 同步 document.title + <html lang> —— EN 模式标签页不再残留中文标题(此前 i18n 唯一漏网之鱼); 中英双向实测通过
+- [细节打磨 ③ CountUp 统计] Hero 4 统计卡数值挂载后 easeOutCubic 0→N 缓动(950ms), tabular-nums 对齐, prefers-reduced-motion 跳过, 首帧即终值(无水合错配); 终值 7/372/6,000+/200+ 复测正确
+- [细节打磨 ④ 头部滚动投影] scrollY>10 时 header 加深 shadow(层次感), 滚回顶部淡出
+- [细节打磨 ⑤ 回到顶部] 页脚右侧 ArrowUp 圆角按钮, 平滑滚回顶部, 双语 aria-label/title
+- [细节打磨 ⑥ 键盘可达性] globals.css 全局 a/button focus-visible 焦点环(emerald 2px outline)
+- [运维] dev server 两次 OOM 被内核杀死(next-server 2GB RSS, 3.9GB 机器) + 一次被环境收割; 最终以 (setsid nohup ... &) 子括号方式启动稳定存活; agent-browser 导航失败为 cron webDevReview 与本会话竞态所致(其自动 reload 重置 scroll), 功能本身验证正常
+- [QA] lint 0 错误; console 0 错误; 1280/1920/1024/390 四档视口无横向溢出; 移动端 hero 图正确隐藏(display:none), 页脚吸底; EN/zh 标题+htmlLang 切换正确; nav 高亮 4 状态(顶/cells/lab/method)正确; VLM 视觉 QA 因 429 限流整轮不可用(以 DOM 几何测量替代: 列宽/图片尺寸/芯片边界/重叠检测)
+
+Stage Summary:
+- Hero 重设计完成: 右侧科学插画放大 50%+ 成为主视觉, 图下条目全删除, 中间空白消除, 左右栏高度平衡; 图注/比例尺内嵌仪器化细节
+- 新增 6 项细节: 导航滚动高亮(+清空)、动态双语标题、统计 CountUp、头部滚动投影、回到顶部、focus-visible 焦点环
+- 产出: hero-visual.tsx(重写v3)、page.tsx(网格+6细节)、globals.css(focus-visible)
+- 风险/遗留: ① VLM 配额 429 整轮限流, 视觉复验下轮补 ② SimEvent 事件文案/分子注释(NODE_NOTES)数据层中文、PDF 报告中文(Task 22 遗留) ③ dev server 内存偏紧(1.7GB RSS), 建议 QA 批量操作减少整页 reload
+- 下阶段建议: ① SimEvent 事件流文案双语化 ② PDF 报告 EN 版 ③ hero 图长期可换项目自身 3D 视图截图(科学性 100% 可控)

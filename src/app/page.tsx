@@ -1,9 +1,10 @@
 'use client';
 
 import { motion } from 'framer-motion';
+import { useEffect, useState } from 'react';
 import {
   FlaskConical, Dna, Activity, Database, MousePointerClick, Cpu,
-  ArrowDown, ShieldCheck, BookOpen, Layers, Languages,
+  ArrowDown, ArrowUp, ShieldCheck, BookOpen, Layers, Languages,
 } from 'lucide-react';
 import { CellPicker } from '@/components/lab/cell-picker';
 import { LabWorkspace } from '@/components/lab/workspace';
@@ -98,8 +99,74 @@ function SectionHeading({
   );
 }
 
+/** 导航锚点（用于滚动时高亮当前区块） */
+const NAV_SECTIONS = ['cells', 'lab', 'method'] as const;
+
+/** 统计数值: 挂载后从 0 缓动到目标值（尊重 prefers-reduced-motion, 首帧即终值避免水合错配） */
+function CountUp({ value }: { value: string }) {
+  const [display, setDisplay] = useState(value);
+  useEffect(() => {
+    const m = value.match(/^([\d,]+)(.*)$/);
+    if (!m) return;
+    const target = parseInt(m[1].replace(/,/g, ''), 10);
+    if (!target || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const suffix = m[2] || '';
+    const dur = 950;
+    const t0 = performance.now();
+    let raf = 0;
+    const tick = (t: number) => {
+      const p = Math.min(1, (t - t0) / dur);
+      const eased = 1 - Math.pow(1 - p, 3); // easeOutCubic
+      setDisplay(Math.round(target * eased).toLocaleString('en-US') + suffix);
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+  return <span className="tabular-nums">{display}</span>;
+}
+
 export default function Home() {
   const { t, lang } = useLang();
+  const [activeSection, setActiveSection] = useState<string>('');
+  const [scrolled, setScrolled] = useState(false);
+
+  // 滚动感知: 当前视口内占比最大的区块 → 导航高亮
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) setActiveSection(e.target.id);
+        }
+      },
+      { rootMargin: '-30% 0px -55% 0px' },
+    );
+    NAV_SECTIONS.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) observer.observe(el);
+    });
+    // Hero 区无 id → 命中观察带即清空高亮（回到顶部不残留上一区块状态）
+    const hero = document.querySelector('main > section');
+    if (hero) observer.observe(hero);
+    return () => observer.disconnect();
+  }, []);
+
+  // 语言切换 → 同步文档标题与 <html lang>（EN 模式不再残留中文标签页标题）
+  useEffect(() => {
+    document.title = lang === 'zh'
+      ? 'VirtualCell Lab · 虚拟细胞实验室 — 分子级信号转导演示平台'
+      : 'VirtualCell Lab — Molecular-level Cell Signaling Demo';
+    document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  }, [lang]);
+
+  // 滚动感知: 页面下滚后头部加深投影, 强化层次
+  useEffect(() => {
+    const fn = () => setScrolled(window.scrollY > 10);
+    window.addEventListener('scroll', fn, { passive: true });
+    fn();
+    return () => window.removeEventListener('scroll', fn);
+  }, []);
+
   const stats = [
     { icon: Dna, label: t('stat.cellLines'), value: '7' },
     { icon: Activity, label: t('stat.pathways'), value: '372' },
@@ -110,7 +177,7 @@ export default function Home() {
     <QueryProvider>
     <div className="flex min-h-screen flex-col bg-[#030812]">
       {/* ============ 头部 ============ */}
-      <header className="sticky top-0 z-40 border-b border-white/5 bg-[#030812]/85 backdrop-blur-xl">
+      <header className={`sticky top-0 z-40 border-b border-white/5 bg-[#030812]/85 backdrop-blur-xl transition-shadow duration-300 ${scrolled ? 'shadow-[0_10px_30px_-12px_rgba(0,0,0,0.65)]' : ''}`}>
         <div className="mx-auto flex h-14 max-w-[1680px] items-center gap-3 px-4 lg:px-6">
           <div className="flex items-center gap-2.5">
             <div className="relative flex h-8 w-8 items-center justify-center rounded-xl border border-emerald-500/40 bg-emerald-500/10">
@@ -127,13 +194,22 @@ export default function Home() {
 
           <nav className="ml-6 hidden items-center gap-5 text-[12.5px] text-slate-400 md:flex">
             {[
-              ['#cells', t('nav.cells')],
-              ['#lab', t('nav.lab')],
-              ['#method', t('nav.method')],
-            ].map(([href, label]) => (
-              <a key={href} href={href} className="group relative py-1 transition hover:text-emerald-300">
+              ['cells', t('nav.cells')],
+              ['lab', t('nav.lab')],
+              ['method', t('nav.method')],
+            ].map(([id, label]) => (
+              <a
+                key={id}
+                href={`#${id}`}
+                className={`group relative py-1 transition hover:text-emerald-300 ${activeSection === id ? 'text-emerald-300' : ''}`}
+              >
                 {label}
-                <span className="absolute inset-x-0 -bottom-px h-px origin-left scale-x-0 bg-gradient-to-r from-emerald-400 to-teal-400 transition-transform duration-300 group-hover:scale-x-100" aria-hidden />
+                <span
+                  className={`absolute inset-x-0 -bottom-px h-px origin-left bg-gradient-to-r from-emerald-400 to-teal-400 transition-transform duration-300 ${
+                    activeSection === id ? 'scale-x-100' : 'scale-x-0 group-hover:scale-x-100'
+                  }`}
+                  aria-hidden
+                />
               </a>
             ))}
           </nav>
@@ -155,7 +231,7 @@ export default function Home() {
           <div className="pointer-events-none absolute -right-40 -top-40 h-[480px] w-[480px] rounded-full bg-emerald-500/[0.07] blur-[120px]" />
           <div className="pointer-events-none absolute -left-40 top-20 h-[380px] w-[380px] rounded-full bg-teal-500/[0.05] blur-[100px]" />
 
-          <div className="mx-auto grid max-w-[1680px] items-center gap-8 px-4 py-14 lg:grid-cols-[minmax(0,1fr)_420px] lg:px-6 lg:py-20">
+          <div className="mx-auto grid max-w-[1680px] items-center gap-8 px-4 py-12 lg:grid-cols-[23fr_27fr] lg:gap-12 lg:px-6 lg:py-16 xl:gap-16">
             <div>
               <motion.div
                 initial={{ opacity: 0, y: 16 }}
@@ -171,7 +247,7 @@ export default function Home() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.08 }}
-                className="mt-5 text-4xl font-bold leading-[1.12] tracking-tight text-slate-50 sm:text-5xl lg:text-[56px]"
+                className="mt-5 text-4xl font-bold leading-[1.12] tracking-tight text-slate-50 sm:text-5xl lg:text-[44px] xl:text-[54px] 2xl:text-[58px]"
               >
                 {t('hero.h1a')}
                 <br />
@@ -193,7 +269,7 @@ export default function Home() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.24 }}
-                className="mt-7 flex flex-wrap gap-3"
+                className="mt-6 flex flex-wrap gap-3"
               >
                 <a
                   href="#lab"
@@ -215,7 +291,7 @@ export default function Home() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.8, delay: 0.35 }}
-                className="mt-9 grid max-w-lg grid-cols-2 gap-3 sm:grid-cols-4"
+                className="mt-8 grid max-w-lg grid-cols-2 gap-3 sm:grid-cols-4"
               >
                 {stats.map((s) => (
                   <div
@@ -224,20 +300,20 @@ export default function Home() {
                   >
                     <span className="absolute inset-y-0 left-0 w-px scale-y-0 bg-emerald-400/60 transition-transform duration-300 group-hover:scale-y-100" aria-hidden />
                     <s.icon className="h-3.5 w-3.5 text-emerald-400/80" />
-                    <div className="mt-1.5 font-mono text-[15px] font-semibold text-slate-100">{s.value}</div>
+                    <div className="mt-1.5 font-mono text-[15px] font-semibold text-slate-100"><CountUp value={s.value} /></div>
                     <div className="text-[10px] text-slate-500">{s.label}</div>
                   </div>
                 ))}
               </motion.div>
             </div>
 
-            {/* 装饰性微细胞（AI 渲染 + 仪器化叠加层） */}
+            {/* 科学插画主视觉（大画幅: 图注与比例尺内嵌, 无下方附属条目） */}
             <HeroVisual />
           </div>
         </section>
 
         {/* ============ 细胞系选择 ============ */}
-        <section id="cells" className="mx-auto max-w-[1680px] scroll-mt-20 px-4 py-12 lg:px-6">
+        <section id="cells" className="mx-auto max-w-[1680px] scroll-mt-20 px-4 py-10 lg:px-6 lg:py-12">
           <SectionHeading
             index="01"
             title={t('cells.h2a')}
@@ -254,7 +330,7 @@ export default function Home() {
         </section>
 
         {/* ============ 模拟实验台 ============ */}
-        <section id="lab" className="mx-auto max-w-[1680px] scroll-mt-20 px-4 pb-12 lg:px-6">
+        <section id="lab" className="mx-auto max-w-[1680px] scroll-mt-20 px-4 pb-10 lg:px-6 lg:pb-12">
           <SectionHeading
             index="02"
             title={t('lab.h2a')}
@@ -265,7 +341,7 @@ export default function Home() {
         </section>
 
         {/* ============ 数据与方法 ============ */}
-        <section id="method" className="mx-auto max-w-[1680px] scroll-mt-20 px-4 pb-14 lg:px-6">
+        <section id="method" className="mx-auto max-w-[1680px] scroll-mt-20 px-4 pb-12 lg:px-6 lg:pb-14">
           <SectionHeading
             index="03"
             title={t('nav.method')}
@@ -333,6 +409,15 @@ export default function Home() {
             <span className="h-1 w-1 rounded-full bg-emerald-500/50" aria-hidden />
             Next.js 16 · Prisma · zustand · z-ai-web-dev-sdk
           </span>
+          {/* 回到顶部 */}
+          <button
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            aria-label={lang === 'zh' ? '回到顶部' : 'Back to top'}
+            title={lang === 'zh' ? '回到顶部' : 'Back to top'}
+            className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] text-slate-500 transition hover:border-emerald-500/40 hover:text-emerald-300"
+          >
+            <ArrowUp className="h-3.5 w-3.5" />
+          </button>
         </div>
       </footer>
     </div>
