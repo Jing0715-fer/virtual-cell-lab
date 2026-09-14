@@ -41,6 +41,9 @@ const COMPARTMENT_ZH: Record<string, string> = {
   nucleus: '细胞核',
 };
 
+/** 剖面裁剪检测复用的世界坐标临时向量（避免每帧分配） */
+const _wp = new THREE.Vector3();
+
 /** 模拟状态快照（由父组件维护并每帧直读） */
 export interface SimSnapshot {
   nodeStates: Record<string, { activity: number; phospho: number; activated: boolean }>;
@@ -56,6 +59,8 @@ export interface SimSnapshot {
   pulseAt?: Record<string, number>;
   /** 事件脉冲: 边最近脉冲时间戳（双向 key） */
   edgePulse?: Record<string, number>;
+  /** 剖面模式: 全局裁剪平面（null = 未开启; 分子标签层据此隐藏被剖掉的前半分子标签） */
+  clipPlane?: THREE.Plane | null;
 }
 
 interface MoleculeProps {
@@ -141,6 +146,13 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
     const st = sim.current.nodeStates[node.id];
     const a = st?.activity ?? 0;
     const ph = st?.phospho ?? 0;
+    // 剖面模式: 被剖掉的前半分子 → DOM 标签同步隐藏（mesh 已被 WebGL 全局裁剪）
+    let clipped = false;
+    const clipPlane = sim.current.clipPlane;
+    if (clipPlane && groupRef.current) {
+      groupRef.current.getWorldPosition(_wp);
+      clipped = clipPlane.distanceToPoint(_wp) < 0;
+    }
     // 信号抵达闪光（事件脉冲层写入时间戳, 650ms 衰减）
     let flash = 0;
     const pAt = sim.current.pulseAt?.[node.id];
@@ -194,18 +206,20 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
       inhibRingRef.current.rotation.x = -Math.PI / 3;
       inhibMat.opacity = Math.min(0.9, inh * 1.1);
     }
-    // 标签（DOM imperative）
+    // 标签（DOM imperative; 剖切掉的分子不显示标签）
     const el = labelRef.current;
     if (el) {
       const bright = a > 0.25 || selected || isTourTarget;
       el.classList.toggle('is-active', bright);
       el.classList.toggle('is-phospho', ph > 0.25);
       el.classList.toggle('is-inhibited', inh > 0.25);
-      el.style.opacity = showLabel
-        ? String(Math.max(0.5 * vis + a * 0.5, bright ? 1 : 0.62))
-        : bright
-          ? '1'
-          : '0';
+      el.style.opacity = clipped
+        ? '0'
+        : showLabel
+          ? String(Math.max(0.5 * vis + a * 0.5, bright ? 1 : 0.62))
+          : bright
+            ? '1'
+            : '0';
     }
   });
 

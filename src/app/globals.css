@@ -387,3 +387,19 @@
   color: rgba(196, 181, 253, 0.78);
   letter-spacing: 0.04em;
 }
+
+/* 剖面结构标注（切面盘上） */
+.mol3d-label.section-anno {
+  border-color: rgba(94, 234, 212, 0.5);
+  background: rgba(4, 30, 28, 0.86);
+  box-shadow: 0 0 12px rgba(45, 212, 191, 0.28);
+}
+.mol3d-label.section-anno .mol3d-sym {
+  color: #99f6e4;
+  font-size: 10px;
+}
+.mol3d-label.section-anno .mol3d-kind {
+  color: rgba(94, 234, 212, 0.62);
+  font-size: 7.5px;
+  letter-spacing: 0.04em;
+}

@@ -455,3 +455,37 @@ Stage Summary:
   3. 药物分子点击交互（点击 3D 药物 → inspector 显示药物档案: 结构/机制/适应症）
   4. mTOR 通路引入合成转录输出节点（RPS6KB1→核糖体生物合成程序叙事，需科学策划）
   5. 对照模式瞬态期观察提示（差异指标卡注明"建议 T+15~40s 观察动力学差异"）
+
+---
+Task ID: 16
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户报告"页面加载不出来"诊断修复 + 3D 细胞剖面展示功能增强
+
+Work Log:
+- 诊断加载问题: dev server 正常（EADDRINUSE 为旧日志, 现存单实例 200 OK）; agent-browser 全新会话实测页面 1.4s 加载完成、WebGL 正常、3D 渲染正常、API db-cache 114ms——本地环境无法复现"加载不出来"
+- 根因推断（用户环境特异性）: ① 3D 崩溃会掀翻整页 React 树（无错误边界）② preserveDrawingBuffer:true 在低端 GPU 显著增加内存带宽易导致 WebGL 崩溃 ③ GPU 探测在 Canvas 创建之后才生效（低端设备先以重参数 antialias+dpr1.75+preserveDrawingBuffer 初始化）④ WebGL contextlost 无处理
+- 修复 1（加载鲁棒性）: 新增 Cell3DErrorBoundary class 组件包裹 Canvas——渲染异常时降级为提示卡 + "切换 2D 切面视图"/"刷新重试"按钮（调 store setView('cell') 保可用性, 不再白屏整页）
+- 修复 2: WebGL contextlost/contextrestored 事件监听（onCreated 注册, e.preventDefault 允许自动恢复 + 遮罩提示"图形上下文丢失·正在尝试自动恢复"）
+- 修复 3: detectLowEndGpu 升级为模块级单次缓存（_lowEndCache）→ Canvas 首次创建即使用正确参数
+- 修复 4: gl preserveDrawingBuffer 改为 !perfMode（低端设备关闭, SceneCapture toDataURL 已有 try-catch 容错）
+- 新功能（剖面展示增强, 新文件 section-view.tsx ~420 行）:
+  · SECTION_ORIENTS 三方位预设: 正剖 Coronal / 俯剖 Horizontal / 侧剖 Sagittal（解剖学标准切面, 带中文提示与科学定位）
+  · makeSectionTexture(): 程序化 Canvas 剖面标本纹理（640px, mulberry32 稳定种子）——质膜双层线+糖被短须/细胞质 teal 渐变+420 颗粒基质/线粒体 7 个剖面椭圆（双层膜+板层嵴）/高尔基 2 组池弧/ER 波浪线+膜旁核糖体/转运囊泡 18 个/核区常染色质渐变+异染色质边集环带+染色质纤维/核仁 1-2 个（纤维中心+颗粒组分）/核被膜双线+核孔剖面短杆——参照 Alberts MBoC Fig.1-8 / Ross Histology 电镜剖面风格
+  · SectionClipController 增强: 剖面填充盘（circleGeometry+剖面纹理+发光切割边缘 ring, polygonOffset 防 z-fighting, renderOrder 96-97）/方位阻尼插值（normal.lerp 0.07 + constant 0.12）/盘位姿每帧同步平面/剖面结构 Html 标注 3 个（细胞核/细胞质基质/质膜, 联动解剖标注开关, section-anno CSS 类）/动态 mesh 双面化补丁（500ms 节流 traverse, 覆盖事件脉冲等运行时生成物）/SimSnapshot.clipPlane 快照广播
+  · molecules.tsx: SimSnapshot 增 clipPlane 字段 + Molecule3D useFrame 剖切检测（getWorldPosition→distanceToPoint<0 → DOM 标签同步隐藏, mesh 已由 WebGL 全局裁剪）+ _wp 模块级临时向量防每帧分配
+  · virtual-cell-3d.tsx: clipAxis 状态 + HUD 方位三按钮组（title 提示）+ 剖深滑杆移入面板 + 底部提示升级 + FALLBACK_SPEC 兜底
+- CSS: globals.css 追加 .mol3d-label.section-anno 剖面标注样式（teal 系）
+- QA: lint 零错误 ✓; 剖面开启 VLM 确认"细胞被剖开+剖面填充盘渲染成功（紫核+绿细胞质+细胞器剖面）" ✓; 俯剖切换 VLM 确认水平切面 ✓; 深度 65→85% 滑杆交互生效 ✓; 关闭剖面恢复完整细胞 ✓; 2D↔3D 视图切换正常 ✓; 移动端 390px 布局正常无溢出 ✓; 全新会话完整加载 WebGL alive ✓; 0 console/page errors ✓
+
+Stage Summary:
+- 项目状态: 3D 沉浸虚拟细胞平台稳定; 加载鲁棒性显著加固（4 层防护: 错误边界/上下文恢复/探测前置/参数降级）; 剖面展示从"简单裁剪+指示环"升级为"填充剖面标本图+三标准切面+深度可调+结构标注"
+- 本轮产出: 1 新组件文件（section-view.tsx）+ 3 文件修改（virtual-cell-3d/molecules/globals.css）; 4 项加载修复 + 剖面功能 6 项增强
+- 关键技术决策: ① 剖面填充盘不做 stencil cap（Three.js 官方 clipping_stencil 需底层 renderBuffer 操作, R3F 侵入性大）而用程序化纹理盘贴剖切平面（保留侧 0.035 偏移防浮点裁剪, 视觉等效且科学风格更强） ② 剖面被裁掉的分子 DOM 标签通过 SimSnapshot.clipPlane 快照广播隐藏（WebGL mesh 自动裁剪 + DOM 标签手动同步） ③ preserveDrawingBuffer 低端关闭（报告导出快照失败静默降级, 换取低端设备稳定性）
+- 未解决问题/风险:
+  1. "页面加载不出来"未能在测试环境复现——已按最可能根因（WebGL 崩溃无边界/低端设备过重参数）全面加固, 需用户确认实际环境（若为 dev 模式首次编译 30-60s 属正常, 等待即出）
+  2. 剖面填充盘为正圆而细胞膜有 FBM 位移（±0.17）, 极浅深度时盘边缘可能略超出膜轮廓（示意可接受）
+  3. 剖面纹理中的细胞器位置为装饰性随机（mulberry32 固定种子稳定复现, 非真实 3D 细胞器的严格投影）
+- 下一阶段建议:
+  1. 用户确认加载问题是否解决（询问环境: 桌面/移动/浏览器型号）
+  2. 剖面模式联动引导叙事（开剖面时自动播放"由外向内"分层讲解: 质膜→细胞质→核）
+  3. 对照模式 3D 视图（Task 14 遗留）与药物浓度时程曲线（前轮遗留）

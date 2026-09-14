@@ -8,18 +8,18 @@
  *   - Bloom 后处理辉光 + 暗角，生物荧光实验质感
  * 模拟状态通过 zustand 订阅写入快照引用，帧驱动 imperative 更新（60fps 流畅）
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ComponentType, RefObject } from 'react';
+import { Component, useEffect, useMemo, useRef, useState } from 'react';
+import type { ComponentType, ReactNode, RefObject } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { setSceneSnapshot } from '@/lib/simulation/scene-capture';
 import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, Noise, Vignette } from '@react-three/postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors } from 'lucide-react';
+import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
-import { layout3D, type Vec3 } from '@/lib/simulation/layout3d';
+import { layout3D, type CellBodySpec, type Vec3 } from '@/lib/simulation/layout3d';
 import { buildGuidedTour, tourIntro } from '@/lib/simulation/guided-tour';
 import { CellBody } from './organelles';
 import { MoleculeLayer, KIND_COLORS, type SimSnapshot } from './molecules';
@@ -27,98 +27,67 @@ import { DrugMoleculeLayer } from './drug-molecules';
 import { EdgeLayer } from './signal-edges';
 import { MrnaFlow } from './mrna-flow';
 import { EventPulses } from './event-pulses';
+import { SectionClipController, SECTION_ORIENTS, type SectionAxis } from './section-view';
 
 type CamMode = 'free' | 'overview' | 'membrane' | 'nucleus' | 'follow' | 'tour';
 
-/** 低端设备/软件渲染检测（SwiftShader/CPU 渲染/低核数 → 自动流畅模式，降帧缓冲内存与 CPU 负担） */
+/** 剖面控制器回退 spec（graph 尚未装配时） */
+const FALLBACK_SPEC: CellBodySpec = {
+  membraneR: 10,
+  nucleusR: 4.1,
+  scale: [1, 1, 1],
+  mitoCount: 0,
+  erSheets: 0,
+  vesicleCount: 0,
+  microtubules: 0,
+  nucleolus: { count: 1, r: 0.8 },
+};
+
+/** 低端设备/软件渲染检测（SwiftShader/CPU 渲染/低核数 → 自动流畅模式，降帧缓冲内存与 CPU 负担）
+ *  模块级一次性缓存: 在 Canvas 创建前完成探测，保证首帧即使用正确的渲染参数 */
+let _lowEndCache: boolean | null = null;
 function detectLowEndGpu(): boolean {
   if (typeof navigator === 'undefined') return false;
+  if (_lowEndCache !== null) return _lowEndCache;
   const nav = navigator as Navigator & { deviceMemory?: number };
-  if (nav.deviceMemory !== undefined && nav.deviceMemory <= 4) return true;
-  if (nav.hardwareConcurrency && nav.hardwareConcurrency <= 4) return true;
-  try {
-    const c = document.createElement('canvas');
-    const gl = (c.getContext('webgl2') ?? c.getContext('webgl')) as WebGLRenderingContext | null;
-    if (!gl) return true;
-    const ext = gl.getExtension('WEBGL_debug_renderer_info');
-    const renderer = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
-    return /swiftshader|llvmpipe|software|basic\s*render|angle \(.*software/i.test(renderer);
-  } catch {
-    return false;
+  let low = false;
+  if (nav.deviceMemory !== undefined && nav.deviceMemory <= 4) low = true;
+  else if (nav.hardwareConcurrency && nav.hardwareConcurrency <= 4) low = true;
+  if (!low) {
+    try {
+      const c = document.createElement('canvas');
+      const gl = (c.getContext('webgl2') ?? c.getContext('webgl')) as WebGLRenderingContext | null;
+      if (!gl) low = true;
+      else {
+        const ext = gl.getExtension('WEBGL_debug_renderer_info');
+        const renderer = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+        low = /swiftshader|llvmpipe|software|basic\s*render|angle \(.*software/i.test(renderer);
+      }
+    } catch {
+      low = false;
+    }
   }
+  _lowEndCache = low;
+  return low;
 }
 
-/** 切面控制器: 全局裁剪平面剖切细胞前半部，露出内部细胞器与核内分子（深度可调） */
-/* eslint-disable react-hooks/immutability -- renderer.clippingPlanes 为 three.js 全局渲染器命令式 API（R3F 标准用法） */
-function SectionClipController({ enabled, ringR, depth }: { enabled: boolean; ringR: number; depth: number }) {
-  const gl = useThree((s) => s.gl);
-  const scene = useThree((s) => s.scene);
-  // 剖面法向: 稍微俯视的前向切割（与默认相机方位一致，翻开“细胞剖面”）
-  const plane = useMemo(
-    () => new THREE.Plane(new THREE.Vector3(0, -0.22, -1).normalize(), 0.55),
-    [],
-  );
-  const origSides = useRef<Map<THREE.Material, THREE.Side>>(new Map());
-  const ringRef = useRef<THREE.Group | null>(null);
-
-  // 剖面深度（0=刚触及表面 1=深剖近后半）：平面常数 10 → -4（默认 0.65 ≈ 0.9，接近原固定值）
-  useEffect(() => {
-    plane.constant = 10 - depth * 14;
-    if (ringRef.current) {
-      ringRef.current.position.copy(plane.normal.clone().multiplyScalar(-plane.constant));
-    }
-  }, [depth, plane, enabled]);
-
-  useEffect(() => {
-    const restore = () => {
-      origSides.current.forEach((side, m) => {
-        m.side = side;
-        m.needsUpdate = true;
-      });
-      origSides.current.clear();
-    };
-    if (enabled) {
-      gl.clippingPlanes = [plane];
-      // 剖开后内壁可见: 结构材质临时双面化（记忆原 side 以便还原）
-      scene.traverse((obj) => {
-        const mesh = obj as THREE.Mesh;
-        if (!mesh.material) return;
-        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const m of mats) {
-          if (!(m instanceof THREE.Material)) continue;
-          if (!origSides.current.has(m)) origSides.current.set(m, m.side);
-          m.side = THREE.DoubleSide;
-          m.needsUpdate = true;
-        }
-      });
-    } else {
-      gl.clippingPlanes = [];
-    }
-    return () => {
-      gl.clippingPlanes = [];
-      restore();
-    };
-  }, [enabled, gl, scene, plane]);
-
-  // 剖面方位环（淡淡的两圈标记，指示切割平面位置与朝向）
-  const ringQuat = useMemo(() => {
-    const q = new THREE.Quaternion();
-    q.setFromUnitVectors(new THREE.Vector3(0, 0, 1), plane.normal);
-    return q;
-  }, [plane]);
-
-  return enabled ? (
-    <group ref={ringRef} quaternion={ringQuat}>
-      <mesh>
-        <ringGeometry args={[ringR - 0.12, ringR, 96]} />
-        <meshBasicMaterial color="#5eead4" transparent opacity={0.22} side={THREE.DoubleSide} fog={false} />
-      </mesh>
-      <mesh>
-        <ringGeometry args={[ringR * 0.42, ringR * 0.42 + 0.05, 64]} />
-        <meshBasicMaterial color="#5eead4" transparent opacity={0.1} side={THREE.DoubleSide} fog={false} />
-      </mesh>
-    </group>
-  ) : null;
+/** 3D 渲染错误边界: WebGL 崩溃/渲染异常时不再掀翻整页 React 树，
+ *  而是显示友好提示并提供 2D 切面视图回退（保证平台可用性） */
+class Cell3DErrorBoundary extends Component<
+  { children: ReactNode; fallback: (error: Error) => ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error) {
+    console.error('[VirtualCell3D] 渲染异常:', error);
+  }
+  render() {
+    if (this.state.error) return this.props.fallback(this.state.error);
+    return this.props.children;
+  }
 }
 
 /** 相机驱动器: 预设机位（含标准观察方位） + 信号跟随 + 教学聚焦（阻尼插值） */
@@ -291,11 +260,15 @@ export function VirtualCell3D() {
   const [tourOpen, setTourOpen] = useState(false);
   const [tourIdx, setTourIdx] = useState(0);
   const [tourAuto, setTourAuto] = useState(true);
-  // 流畅模式: 低端设备自动开启（低分辨率渲染 + 关闭 MSAA，保留辉光视觉特征）
+  // 流畅模式: 低端设备自动开启（低分辨率渲染 + 关闭 MSAA/帧缓冲保留，保留辉光视觉特征）
+  // 初始化函数立即探测 → Canvas 首次创建即使用正确参数（避免低端设备以重参数初始化后无法降级）
   const [perfMode, setPerfMode] = useState(false);
-  // 切面模式: 剖切细胞前半部露出内部细胞器（全局裁剪平面）+ 剖面深度滑杆
+  // 剖面展示: 全局裁剪平面剖切细胞 + 剖面填充盘 + 方位/深度控制
   const [clipView, setClipView] = useState(false);
   const [clipDepth, setClipDepth] = useState(0.65);
+  const [clipAxis, setClipAxis] = useState<SectionAxis>('front');
+  // WebGL 上下文丢失提示（自动恢复尝试中）
+  const [ctxLost, setCtxLost] = useState(false);
 
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
@@ -311,7 +284,7 @@ export function VirtualCell3D() {
     setTourIdx(0);
   }
 
-  // 首次挂载: 硬件探测自动进入流畅模式（渲染期间状态调整模式，避免 effect 抖动）
+  // 首帧渲染前完成硬件探测（渲染期间状态调整模式，避免 effect 抖动; 模块级缓存保证幂等）
   const [probed, setProbed] = useState(false);
   if (!probed) {
     setProbed(true);
@@ -346,7 +319,7 @@ export function VirtualCell3D() {
   }, [tourOpen, tourAuto, tourIdx, tour.length]);
 
   // 模拟快照: zustand 订阅写入可变引用（避免逐 tick React 重渲染）
-  const sim = useRef<SimSnapshot>({ nodeStates: {}, signalFlux: {}, injected: {}, inhibition: {}, focus: false, tourNode: null, tourNeighbors: null, pulseAt: {}, edgePulse: {} });
+  const sim = useRef<SimSnapshot>({ nodeStates: {}, signalFlux: {}, injected: {}, inhibition: {}, focus: false, tourNode: null, tourNeighbors: null, pulseAt: {}, edgePulse: {}, clipPlane: null });
   useEffect(() => {
     const unsub = useLabStore.subscribe((s) => {
       sim.current.nodeStates = s.nodeStates;
@@ -409,12 +382,54 @@ export function VirtualCell3D() {
 
   return (
     <div className="relative h-full w-full overflow-hidden">
-      {/* 3D 画布 */}
+      {/* 3D 画布（错误边界包裹: WebGL 崩溃时降级为提示卡 + 2D 切面回退, 不掀翻整页） */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,#04211d_0%,#020617_55%,#01030e_100%)]">
+        <Cell3DErrorBoundary
+          fallback={(error) => (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-rose-500/40 bg-rose-500/10">
+                <AlertTriangle className="h-5 w-5 text-rose-400" />
+              </div>
+              <div>
+                <p className="text-[13px] font-semibold text-slate-200">3D 渲染引擎异常</p>
+                <p className="mt-1 max-w-xs text-[11px] leading-relaxed text-slate-500">
+                  图形加速不可用或渲染资源不足。可切换到 2D 切面视图继续实验，或刷新页面重试。
+                </p>
+                {typeof error?.message === 'string' && error.message.length < 90 && (
+                  <p className="mt-1 font-mono text-[9px] text-slate-600">{error.message}</p>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => useLabStore.getState().setView('cell')}
+                  className="rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 text-[11px] text-emerald-200 transition hover:bg-emerald-500/25"
+                >
+                  切换 2D 切面视图
+                </button>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] text-slate-300 transition hover:text-slate-100"
+                >
+                  刷新重试
+                </button>
+              </div>
+            </div>
+          )}
+        >
         <Canvas
           camera={{ fov: 42, near: 0.1, far: 300, position: [0, 9, 28] }}
           dpr={perfMode ? [0.7, 1] : [1, 1.75]}
-          gl={{ antialias: !perfMode, alpha: true, preserveDrawingBuffer: true }}
+          gl={{ antialias: !perfMode, alpha: true, preserveDrawingBuffer: !perfMode }}
+          onCreated={({ gl }) => {
+            // WebGL 上下文丢失防护（低端 GPU 内存回收时常见）: 提示 + 浏览器自动恢复
+            gl.domElement.addEventListener('webglcontextlost', (e) => {
+              e.preventDefault();
+              setCtxLost(true);
+            }, false);
+            gl.domElement.addEventListener('webglcontextrestored', () => {
+              setCtxLost(false);
+            }, false);
+          }}
           onPointerMissed={() => selectNode(null)}
         >
           <ambientLight intensity={0.4} />
@@ -437,7 +452,7 @@ export function VirtualCell3D() {
           </Environment>
           <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} sim={sim} />
           <SceneCapture />
-          <SectionClipController enabled={clipView} ringR={morph === 'tcell' ? 9.6 : 10.8} depth={clipDepth} />
+          <SectionClipController enabled={clipView} depth={clipDepth} axis={clipAxis} spec={layout?.spec ?? FALLBACK_SPEC} showAnatomy={showAnatomy} sim={sim} />
           <CameraRig mode={camMode} layout={layout} spec={layoutSpec} controlsRef={controlsRef} tourTarget={tourTarget} />
           <OrbitControls
             ref={controlsRef}
@@ -458,7 +473,17 @@ export function VirtualCell3D() {
             </EffectComposer>
           )}
         </Canvas>
+        </Cell3DErrorBoundary>
       </div>
+
+      {/* WebGL 上下文丢失遮罩 */}
+      {ctxLost && (
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-slate-950/80 backdrop-blur-sm">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-teal-500/30 border-t-teal-400" />
+          <p className="text-[12px] text-teal-200">图形上下文丢失 · 正在尝试自动恢复…</p>
+          <p className="text-[10px] text-slate-500">若长时间未恢复，请刷新页面</p>
+        </div>
+      )}
 
       {/* ============ HUD ============ */}
       {/* 左上: 实验信息 */}
@@ -494,23 +519,46 @@ export function VirtualCell3D() {
         <HudToggle active={showAnatomy} onClick={() => setShowAnatomy(!showAnatomy)} icon={Tags} label="解剖标注" />
         <HudToggle active={showLabels} onClick={() => setShowLabels(!showLabels)} icon={Eye} label="全部标签" />
         <HudToggle active={focus} onClick={() => setFocus(!focus)} icon={Focus} label="专注模式" />
-        <HudToggle active={clipView} onClick={() => setClipView(!clipView)} icon={Layers} label="切面视图" highlight={false} />
+        <HudToggle active={clipView} onClick={() => setClipView(!clipView)} icon={Layers} label="剖面展示" highlight={false} />
         <HudToggle active={autoRotate} onClick={() => setAutoRotate(!autoRotate)} icon={RotateCw} label="自动环视" />
         {clipView && (
-          <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-teal-500/25 bg-slate-950/75 px-2.5 py-1.5 backdrop-blur-md">
-            <Scissors className="h-3 w-3 shrink-0 text-teal-400" />
-            <span className="shrink-0 text-[9px] text-slate-400">剖面深度</span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={1}
-              value={Math.round(clipDepth * 100)}
-              onChange={(e) => setClipDepth(Number(e.target.value) / 100)}
-              className="h-1 w-24 cursor-pointer accent-teal-400"
-              aria-label="剖面深度"
-            />
-            <span className="w-7 text-right font-mono text-[9px] text-teal-300">{Math.round(clipDepth * 100)}%</span>
+          <div className="pointer-events-auto w-44 space-y-2 rounded-lg border border-teal-500/25 bg-slate-950/80 p-2.5 backdrop-blur-md">
+            <div className="flex items-center gap-1.5">
+              <Scissors className="h-3 w-3 shrink-0 text-teal-400" />
+              <span className="text-[9px] font-medium text-slate-300">剖面方位</span>
+              <span className="ml-auto font-mono text-[8px] text-teal-400/70">{SECTION_ORIENTS[clipAxis].latin}</span>
+            </div>
+            <div className="grid grid-cols-3 gap-1">
+              {(Object.keys(SECTION_ORIENTS) as SectionAxis[]).map((ax) => (
+                <button
+                  key={ax}
+                  onClick={() => setClipAxis(ax)}
+                  title={SECTION_ORIENTS[ax].hint}
+                  className={`rounded-md border px-1 py-1 text-[9px] transition ${
+                    clipAxis === ax
+                      ? 'border-teal-400/60 bg-teal-500/20 text-teal-200'
+                      : 'border-white/10 bg-white/[0.03] text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  {SECTION_ORIENTS[ax].label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="shrink-0 text-[9px] text-slate-400">剖深</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={Math.round(clipDepth * 100)}
+                onChange={(e) => setClipDepth(Number(e.target.value) / 100)}
+                className="h-1 w-full cursor-pointer accent-teal-400"
+                aria-label="剖面深度"
+              />
+              <span className="w-7 shrink-0 text-right font-mono text-[9px] text-teal-300">{Math.round(clipDepth * 100)}%</span>
+            </div>
+            <p className="text-[8px] leading-relaxed text-slate-500">{SECTION_ORIENTS[clipAxis].hint} · 剖开处已填充剖面标本图</p>
           </div>
         )}
       </div>
@@ -651,8 +699,8 @@ export function VirtualCell3D() {
           {clipView ? (
             <>
               <Layers className="h-3 w-3 text-teal-400" />
-              <span className="text-teal-300/90">切面模式 · 细胞前半部已剖开</span>
-              <span className="text-slate-600">—— 旋转视角观察细胞器内部结构与核内分子</span>
+              <span className="text-teal-300/90">剖面模式 · {SECTION_ORIENTS[clipAxis].label}（{SECTION_ORIENTS[clipAxis].latin}）</span>
+              <span className="text-slate-600">—— 剖面填充盘展示质膜/细胞质/细胞器/核的切面结构，旋转视角观察纵深</span>
             </>
           ) : (
             <span>拖拽旋转 · 滚轮缩放 · 点击分子查看档案 · 悬停显示分子卡</span>

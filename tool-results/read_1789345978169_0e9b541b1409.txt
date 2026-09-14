@@ -1,0 +1,715 @@
+     1→'use client';
+     2→
+     3→/**
+     4→ * 虚拟细胞 3D 沉浸视图 —— R3F Canvas + 科学 HUD
+     5→ *   - 细胞体（超微结构） + 核心子图分子（径向区室布局） + 信号边流动 + mRNA 出核流
+     6→ *   - 相机模式: 全景 / 质膜近景 / 核内视角 / 跟随信号 / 教学引导（分步级联讲解）
+     7→ *   - 专注模式: 熄灭背景结构，仅保留活跃级联 —— 通路走向一目了然
+     8→ *   - Bloom 后处理辉光 + 暗角，生物荧光实验质感
+     9→ * 模拟状态通过 zustand 订阅写入快照引用，帧驱动 imperative 更新（60fps 流畅）
+    10→ */
+    11→import { useEffect, useMemo, useRef, useState } from 'react';
+    12→import type { ComponentType, RefObject } from 'react';
+    13→import * as THREE from 'three';
+    14→import { Canvas, useFrame, useThree } from '@react-three/fiber';
+    15→import { setSceneSnapshot } from '@/lib/simulation/scene-capture';
+    16→import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
+    17→import { EffectComposer, Bloom, Noise, Vignette } from '@react-three/postprocessing';
+    18→import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
+    19→import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors } from 'lucide-react';
+    20→import { useLabStore } from '@/store/lab-store';
+    21→import { CELL_TYPE_MAP } from '@/data/cell-types';
+    22→import { layout3D, type Vec3 } from '@/lib/simulation/layout3d';
+    23→import { buildGuidedTour, tourIntro } from '@/lib/simulation/guided-tour';
+    24→import { CellBody } from './organelles';
+    25→import { MoleculeLayer, KIND_COLORS, type SimSnapshot } from './molecules';
+    26→import { DrugMoleculeLayer } from './drug-molecules';
+    27→import { EdgeLayer } from './signal-edges';
+    28→import { MrnaFlow } from './mrna-flow';
+    29→import { EventPulses } from './event-pulses';
+    30→
+    31→type CamMode = 'free' | 'overview' | 'membrane' | 'nucleus' | 'follow' | 'tour';
+    32→
+    33→/** 低端设备/软件渲染检测（SwiftShader/CPU 渲染/低核数 → 自动流畅模式，降帧缓冲内存与 CPU 负担） */
+    34→function detectLowEndGpu(): boolean {
+    35→  if (typeof navigator === 'undefined') return false;
+    36→  const nav = navigator as Navigator & { deviceMemory?: number };
+    37→  if (nav.deviceMemory !== undefined && nav.deviceMemory <= 4) return true;
+    38→  if (nav.hardwareConcurrency && nav.hardwareConcurrency <= 4) return true;
+    39→  try {
+    40→    const c = document.createElement('canvas');
+    41→    const gl = (c.getContext('webgl2') ?? c.getContext('webgl')) as WebGLRenderingContext | null;
+    42→    if (!gl) return true;
+    43→    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    44→    const renderer = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+    45→    return /swiftshader|llvmpipe|software|basic\s*render|angle \(.*software/i.test(renderer);
+    46→  } catch {
+    47→    return false;
+    48→  }
+    49→}
+    50→
+    51→/** 切面控制器: 全局裁剪平面剖切细胞前半部，露出内部细胞器与核内分子（深度可调） */
+    52→/* eslint-disable react-hooks/immutability -- renderer.clippingPlanes 为 three.js 全局渲染器命令式 API（R3F 标准用法） */
+    53→function SectionClipController({ enabled, ringR, depth }: { enabled: boolean; ringR: number; depth: number }) {
+    54→  const gl = useThree((s) => s.gl);
+    55→  const scene = useThree((s) => s.scene);
+    56→  // 剖面法向: 稍微俯视的前向切割（与默认相机方位一致，翻开“细胞剖面”）
+    57→  const plane = useMemo(
+    58→    () => new THREE.Plane(new THREE.Vector3(0, -0.22, -1).normalize(), 0.55),
+    59→    [],
+    60→  );
+    61→  const origSides = useRef<Map<THREE.Material, THREE.Side>>(new Map());
+    62→  const ringRef = useRef<THREE.Group | null>(null);
+    63→
+    64→  // 剖面深度（0=刚触及表面 1=深剖近后半）：平面常数 10 → -4（默认 0.65 ≈ 0.9，接近原固定值）
+    65→  useEffect(() => {
+    66→    plane.constant = 10 - depth * 14;
+    67→    if (ringRef.current) {
+    68→      ringRef.current.position.copy(plane.normal.clone().multiplyScalar(-plane.constant));
+    69→    }
+    70→  }, [depth, plane, enabled]);
+    71→
+    72→  useEffect(() => {
+    73→    const restore = () => {
+    74→      origSides.current.forEach((side, m) => {
+    75→        m.side = side;
+    76→        m.needsUpdate = true;
+    77→      });
+    78→      origSides.current.clear();
+    79→    };
+    80→    if (enabled) {
+    81→      gl.clippingPlanes = [plane];
+    82→      // 剖开后内壁可见: 结构材质临时双面化（记忆原 side 以便还原）
+    83→      scene.traverse((obj) => {
+    84→        const mesh = obj as THREE.Mesh;
+    85→        if (!mesh.material) return;
+    86→        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    87→        for (const m of mats) {
+    88→          if (!(m instanceof THREE.Material)) continue;
+    89→          if (!origSides.current.has(m)) origSides.current.set(m, m.side);
+    90→          m.side = THREE.DoubleSide;
+    91→          m.needsUpdate = true;
+    92→        }
+    93→      });
+    94→    } else {
+    95→      gl.clippingPlanes = [];
+    96→    }
+    97→    return () => {
+    98→      gl.clippingPlanes = [];
+    99→      restore();
+   100→    };
+   101→  }, [enabled, gl, scene, plane]);
+   102→
+   103→  // 剖面方位环（淡淡的两圈标记，指示切割平面位置与朝向）
+   104→  const ringQuat = useMemo(() => {
+   105→    const q = new THREE.Quaternion();
+   106→    q.setFromUnitVectors(new THREE.Vector3(0, 0, 1), plane.normal);
+   107→    return q;
+   108→  }, [plane]);
+   109→
+   110→  return enabled ? (
+   111→    <group ref={ringRef} quaternion={ringQuat}>
+   112→      <mesh>
+   113→        <ringGeometry args={[ringR - 0.12, ringR, 96]} />
+   114→        <meshBasicMaterial color="#5eead4" transparent opacity={0.22} side={THREE.DoubleSide} fog={false} />
+   115→      </mesh>
+   116→      <mesh>
+   117→        <ringGeometry args={[ringR * 0.42, ringR * 0.42 + 0.05, 64]} />
+   118→        <meshBasicMaterial color="#5eead4" transparent opacity={0.1} side={THREE.DoubleSide} fog={false} />
+   119→      </mesh>
+   120→    </group>
+   121→  ) : null;
+   122→}
+   123→
+   124→/** 相机驱动器: 预设机位（含标准观察方位） + 信号跟随 + 教学聚焦（阻尼插值） */
+   125→function CameraRig({ mode, layout, spec, controlsRef, tourTarget }: {
+   126→  mode: CamMode;
+   127→  layout: ReturnType<typeof layout3D> | null;
+   128→  spec: { scale: [number, number, number] };
+   129→  controlsRef: RefObject<OrbitControlsImpl | null>;
+   130→  /** 教学引导: 当前聚焦分子世界坐标 */
+   131→  tourTarget: Vec3 | null;
+   132→}) {
+   133→  const { camera } = useThree();
+   134→  const desired = useRef({ target: new THREE.Vector3(), dist: 30, dir: new THREE.Vector3(0, 0.33, 0.94) });
+   135→  const smoothTarget = useRef(new THREE.Vector3());
+   136→  const lastTracked = useRef<string | null>(null);
+   137→
+   138→  const toWorld = (p: Vec3): THREE.Vector3 =>
+   139→    new THREE.Vector3(p.x * spec.scale[0], p.y * spec.scale[1], p.z * spec.scale[2]);
+   140→
+   141→  useEffect(() => {
+   142→    if (mode === 'overview') desired.current = { target: new THREE.Vector3(0, 0, 0), dist: 31, dir: new THREE.Vector3(0, 0.33, 0.94) };
+   143→    else if (mode === 'nucleus') desired.current = { target: new THREE.Vector3(0, 0, 0), dist: 3.4, dir: new THREE.Vector3(0.35, 0.25, 0.9) };
+   144→    else if (mode === 'membrane') {
+   145→      const rec = bestReceptor(layout);
+   146→      if (rec) desired.current = { target: toWorld(rec.pos), dist: 6.2, dir: new THREE.Vector3(0.15, 0.28, 0.94) };
+   147→    }
+   148→    // follow 每帧动态计算（不重置观察方位，尊重用户视角）
+   149→  }, [mode, layout, spec]);
+   150→
+   151→  useFrame(() => {
+   152→    const controls = controlsRef.current;
+   153→    if (!controls) return;
+   154→
+   155→    if (mode === 'follow') {
+   156→      const target = trackedMolecule(layout);
+   157→      if (target) {
+   158→        desired.current.target.copy(toWorld(target.pos));
+   159→        desired.current.dist = 6.5;
+   160→        lastTracked.current = target.id;
+   161→      }
+   162→    } else if (mode === 'tour' && tourTarget) {
+   163→      desired.current.target.copy(toWorld(tourTarget));
+   164→      desired.current.dist = 7.8;
+   165→    }
+   166→
+   167→    const dt = desired.current;
+   168→    smoothTarget.current.lerp(dt.target, 0.045);
+   169→    controls.target.copy(smoothTarget.current);
+   170→
+   171→    // 观察方位阻尼（预设机位恢复标准方位；follow/free/tour 保留用户视角）
+   172→    const dir = camera.position.clone().sub(controls.target).normalize();
+   173→    if (dt.dir && mode !== 'follow' && mode !== 'free' && mode !== 'tour') {
+   174→      dir.lerp(dt.dir, 0.06).normalize();
+   175→    }
+   176→
+   177→    // 距离阻尼（沿当前方向推拉）
+   178→    const d = camera.position.distanceTo(controls.target);
+   179→    const nd = THREE.MathUtils.lerp(d, dt.dist, mode === 'follow' ? 0.05 : 0.06);
+   180→    camera.position.copy(controls.target).add(dir.multiplyScalar(Math.max(1.2, nd)));
+   181→    controls.update();
+   182→  });
+   183→
+   184→  return null;
+   185→}
+   186→
+   187→/** 活性最高的受体（质膜近景机位锚点） */
+   188→function bestReceptor(layout: ReturnType<typeof layout3D> | null) {
+   189→  if (!layout) return null;
+   190→  const states = useLabStore.getState().nodeStates;
+   191→  const receptors = layout.nodes.filter((n) => n.tier === 1);
+   192→  if (!receptors.length) return null;
+   193→  let best = receptors[0];
+   194→  let bestA = -1;
+   195→  for (const r of receptors) {
+   196→    const a = states[r.id]?.activity ?? 0;
+   197→    if (a > bestA) {
+   198→      bestA = a;
+   199→      best = r;
+   200→    }
+   201→  }
+   202→  return best;
+   203→}
+   204→
+   205→/** 最近激活且仍活跃的分子（跟随信号目标） */
+   206→function trackedMolecule(layout: ReturnType<typeof layout3D> | null) {
+   207→  if (!layout) return null;
+   208→  const { events, nodeStates } = useLabStore.getState();
+   209→  const byId = new Map(layout.nodes.map((n) => [n.id, n]));
+   210→  for (let i = events.length - 1; i >= 0 && i > events.length - 12; i--) {
+   211→    const ev = events[i];
+   212→    if (!ev.nodeId) continue;
+   213→    const st = nodeStates[ev.nodeId];
+   214→    const node = byId.get(ev.nodeId);
+   215→    if (st && node && st.activity > 0.35) return node;
+   216→  }
+   217→  return null;
+   218→}
+   219→
+   220→function SceneContents({ showAnatomy, showLabels, focus, perf, sim }: {
+   221→  showAnatomy: boolean;
+   222→  showLabels: boolean;
+   223→  focus: boolean;
+   224→  /** 低端设备流畅模式（禁用折射/减实例） */
+   225→  perf: boolean;
+   226→  sim: { current: SimSnapshot };
+   227→}) {
+   228→  const graph = useLabStore((s) => s.graph);
+   229→  const cellId = useLabStore((s) => s.cellId);
+   230→  const cell = CELL_TYPE_MAP.get(cellId);
+   231→
+   232→  const morph = cell?.morphology ?? 'hepatocyte';
+   233→  const tint = cell?.tint?.[0] ?? '#134e4a';
+   234→
+   235→  const layout = useMemo(
+   236→    () => (graph ? layout3D(graph.core.nodes, graph.core.edges, morph) : null),
+   237→    [graph, morph],
+   238→  );
+   239→
+   240→  if (!layout) return null;
+   241→
+   242→  return (
+   243→    <group scale={layout.spec.scale}>
+   244→      <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} />
+   245→      <EdgeLayer edges={layout.edges} sim={sim} />
+   246→      <MoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />
+   247→      {/* 激酶抑制剂 3D 药物分子（球棍模型，结合靶点） */}
+   248→      <DrugMoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />
+   249→      {/* mRNA 转录出核流（表达事件驱动） */}
+   250→      <MrnaFlow nodes={layout.nodes} spec={layout.spec} />
+   251→      {/* 信号事件脉冲（分子事件驱动: 沿边彗星 + 抵达冲击波 + 分子闪光） */}
+   252→      <EventPulses nodes={layout.nodes} sim={sim} />
+   253→    </group>
+   254→  );
+   255→}
+   256→
+   257→/** 场景快照采集器（报告导出嵌入用，4s 节流 JPEG） */
+   258→function SceneCapture() {
+   259→  const lastRef = useRef(0);
+   260→  useFrame(({ gl }) => {
+   261→    const now = performance.now();
+   262→    if (now - lastRef.current < 4000) return;
+   263→    lastRef.current = now;
+   264→    try {
+   265→      setSceneSnapshot(gl.domElement.toDataURL('image/jpeg', 0.82));
+   266→    } catch {
+   267→      /* WebGL 画布不可读时跳过（如上下文丢失） */
+   268→    }
+   269→  });
+   270→  return null;
+   271→}
+   272→
+   273→export function VirtualCell3D() {
+   274→  const graph = useLabStore((s) => s.graph);
+   275→  const cellId = useLabStore((s) => s.cellId);
+   276→  const running = useLabStore((s) => s.running);
+   277→  const phase = useLabStore((s) => s.phase);
+   278→  const tick = useLabStore((s) => s.tick);
+   279→  const selectNode = useLabStore((s) => s.selectNode);
+   280→
+   281→  const cell = CELL_TYPE_MAP.get(cellId);
+   282→  const morph = cell?.morphology ?? 'hepatocyte';
+   283→
+   284→  const [showAnatomy, setShowAnatomy] = useState(true);
+   285→  const [showLabels, setShowLabels] = useState(true);
+   286→  const [focus, setFocus] = useState(false);
+   287→  const [autoRotate, setAutoRotate] = useState(true);
+   288→  const [camMode, setCamMode] = useState<CamMode>('overview');
+   289→  const [legendOpen, setLegendOpen] = useState(true);
+   290→  const [glow, setGlow] = useState(true);
+   291→  const [tourOpen, setTourOpen] = useState(false);
+   292→  const [tourIdx, setTourIdx] = useState(0);
+   293→  const [tourAuto, setTourAuto] = useState(true);
+   294→  // 流畅模式: 低端设备自动开启（低分辨率渲染 + 关闭 MSAA，保留辉光视觉特征）
+   295→  const [perfMode, setPerfMode] = useState(false);
+   296→  // 切面模式: 剖切细胞前半部露出内部细胞器（全局裁剪平面）+ 剖面深度滑杆
+   297→  const [clipView, setClipView] = useState(false);
+   298→  const [clipDepth, setClipDepth] = useState(0.65);
+   299→
+   300→  const controlsRef = useRef<OrbitControlsImpl | null>(null);
+   301→
+   302→  // 教学级联步骤（通路切换时重建）
+   303→  const tour = useMemo(() => (graph ? buildGuidedTour(graph) : []), [graph]);
+   304→  const tourStep = tour.length > 0 ? tour[Math.min(tourIdx, tour.length - 1)] : null;
+   305→
+   306→  // 通路切换时回到第一站（渲染期间状态调整模式，避免 effect 级联渲染）
+   307→  const [lastTourKey, setLastTourKey] = useState('');
+   308→  const tourKey = tour.map((s) => s.nodeId).join(',');
+   309→  if (tourKey !== lastTourKey) {
+   310→    setLastTourKey(tourKey);
+   311→    setTourIdx(0);
+   312→  }
+   313→
+   314→  // 首次挂载: 硬件探测自动进入流畅模式（渲染期间状态调整模式，避免 effect 抖动）
+   315→  const [probed, setProbed] = useState(false);
+   316→  if (!probed) {
+   317→    setProbed(true);
+   318→    setPerfMode(detectLowEndGpu());
+   319→  }
+   320→
+   321→  // 进入/退出教学引导（事件处理器内完成状态切换）
+   322→  const openTour = (next: boolean) => {
+   323→    setTourOpen(next);
+   324→    if (next) {
+   325→      useLabStore.getState().pause();
+   326→      setAutoRotate(false);
+   327→      setCamMode('tour');
+   328→    } else {
+   329→      setCamMode('overview');
+   330→    }
+   331→  };
+   332→
+   333→  // 每步同步: 选中分子（联动右栏检测器） + 邻居集合写入快照
+   334→  useEffect(() => {
+   335→    if (tourOpen && tourStep) {
+   336→      useLabStore.getState().selectNode(tourStep.nodeId);
+   337→    }
+   338→  }, [tourOpen, tourStep]);
+   339→
+   340→  // 自动逐步推进（7s/站，末站自动停止）
+   341→  useEffect(() => {
+   342→    if (!tourOpen || !tourAuto || tour.length === 0) return;
+   343→    if (tourIdx >= tour.length - 1) return;
+   344→    const timer = setInterval(() => setTourIdx((i) => Math.min(i + 1, tour.length - 1)), 7000);
+   345→    return () => clearInterval(timer);
+   346→  }, [tourOpen, tourAuto, tourIdx, tour.length]);
+   347→
+   348→  // 模拟快照: zustand 订阅写入可变引用（避免逐 tick React 重渲染）
+   349→  const sim = useRef<SimSnapshot>({ nodeStates: {}, signalFlux: {}, injected: {}, inhibition: {}, focus: false, tourNode: null, tourNeighbors: null, pulseAt: {}, edgePulse: {} });
+   350→  useEffect(() => {
+   351→    const unsub = useLabStore.subscribe((s) => {
+   352→      sim.current.nodeStates = s.nodeStates;
+   353→      sim.current.signalFlux = s.signalFlux;
+   354→      sim.current.injected = s.injected;
+   355→      sim.current.inhibition = s.inhibition;
+   356→    });
+   357→    return unsub;
+   358→  }, []);
+   359→  useEffect(() => {
+   360→    sim.current.focus = focus;
+   361→  }, [focus]);
+   362→  // 教学引导快照: 聚焦分子 + 邻居集合
+   363→  useEffect(() => {
+   364→    if (tourOpen && tourStep && graph) {
+   365→      sim.current.tourNode = tourStep.nodeId;
+   366→      const neighbors = new Set<string>();
+   367→      for (const e of graph.core.edges) {
+   368→        if (e.source === tourStep.nodeId) neighbors.add(e.target);
+   369→        else if (e.target === tourStep.nodeId) neighbors.add(e.source);
+   370→      }
+   371→      sim.current.tourNeighbors = neighbors;
+   372→    } else {
+   373→      sim.current.tourNode = null;
+   374→      sim.current.tourNeighbors = null;
+   375→    }
+   376→  }, [tourOpen, tourStep, graph]);
+   377→
+   378→  const specScale = useMemo<[number, number, number]>(() => {
+   379→    const specs: Record<string, [number, number, number]> = {
+   380→      hepatocyte: [1, 0.96, 1],
+   381→      neuron: [1, 1, 1],
+   382→      tcell: [1, 1, 1],
+   383→      epithelial: [1, 1.05, 0.92],
+   384→      cardiomyocyte: [1.18, 0.82, 0.78],
+   385→      fibroblast: [1.36, 0.76, 0.8],
+   386→      cancer: [1.06, 1, 0.96],
+   387→    };
+   388→    return specs[morph] ?? [1, 1, 1];
+   389→  }, [morph]);
+   390→
+   391→  const layoutSpec = useMemo(() => ({ scale: specScale }), [specScale]);
+   392→  const layout = useMemo(
+   393→    () => (graph ? layout3D(graph.core.nodes, graph.core.edges, morph) : null),
+   394→    [graph, morph],
+   395→  );
+   396→  // 教学引导: 当前聚焦分子世界坐标（layout 坐标系）
+   397→  const tourTarget = useMemo(() => {
+   398→    if (!tourOpen || !tourStep || !layout) return null;
+   399→    return layout.nodes.find((n) => n.id === tourStep.nodeId)?.pos ?? null;
+   400→  }, [tourOpen, tourStep, layout]);
+   401→
+   402→  if (!graph) {
+   403→    return (
+   404→      <div className="flex h-full items-center justify-center text-slate-500 text-sm">
+   405→        正在装配虚拟细胞…
+   406→      </div>
+   407→    );
+   408→  }
+   409→
+   410→  return (
+   411→    <div className="relative h-full w-full overflow-hidden">
+   412→      {/* 3D 画布 */}
+   413→      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,#04211d_0%,#020617_55%,#01030e_100%)]">
+   414→        <Canvas
+   415→          camera={{ fov: 42, near: 0.1, far: 300, position: [0, 9, 28] }}
+   416→          dpr={perfMode ? [0.7, 1] : [1, 1.75]}
+   417→          gl={{ antialias: !perfMode, alpha: true, preserveDrawingBuffer: true }}
+   418→          onPointerMissed={() => selectNode(null)}
+   419→        >
+   420→          <ambientLight intensity={0.4} />
+   421→          <directionalLight position={[6, 10, 8]} intensity={0.9} color="#e7fffb" />
+   422→          <pointLight position={[0, 2.2, 0]} intensity={16} distance={26} decay={2} color="#14b8a6" />
+   423→          <pointLight position={[0, 0, 0]} intensity={7} distance={9} decay={2} color="#fb7185" />
+   424→          {/* 指数雾: 深度层次感（远端结构淡入背景） */}
+   425→          <fogExp2 attach="fog" args={['#020a12', 0.0072]} />
+   426→          {/* 程序化环境光照: Lightformer 阵列烘焙镜面形体感（离线, 无外部 HDR） */}
+   427→          <Environment resolution={perfMode ? 64 : 128} frames={1}>
+   428→            <color attach="background" args={['#02101a']} />
+   429→            {/* 顶部主光: 冷青生物荧光 */}
+   430→            <Lightformer intensity={2.4} color="#7ffcf0" position={[0, 14, 4]} scale={[12, 8, 1]} rotation-x={-Math.PI / 2.2} />
+   431→            {/* 侧逆光: 暖琥珀（分子标签色系） */}
+   432→            <Lightformer intensity={1.6} color="#ffc87a" position={[-12, 2, 5]} scale={[7, 5, 1]} rotation-y={Math.PI / 2.6} />
+   433→            {/* 右侧补光: 玫瑰（转录/核色系） */}
+   434→            <Lightformer intensity={1.1} color="#ff9ab5" position={[12, -3, 2]} scale={[6, 4, 1]} rotation-y={-Math.PI / 2.4} />
+   435→            {/* 底部微光: 深青 */}
+   436→            <Lightformer intensity={0.7} color="#0e5f56" position={[0, -12, 0]} scale={[14, 14, 1]} rotation-x={Math.PI / 2} />
+   437→          </Environment>
+   438→          <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} sim={sim} />
+   439→          <SceneCapture />
+   440→          <SectionClipController enabled={clipView} ringR={morph === 'tcell' ? 9.6 : 10.8} depth={clipDepth} />
+   441→          <CameraRig mode={camMode} layout={layout} spec={layoutSpec} controlsRef={controlsRef} tourTarget={tourTarget} />
+   442→          <OrbitControls
+   443→            ref={controlsRef}
+   444→            enableDamping
+   445→            dampingFactor={0.08}
+   446→            minDistance={2.2}
+   447→            maxDistance={80}
+   448→            autoRotate={autoRotate}
+   449→            autoRotateSpeed={0.5}
+   450→            makeDefault
+   451→          />
+   452→          {/* 生物荧光辉光: Bloom 提亮发光体 + 微粒胶片噪声 + 暗角聚焦视线（流畅模式降采样） */}
+   453→          {glow && (
+   454→            <EffectComposer multisampling={perfMode ? 0 : 4} enableNormalPass={false}>
+   455→              <Bloom mipmapBlur intensity={1.15} luminanceThreshold={0.5} luminanceSmoothing={0.3} />
+   456→              {!perfMode && <Noise premultiply opacity={0.05} />}
+   457→              <Vignette offset={0.22} darkness={0.52} />
+   458→            </EffectComposer>
+   459→          )}
+   460→        </Canvas>
+   461→      </div>
+   462→
+   463→      {/* ============ HUD ============ */}
+   464→      {/* 左上: 实验信息 */}
+   465→      <div className="pointer-events-none absolute left-3 top-3 z-10 space-y-1.5">
+   466→        <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-slate-950/70 px-2.5 py-1.5 backdrop-blur-md">
+   467→          <Shell className="h-3.5 w-3.5 text-emerald-400" />
+   468→          <div>
+   469→            <div className="text-[11px] font-medium text-emerald-300">{cell?.name ?? "细胞"}</div>
+   470→            <div className="text-[9px] text-slate-500">{graph.meta.nameZh} · 3D 沉浸视图</div>
+   471→          </div>
+   472→        </div>
+   473→        <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-white/10 bg-slate-950/70 px-2.5 py-1 backdrop-blur-md font-mono text-[9px] text-slate-400">
+   474→          <span className={running ? 'text-emerald-400' : 'text-slate-600'}>●</span>
+   475→          <span>T+{(tick * 0.5).toFixed(1)}s</span>
+   476→          <span className="text-slate-600">|</span>
+   477→          <span>阶段 {phase}/4</span>
+   478→          <span className="text-slate-600">|</span>
+   479→          <span>{graph.stats.coreCount} 分子</span>
+   480→        </div>
+   481→        <div className="pointer-events-auto flex items-center gap-1.5 rounded-lg border border-white/10 bg-slate-950/70 px-2.5 py-1 backdrop-blur-md text-[9px] text-slate-500">
+   482→          <Ruler className="h-3 w-3 text-slate-400" />
+   483→          <span>⌀ {cell?.diameter ?? '—'}</span>
+   484→          <span className="text-slate-600">(非等比示意)</span>
+   485→        </div>
+   486→      </div>
+   487→
+   488→      {/* 右上: 显示开关 */}
+   489→      <div className="absolute right-3 top-3 z-10 flex flex-col gap-1.5">
+   490→        <HudToggle active={tourOpen} onClick={() => openTour(!tourOpen)} icon={BookOpen} label="教学引导" highlight
+   491→          disabled={tour.length === 0} />
+   492→        <HudToggle active={glow} onClick={() => setGlow(!glow)} icon={Sparkles} label="辉光渲染" />
+   493→        <HudToggle active={perfMode} onClick={() => setPerfMode(!perfMode)} icon={Gauge} label={perfMode ? '流畅模式' : '高清模式'} />
+   494→        <HudToggle active={showAnatomy} onClick={() => setShowAnatomy(!showAnatomy)} icon={Tags} label="解剖标注" />
+   495→        <HudToggle active={showLabels} onClick={() => setShowLabels(!showLabels)} icon={Eye} label="全部标签" />
+   496→        <HudToggle active={focus} onClick={() => setFocus(!focus)} icon={Focus} label="专注模式" />
+   497→        <HudToggle active={clipView} onClick={() => setClipView(!clipView)} icon={Layers} label="切面视图" highlight={false} />
+   498→        <HudToggle active={autoRotate} onClick={() => setAutoRotate(!autoRotate)} icon={RotateCw} label="自动环视" />
+   499→        {clipView && (
+   500→          <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-teal-500/25 bg-slate-950/75 px-2.5 py-1.5 backdrop-blur-md">
+   501→            <Scissors className="h-3 w-3 shrink-0 text-teal-400" />
+   502→            <span className="shrink-0 text-[9px] text-slate-400">剖面深度</span>
+   503→            <input
+   504→              type="range"
+   505→              min={0}
+   506→              max={100}
+   507→              step={1}
+   508→              value={Math.round(clipDepth * 100)}
+   509→              onChange={(e) => setClipDepth(Number(e.target.value) / 100)}
+   510→              className="h-1 w-24 cursor-pointer accent-teal-400"
+   511→              aria-label="剖面深度"
+   512→            />
+   513→            <span className="w-7 text-right font-mono text-[9px] text-teal-300">{Math.round(clipDepth * 100)}%</span>
+   514→          </div>
+   515→        )}
+   516→      </div>
+   517→
+   518→      {/* 右下: 相机预设 */}
+   519→      <div className="absolute bottom-3 right-3 z-10 flex flex-wrap justify-end gap-1.5">
+   520→        <CamBtn active={camMode === 'overview'} onClick={() => setCamMode('overview')} icon={Maximize} label="全景" />
+   521→        <CamBtn active={camMode === 'membrane'} onClick={() => setCamMode('membrane')} icon={Crosshair} label="质膜近景" />
+   522→        <CamBtn active={camMode === 'nucleus'} onClick={() => setCamMode('nucleus')} icon={Atom} label="核内视角" />
+   523→        <CamBtn active={camMode === 'follow'} onClick={() => setCamMode(camMode === 'follow' ? 'free' : 'follow')} icon={Focus} label={camMode === 'follow' ? '跟随中·点击停止' : '跟随信号'} />
+   524→      </div>
+   525→
+   526→      {/* 左下: 图例 */}
+   527→      <div className="absolute bottom-3 left-3 z-10">
+   528→        {legendOpen ? (
+   529→          <div className="rounded-lg border border-white/10 bg-slate-950/75 p-2.5 backdrop-blur-md">
+   530→            <div className="mb-1.5 flex items-center justify-between gap-3">
+   531→              <span className="text-[9px] font-medium text-slate-300">分子类别</span>
+   532→              <button className="text-[9px] text-slate-500 hover:text-slate-300" onClick={() => setLegendOpen(false)}>收起</button>
+   533→            </div>
+   534→            <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+   535→              {Object.entries(KIND_COLORS).map(([k, v]) => (
+   536→                <div key={k} className="flex items-center gap-1.5">
+   537→                  <span className="h-2 w-2 rounded-full" style={{ background: v.color, boxShadow: `0 0 6px ${v.color}` }} />
+   538→                  <span className="text-[9px] text-slate-400">{v.label}</span>
+   539→                </div>
+   540→              ))}
+   541→            </div>
+   542→            <div className="mt-2 space-y-1 border-t border-white/8 pt-1.5">
+   543→              <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-emerald-400" /><span className="text-[9px] text-slate-400">激活/磷酸化</span></div>
+   544→              <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-dashed border-rose-400" /><span className="text-[9px] text-slate-400">抑制/负反馈</span></div>
+   545→              <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-amber-400" /><span className="text-[9px] text-slate-400">转录表达</span></div>
+   546→              <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full border border-amber-400" /><span className="text-[9px] text-slate-400">磷酸化 (P)</span></div>
+   547→              <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-400/80 shadow-[0_0_6px_rgba(251,191,36,0.8)]" /><span className="text-[9px] text-slate-400">mRNA 出核</span></div>
+   548→              <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.9)]" /><span className="text-[9px] text-slate-400">信号事件脉冲</span></div>
+   549→            </div>
+   550→          </div>
+   551→        ) : (
+   552→          <button
+   553→            onClick={() => setLegendOpen(true)}
+   554→            className="rounded-lg border border-white/10 bg-slate-950/75 px-2.5 py-1.5 text-[9px] text-slate-400 backdrop-blur-md hover:text-slate-200"
+   555→          >
+   556→            图例
+   557→          </button>
+   558→        )}
+   559→      </div>
+   560→
+   561→      {/* 底部中央: 教学引导卡（激活时替换操作提示） */}
+   562→      {tourOpen && tourStep ? (
+   563→        <div className="absolute bottom-3 left-1/2 z-20 w-[min(94%,560px)] -translate-x-1/2">
+   564→          <div className="rounded-xl border border-emerald-500/25 bg-slate-950/85 p-3 shadow-[0_8px_32px_rgba(0,0,0,0.45)] backdrop-blur-lg">
+   565→            {/* 头部: 站点标题 + 进度 + 关闭 */}
+   566→            <div className="flex items-center gap-2">
+   567→              <BookOpen className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+   568→              <span className="text-[12px] font-semibold text-slate-100">{tourStep.title}</span>
+   569→              <span className="shrink-0 rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-px font-mono text-[8px] leading-tight text-emerald-300">
+   570→                {Math.min(tourIdx + 1, tour.length)} / {tour.length}
+   571→              </span>
+   572→              <span className="ml-auto hidden font-mono text-[8px] text-slate-500 sm:inline">{tourStep.phaseTag}</span>
+   573→              <button
+   574→                onClick={() => openTour(false)}
+   575→                aria-label="退出教学引导"
+   576→                className="shrink-0 rounded-md border border-white/10 bg-white/5 p-1 text-slate-500 transition hover:text-rose-300"
+   577→              >
+   578→                <X className="h-3 w-3" />
+   579→              </button>
+   580→            </div>
+   581→
+   582→            {/* 级联注解（上一站 → 本站） */}
+   583→            {tourStep.edgeNote && (
+   584→              <p className="mt-2 rounded-lg border border-amber-500/20 bg-amber-950/15 px-2.5 py-1.5 text-[10.5px] leading-relaxed text-amber-200/90">
+   585→                <span className="mr-1 font-mono text-[9px] text-amber-400">级联 ⟶</span>
+   586→                {tourStep.edgeNote}
+   587→              </p>
+   588→            )}
+   589→
+   590→            {/* 分子功能注释 */}
+   591→            <p className="mt-2 text-[11px] leading-relaxed text-slate-300">{tourStep.text}</p>
+   592→
+   593→            {/* 进度点 + 导航 */}
+   594→            <div className="mt-2.5 flex items-center gap-2">
+   595→              <div className="flex flex-1 items-center gap-1 overflow-x-auto">
+   596→                {tour.map((s, i) => (
+   597→                  <button
+   598→                    key={s.nodeId}
+   599→                    aria-label={`跳转到 ${s.label}`}
+   600→                    onClick={() => setTourIdx(i)}
+   601→                    className={`h-1.5 shrink-0 rounded-full transition-all ${
+   602→                      i === tourIdx
+   603→                        ? 'w-5 bg-emerald-400'
+   604→                        : i < tourIdx
+   605→                          ? 'w-1.5 bg-emerald-500/50 hover:bg-emerald-400/70'
+   606→                          : 'w-1.5 bg-white/15 hover:bg-white/30'
+   607→                    }`}
+   608→                  />
+   609→                ))}
+   610→              </div>
+   611→              <button
+   612→                onClick={() => setTourAuto(!tourAuto)}
+   613→                className={`flex shrink-0 items-center gap-1 rounded-lg border px-2 py-1 text-[9px] transition ${
+   614→                  tourAuto
+   615→                    ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+   616→                    : 'border-white/10 bg-white/5 text-slate-500 hover:text-slate-300'
+   617→                }`}
+   618→              >
+   619→                <CirclePlay className={`h-3 w-3 ${tourAuto ? 'animate-pulse' : ''}`} />
+   620→                自动
+   621→              </button>
+   622→              <button
+   623→                onClick={() => setTourIdx(Math.max(0, tourIdx - 1))}
+   624→                disabled={tourIdx === 0}
+   625→                aria-label="上一站"
+   626→                className="flex shrink-0 items-center rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-slate-400 transition hover:text-slate-200 disabled:opacity-30"
+   627→              >
+   628→                <ChevronLeft className="h-3 w-3" />
+   629→              </button>
+   630→              <button
+   631→                onClick={() => setTourIdx(Math.min(tour.length - 1, tourIdx + 1))}
+   632→                disabled={tourIdx >= tour.length - 1}
+   633→                aria-label="下一站"
+   634→                className="flex shrink-0 items-center gap-1 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-[10px] text-emerald-300 transition hover:bg-emerald-500/25 disabled:opacity-30"
+   635→              >
+   636→                下一站
+   637→                <ChevronRight className="h-3 w-3" />
+   638→              </button>
+   639→            </div>
+   640→
+   641→            {/* 末站导出提示 */}
+   642→            {tourIdx >= tour.length - 1 && (
+   643→              <p className="mt-2 border-t border-white/8 pt-1.5 text-[9px] text-slate-500">
+   644→                级联讲解完毕 —— 退出引导后点击「播放」可观察动态信号流，或在「药理」面板投放激酶抑制剂观察断流效应。
+   645→              </p>
+   646→            )}
+   647→          </div>
+   648→        </div>
+   649→      ) : (
+   650→        <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 hidden -translate-x-1/2 items-center gap-2 rounded-full border border-white/8 bg-slate-950/60 px-3 py-1 text-[9px] text-slate-500 backdrop-blur-md md:flex">
+   651→          {clipView ? (
+   652→            <>
+   653→              <Layers className="h-3 w-3 text-teal-400" />
+   654→              <span className="text-teal-300/90">切面模式 · 细胞前半部已剖开</span>
+   655→              <span className="text-slate-600">—— 旋转视角观察细胞器内部结构与核内分子</span>
+   656→            </>
+   657→          ) : (
+   658→            <span>拖拽旋转 · 滚轮缩放 · 点击分子查看档案 · 悬停显示分子卡</span>
+   659→          )}
+   660→        </div>
+   661→      )}
+   662→    </div>
+   663→  );
+   664→}
+   665→
+   666→function HudToggle({ active, onClick, icon: Icon, label, highlight, disabled }: {
+   667→  active: boolean;
+   668→  onClick: () => void;
+   669→  icon: ComponentType<{ className?: string }>;
+   670→  label: string;
+   671→  /** 强调色（教学引导等重要功能） */
+   672→  highlight?: boolean;
+   673→  disabled?: boolean;
+   674→}) {
+   675→  return (
+   676→    <button
+   677→      onClick={onClick}
+   678→      disabled={disabled}
+   679→      className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] backdrop-blur-md transition ${
+   680→        active
+   681→          ? highlight
+   682→            ? 'border-amber-500/50 bg-amber-500/15 text-amber-300'
+   683→            : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+   684→          : highlight
+   685→            ? 'border-amber-500/30 bg-slate-950/70 text-amber-300/70 hover:text-amber-300'
+   686→            : 'border-white/10 bg-slate-950/70 text-slate-500 hover:text-slate-300'
+   687→      } ${disabled ? 'cursor-not-allowed opacity-40' : ''}`}
+   688→    >
+   689→      <Icon className="h-3 w-3" />
+   690→      {label}
+   691→    </button>
+   692→  );
+   693→}
+   694→
+   695→function CamBtn({ active, onClick, icon: Icon, label }: {
+   696→  active: boolean;
+   697→  onClick: () => void;
+   698→  icon: ComponentType<{ className?: string }>;
+   699→  label: string;
+   700→}) {
+   701→  return (
+   702→    <button
+   703→      onClick={onClick}
+   704→      className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] backdrop-blur-md transition ${
+   705→        active
+   706→          ? 'border-amber-500/40 bg-amber-500/15 text-amber-300'
+   707→          : 'border-white/10 bg-slate-950/70 text-slate-400 hover:text-slate-200'
+   708→      }`}
+   709→    >
+   710→      <Icon className="h-3 w-3" />
+   711→      {label}
+   712→    </button>
+   713→  );
+   714→}
+   715→
