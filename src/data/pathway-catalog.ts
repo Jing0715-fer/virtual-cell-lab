@@ -39,6 +39,8 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
     cascadeEn: 'IGF-1 → IGF1R → PI3K → PIP3 → PDK1/Akt → mTORC1 / GSK3β / FOXO',
     seeds: [
       'IGF1', 'IGF2', 'EGF', 'INS', 'IGF1R', 'INSR', 'EGFR', 'ERBB3',
+      // v6 补：GRB2→SOS→RAS 是生长因子输入经典轴，SOS1 曾被挤出局致 GRB2 死端
+      'SOS1',
       'PIK3CA', 'PIK3CB', 'PIK3CD', 'PIK3R1', 'PIK3R2', 'PDPK1',
       'AKT1', 'AKT2', 'AKT3', 'MTOR', 'GSK3B', 'FOXO1', 'FOXO3', 'FOXO4',
       'BAD', 'BCL2L1', 'BCL2', 'PTEN', 'TSC1', 'TSC2', 'RPTOR', 'RICTOR',
@@ -162,7 +164,9 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
       'GNA11', 'MYLK', 'NOS1', 'NOS3', 'ADCY1', 'PRKACA', 'MAPK1',
     ],
     syntheticLigands: [
-      { symbol: 'ACh', fullName: '乙酰胆碱 (Acetylcholine)', receptor: 'PLCB2' },
+      // 烟碱型乙酰胆碱受体 α7（配体门控 Ca²⁻ 通道）—— ACh 的科学受体；
+      // 旧配置 PLCB2 是 Gq 下游效应磷脂酶，跳过了受体环节
+      { symbol: 'ACh', fullName: '乙酰胆碱 (Acetylcholine)', receptor: 'CHRNA7' },
     ],
   },
   {
@@ -177,6 +181,8 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
     cascade: 'IGF-1/氨基酸 → TSC2 ⊣ RHEB → mTORC1 → S6K/4E-BP1 → 蛋白合成/自噬抑制',
     cascadeEn: 'IGF-1/amino acids → TSC2 ⊣ RHEB → mTORC1 → S6K/4E-BP1 → protein synthesis / autophagy repression',
     seeds: [
+      // 生长因子输入轴（KGML 实有 IGF1→IGF1R→IRS1→PI3K 链，v6 起纳入演示起点）
+      'IGF1', 'IGF1R', 'IRS1',
       'MTOR', 'RPTOR', 'RICTOR', 'MLST8', 'MAPKAP1', 'TSC1', 'TSC2', 'RHEB',
       'RRAGA', 'RRAGB', 'RRAGC', 'RRAGD', 'RPS6KB1', 'RPS6', 'EIF4EBP1',
       'EIF4E', 'EIF4EBP2', 'AKT1', 'AKT2', 'PRKAA1', 'PRKAA2', 'STK11', 'STRADA',
@@ -196,6 +202,8 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
     cascade: 'TNF-α → TNFR1 → IKK → IκBα 降解 → NF-κB (p65/p50) 入核 → 炎症基因',
     cascadeEn: 'TNF-α → TNFR1 → IKK → IκBα degradation → NF-κB (p65/p50) nuclear entry → inflammatory genes',
     seeds: [
+      // 受体层（v6 补：TNFR1/TNFRSF13B 是 TNF/BAFF 的信号入口，曾被度数截断挤出）
+      'TNFRSF1A', 'TNFRSF13B',
       'TNF', 'IL1B', 'LTA', 'CD40LG', 'BAFF', 'TLR4', 'TLR2', 'MYD88', 'IRAK1',
       'IRAK4', 'TRAF6', 'TRAF2', 'TRADD', 'RIPK1', 'TAB1', 'TAB2', 'MAP3K7',
       'CHUK', 'IKBKB', 'IKBKG', 'NFKBIA', 'NFKBIB', 'NFKB1', 'RELA', 'REL',
@@ -363,6 +371,10 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
       'MAP2K4', 'MAP2K6', 'MAP2K7', 'JUN', 'FOS', 'ELK1', 'MAP3K8', 'RAC1',
       'CDC42', 'PIK3CA', 'PIK3R1', 'BTK', 'TANK', 'AZI2', 'SARM1', 'FADD',
       'CASP8', 'TNF', 'IL6', 'IL1B', 'PTGS2',
+    ],
+    syntheticLigands: [
+      // LPS（革兰阴性菌内毒素）不在 KGML 图中 —— TLR4/MD-2/CD14 的经典 PAMP 配体
+      { symbol: 'LPS', fullName: '脂多糖 (Lipopolysaccharide)', receptor: 'TLR4' },
     ],
   },
   {

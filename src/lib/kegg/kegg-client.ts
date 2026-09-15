@@ -46,7 +46,7 @@ const g = globalThis as unknown as KeggGlobalCache;
  * 代码版本标记：classify/subgraph 算法迭代后递增版本号使内存缓存自动失效，
  * 避免 dev 热重载后 globalThis 仍持有旧算法产物（生产环境版本恒定无影响）
  */
-const CACHE_VERSION = '2025-02-v11';
+const CACHE_VERSION = '2025-02-v12';
 if (g.cacheVersion !== CACHE_VERSION) {
   g.memCache?.clear();
   g.inflight?.clear();

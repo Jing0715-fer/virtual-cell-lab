@@ -869,3 +869,35 @@ Stage Summary:
 - 附带收益: ①标签悬停提示卡与所见标签严格一致（旧穿透行为是错位感来源）②标签不再浮于 HUD 之上③隐藏标签不再成隐形拦截块④选中反馈三重强化（金框标签+旋转金环+检测器档案）
 - 遗留/风险: ①核区标签桌面端仍密集互叠（点击取最顶层, 可缩放/旋转分离; smartHide 仅 <480px 生效）②药物标签可能落于剖切面板之下（HUD 压制, 属正确分层, 可关剖面或旋转视角）③WebGL 上下文在连续热更新后偶发丢失（自动恢复提示已有, 刷新即愈）
 - 下阶段建议: ①贴面模式下核区标签自动错位（force-simulate 防重叠）②SimEvent 文案双语化（Task 22 遗留）③PDF 报告 EN 版④hero 图换 3D 视图截图
+
+---
+Task ID: 26-a
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户需求——①MAPK 通路到 TGFB 就中断需修复 ②检查所有通路演示完整性 ③排查 KEGG 未收录通路
+
+Work Log:
+- [审计基建] 新建 scripts/audit-pathways.ts：全通路信号传播审计（镜像引擎语义：正向激活/磷酸化/表达 + binding 双向 + 配体门控 + scaffold 补边 + 去磷酸化激活家族），报告每配体可达数/级联闭环率/死端中断点/孤儿节点；基线跑出 44 处死端、16/48 配体未闭环（67%）——远不止用户报告的 TGFB 一处
+- [根因谱系] 五类断链模式全部定位：①死端受体（TGFBR1 的唯一下游 DAXX 在子图扩容打分竞争中被挤出）②配体起点断链（NF-κB 种子洪泛 66 匹配→度数截断挤掉 TNFRSF1A/13B 受体层）③同 label 异 entry 副本撕裂（TNF 输入侧 #18 与输出侧 #236 分离，TNF→TNFRSF1A 边随副本丢失；BAFF 同模式）④双 subtype 边语义错译（JAG1→NOTCH1 的 activation+inhibition 组合被 inhibition 优先规则吃掉，配体注入无法激活）⑤硬限裁剪误杀配体（LPS 合成配体 deg=1 被末段 trim 切掉）
+- [算法升级 v5→v10，六轮迭代] subgraph.ts：
+  · mapEdgeKind：activation+inhibition 双 subtype → activation（全库仅 Notch 的 JAG1/LFNG 两条边）
+  · 死端受体拯救（a）：BFS ≤4 深接通（TGFBR1→DAXX→MAP3K5 即一跳打通）
+  · 广义中段死端拯救（b）：kinase/adapter/gtpase/phosphatase 高连接枢纽 BFS 接通（度数门限）
+  · 终末底物直拉（b'）：中段死端的终端型出边目标优选直拉（CASP6→LMNA 凋亡表型终点、ErbB MTOR→EIF4EBP1 翻译机器）
+  · 配体起点拯救（c）：无出边配体拉最佳全图靶点，不受 HARD_LIMIT 短路（上限由裁剪豁免兜底）
+  · 同 label 副本边恢复：边生成端点 resolveSelected 将未选副本映射到已选同 label 节点（TNF 边找回）
+  · 配体出边修复（stage 8）：合并后配体节点 0 出边 → 按 label 找回副本出边，目标非节点则拉入（BAFF→TNFRSF13C 修复）
+  · 末段 trim 配体豁免：配体节点与其 tier≤1 靶点不得被裁剪（LPS 修复）；trim 后接续 merge（原超限路径跳过同名合并的旧缺陷顺带修复）
+  · 迭代陷阱记录：CORE_ALGO_VERSION 升级后同版本号重跑 FRESH 审计会命中 DB 缓存跳过重提取（v6 行带 bug 被误当已修复），每轮算法变更必须同步升版本
+- [catalog 三处修正] Ca²⁺ 通路 ACh 合成配体 receptor PLCB2→CHRNA7（旧配置跳过受体环节直连磷脂酶，科学性错误）；mTOR seeds +IGF1/IGF1R/IRS1（KGML 实有 IGF1→IGF1R→IRS1 链，WNT2 原是唯一配体但 LRP6 在该通路无下游）；NF-κB seeds +TNFRSF1A/TNFRSF13B（受体层）；PI3K-Akt seeds +SOS1（GRB2→SOS→RAS 经典轴）
+- [TLR 新增合成配体] LPS→TLR4（革兰阴性菌内毒素，TLR4/MD-2/CD14 的经典 PAMP 配体，KGML 图内无此节点）—— TLR 通路从"无可用注入起点"变为 LPS(33) 全级联演示
+- [审计口径三修] 通道=合法终端（cAMP 8 个假死端消除）；抑制/去磷酸化出边=有效信号流（MDM2⊣TP53 类负调控不算死端）；效应器输出集（mTOR 翻译机器/VEGF 迁移效应/凋亡执行器等非转录型通路终点）触达=级联闭环；输出型配体按拓扑判定（零出边即 ⊣输出型，DKK1/WIF1/SFRP1/SOST/LEFTY1/p53-IGF1 等 8 个为语义正确的不可传导）
+- [KEGG 全量普查] rest.kegg.jp/list/pathway/hsa 372 条核对：现有 20 条策划通路 ID 全部正确（hsa04024=cAMP、hsa04020=Calcium 为现行 KEGG 真实命名，无错位）；信号转导类未收录高价值通路 14 条，选定 5 条扩充（Hedgehog/Ras/cGAS-STING/Sphingolipid/NOD-like receptor，见 Task 26-b）
+- [最终审计 v10] 20 条通路：16 条零死端；死端 44→5（全部为侧支：PI3K RAF1、TGF-β RHOA、mTOR GRB2、TLR IFNAR1/FADD、ErbB NCK1——主级联均完整）；配体闭环 32/48(67%)→42/50(84%)，剩余 8 个全部为输出型/拮抗剂配体或 KGML 原生终端（WNT2-mTOR）
+- [关键修复对照] MAPK TGFB1: 1→15 节点（TGFBR1→DAXX→MAP3K5→MAP2K3/6→p38 全链）；NF-κB TNF: 0→19；Notch JAG1: 0→8；凋亡 FASLG: 13（+CASP6→LMNA 执行相）；TLR LPS: 0→33；Ca ACh: 绑定 CHRNA7 正常闭环；mTOR IGF1: 19（IGF1→IGF1R→IRS1→PI3K→AKT→TSC→RHEB→MTOR）
+- [运维] dev server HMR 不重载 route 模块级缓存（API 返回旧 coreVersion），重启 dev server 后 API 正常返回 v10/db-cache；lint 零错误
+
+Stage Summary:
+- 三项需求中的前两项完成：MAPK TGFB 断链修复（根因=死端受体 DAXX 落选，已系统性修复）+ 全通路演示完整性审计与修复（20/20 通路主级联全部可演示，审计报告落盘 agent-ctx/audit-{baseline,after}.md）
+- 沉淀 scripts/audit-pathways.ts 常态化审计工具（引擎语义镜像），算法 v10 含 6 层信号连通性保障（受体/中段/底物/配体/副本边/裁剪豁免）
+- 产出：subgraph.ts(v10 算法)/pathway-catalog.ts(4 处修正+TLR LPS)/kegg-client.ts(CACHE_VERSION v12)/scripts/audit-pathways.ts(新)
+- 第三项需求（KEGG 未收录通路扩充 5 条）移交 Task 26-b 子代理执行

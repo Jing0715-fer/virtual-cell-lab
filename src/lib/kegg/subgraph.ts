@@ -38,10 +38,13 @@ const HARD_LIMIT = 58;
 /** 种子最少期望数（不足时按度数补齐） */
 const MIN_SEEDS = 18;
 /** 提取算法版本（写入缓存行，变更时触发旧缓存升级重抓） */
-export const CORE_ALGO_VERSION = 5;
+export const CORE_ALGO_VERSION = 10;
 
 /** 种子配体补全上限（seeds 中配体类符号图中缺失时最多合成数量） */
 const MAX_SEED_LIGANDS = 2;
+
+/** 演示语义的终端节点类别（信号抵达即级联完成） */
+const TERMINAL_NODE_KINDS = new Set(['tf', 'gene', 'compound', 'channel', 'ligand']);
 
 /**
  * 常见配体 → 受体亲和表（用于合成配体时寻找科学正确的结合靶点）
@@ -107,6 +110,9 @@ function hasSubtype(r: KeggRelation, name: string): boolean {
 
 /** EdgeKind 映射（按 subtype 优先级） */
 function mapEdgeKind(r: KeggRelation): EdgeKind {
+  // 混合语义边（activation+inhibition 双 subtype，如 Notch 通路 JAG1→NOTCH1）
+  // 取激活语义 —— 配体/修饰酶的正向事件是演示主叙事，抑制分量属反馈复杂性
+  if (hasSubtype(r, 'activation') && hasSubtype(r, 'inhibition')) return 'activation';
   if (hasSubtype(r, 'inhibition')) return 'inhibition';
   if (r.type === 'GErel' && hasSubtype(r, 'expression')) return 'expression';
   if (r.type === 'GErel' && hasSubtype(r, 'repression')) return 'repression';
@@ -280,6 +286,182 @@ export function extractCoreSubgraph(
   // 通路 relation 稀疏时（1 层不足）自动再扩一层
   if (selected.size < EXPAND_TARGET - 6) expandOnce();
 
+  // ---------- 2.6 信号连通性拯救（v6 新增） ----------
+  // 审计发现三类断链模式（详见 scripts/audit-pathways.ts）：
+  //   a) 死端受体 —— 受体入选但其下游中介在打分竞争中落选
+  //      （如 MAPK 通路 TGFBR1 的唯一下游适配体 DAXX，配体→受体→死端）
+  //   b) 配体起点断链 —— 配体入选但其受体/靶点落选（如 NF-κB 的 BAFF）
+  //      或同名异 entry 副本被拆分（输入侧 TNF 落选而输出侧入选，
+  //      TNF→TNFRSF1A 边随副本丢失）—— 后者在边生成阶段按 label 恢复
+  // 本阶段处理 a/b 的节点补入；副本边恢复见边生成的 resolveSelected
+
+  /** 有向出边邻接（用于 BFS 接通死端） */
+  const outAdj = new Map<number, Set<number>>();
+  for (const { src, dst } of flatRelations) {
+    if (!outAdj.has(src)) outAdj.set(src, new Set());
+    outAdj.get(src)!.add(dst);
+  }
+
+  /** 拯救目标打分：度数 + 类别教学价值 */
+  const rescueScore = (id: number): number => {
+    const e = entryById.get(id);
+    if (!e || !selectable(e)) return -1;
+    const cls = classOf(e);
+    let s = (degree.get(id) ?? 0) * 2;
+    if (cls.kind === 'ligand' || cls.kind === 'receptor' || cls.kind === 'tf' || cls.kind === 'channel') s += 8;
+    else if (cls.kind === 'kinase' || cls.kind === 'gtpase' || cls.kind === 'adapter') s += 4;
+    return s;
+  };
+
+  /** 从死端节点沿出边 BFS 寻找接通已选节点的最短路径（深度≤4） */
+  const connectPath = (startId: number): number[] | null => {
+    const prev = new Map<number, number>();
+    const visited = new Set<number>([startId]);
+    let frontier = [startId];
+    for (let depth = 0; depth < 4; depth++) {
+      const next: number[] = [];
+      // 同层候选按打分排序（同样深度优先高价值节点）
+      const expand: number[] = [];
+      for (const cur of frontier) {
+        for (const nxt of outAdj.get(cur) ?? []) {
+          if (visited.has(nxt)) continue;
+          const e = entryById.get(nxt);
+          if (!e || !selectable(e)) continue;
+          visited.add(nxt);
+          prev.set(nxt, cur);
+          if (selected.has(nxt)) {
+            // 回溯路径（不含两端已选节点：终点 pop 去除，起点由 while 边界排除）
+            const path: number[] = [];
+            let c = nxt;
+            while (c !== startId) {
+              path.unshift(c);
+              c = prev.get(c)!;
+            }
+            path.pop(); // 去掉终点（已选）
+            return path;
+          }
+          expand.push(nxt);
+        }
+      }
+      expand.sort((a, b) => rescueScore(b) - rescueScore(a) || a - b);
+      next.push(...expand);
+      frontier = next;
+    }
+    return null;
+  };
+
+  /** a) 死端受体拯救：已选受体在全图有出边但无一入选 → BFS 接通 */
+  let rescueOps = 0;
+  for (const id of [...selected]) {
+    if (rescueOps >= 8 || selected.size >= HARD_LIMIT) break;
+    const e = entryById.get(id);
+    if (!e || !selectable(e)) continue;
+    const cls = classOf(e);
+    const outs = outAdj.get(id) ?? [];
+    if (outs.size === 0) continue;
+    // 已有下游出路（出边目标入选）→ 无需拯救
+    let hasSelectedOut = false;
+    for (const o of outs) if (selected.has(o)) { hasSelectedOut = true; break; }
+    if (hasSelectedOut) continue;
+    // 仅拯救受体类节点（含配体入边的膜节点）—— 信号入口死端是演示断链；
+    // TF/基因/通道等作为级联输出终端是合法死端
+    if (cls.kind !== 'receptor') continue;
+    const path = connectPath(id);
+    if (!path || path.length === 0) continue;
+    let ok = true;
+    for (const p of path) {
+      if (selected.size >= HARD_LIMIT) { ok = false; break; }
+      selected.add(p);
+    }
+    if (ok) rescueOps++;
+  }
+
+  /** b) 广义死端拯救：非终端类别节点被信号触达却在子图内无出边 → 同样接通。
+   *  在节点/边生成前的选中集层面近似：非 receptor 的非终端节点（激酶/适配体/
+   *  GTP酶）出边目标全落选且自身非种子配体，按度数限制少量接通（避免爆炸） */
+  let midOps = 0;
+  for (const id of [...selected]) {
+    if (midOps >= 5 || selected.size >= HARD_LIMIT) break;
+    const e = entryById.get(id);
+    if (!e || !selectable(e)) continue;
+    const cls = classOf(e);
+    if (!['kinase', 'adapter', 'gtpase', 'phosphatase'].includes(cls.kind)) continue;
+    const outs = outAdj.get(id) ?? [];
+    if (outs.size === 0) continue;
+    let hasSelectedOut = false;
+    for (const o of outs) if (selected.has(o)) { hasSelectedOut = true; break; }
+    if (hasSelectedOut) continue;
+    // 高连接枢纽才值得接通（如 PI3K-Akt 的 RPS6KB1→EIF4B 翻译机器）
+    if ((degree.get(id) ?? 0) < 5) continue;
+    const path = connectPath(id);
+    if (!path || path.length === 0) continue;
+    let ok = true;
+    for (const p of path) {
+      if (selected.size >= HARD_LIMIT) { ok = false; break; }
+      selected.add(p);
+    }
+    if (ok) midOps++;
+  }
+
+  /** c) 配体起点拯救：已选配体无任何已选出边 → 拉入最佳全图靶点（受体优先）。
+   *  不受 HARD_LIMIT 短路 —— 配体→受体是演示的信号入口；超额由末段
+   *  硬限裁剪的「配体靶点豁免」兑底（见下） */
+  let ligandRescues = 0;
+  for (const id of [...selected]) {
+    if (ligandRescues >= 4) break;
+    const e = entryById.get(id);
+    if (!e || !selectable(e)) continue;
+    const cls = classOf(e);
+    if (cls.kind !== 'ligand') continue;
+    const outs = outAdj.get(id) ?? [];
+    if (outs.size === 0) continue; // 图内本无下游（输出型配体如 IFNB1）
+    let hasSelectedOut = false;
+    for (const o of outs) if (selected.has(o)) { hasSelectedOut = true; break; }
+    if (hasSelectedOut) continue;
+    const ranked = [...outs].sort((a, b) => rescueScore(b) - rescueScore(a) || a - b);
+    const target = ranked[0];
+    if (rescueScore(target) >= 0) {
+      selected.add(target);
+      ligandRescues++;
+    }
+  }
+
+  /** b') 终末底物直拉：中段死端（激酶/酶/适配体等非终端类别、出边目标全落选）
+   *  的最高分出边目标若本身是终端型（TF/基因/通道/低度数）→ 直接拉入。
+   *  典型：凋亡 CASP6→LMNA（核纤层降解 = 凋亡表型终点）、TGF-β RHOA→ROCK1 */
+  let substrateOps = 0;
+  for (const id of [...selected]) {
+    if (substrateOps >= 4 || selected.size >= HARD_LIMIT + 4) break;
+    const e = entryById.get(id);
+    if (!e || !selectable(e)) continue;
+    const cls = classOf(e);
+    if (TERMINAL_NODE_KINDS.has(cls.kind)) continue;
+    const outs = outAdj.get(id) ?? [];
+    if (outs.size === 0) continue;
+    let hasSelectedOut = false;
+    for (const o of outs) if (selected.has(o)) { hasSelectedOut = true; break; }
+    if (hasSelectedOut) continue;
+    if ((degree.get(id) ?? 0) < 3) continue;
+    const ranked = [...outs].sort((a, b) => rescueScore(b) - rescueScore(a) || a - b);
+    // 优选「终端型」目标（而非单纯最高分）—— 如 ErbB 的 MTOR 出边
+    // RPS6KB1(高连接非终端) 与 EIF4EBP1(翻译抑制终端)，应拉后者
+    let target: number | null = null;
+    for (const cand of ranked) {
+      const ce = entryById.get(cand);
+      if (!ce || !selectable(ce)) continue;
+      const ccls = classOf(ce);
+      if (TERMINAL_NODE_KINDS.has(ccls.kind) || (degree.get(cand) ?? 0) <= 4) {
+        target = cand;
+        break;
+      }
+    }
+    if (target === null) continue;
+    const te = entryById.get(target);
+    if (!te || !selectable(te)) continue;
+    selected.add(target);
+    substrateOps++;
+  }
+
   // ---------- 2.5 化合物兜底二遍 ----------
   // 扩展后新增的种子外节点也可能邻接化合物（如 PKA→cAMP），再补一遍（幂等）
   for (const e of entries) {
@@ -352,7 +534,8 @@ export function extractCoreSubgraph(
   const findBySymbol = (symbol: string): KeggEntry | undefined =>
     entries.find((e) => selectable(e) && matchesSymbol(e, symbol));
 
-  const allEdges: CoreEdge[] = [];
+  let allEdges: CoreEdge[] = [];
+  // 注：末段硬限裁剪可能重新赋值（见「配体靶点豁免」）
 
   // ---------- 主流程：构造节点 ----------
   const selectedEntries: KeggEntry[] = [];
@@ -365,11 +548,33 @@ export function extractCoreSubgraph(
   nodes.push(...selectedEntries.map(toCoreNode));
 
   // ---------- 5. 边生成（双端都在选中集合 → CoreEdge） ----------
+  // 同 label 副本边恢复：KGML 常将同一基因绘制为多个 entry（如 NF-κB 的 TNF
+  // 输入侧 #18 与输出侧 #236）。若仅输出侧入选，输入侧参与的 TNF→TNFRSF1A
+  // 边会随副本丢失。此处将非选中端点的 label 映射到已选同 label 节点：
+  const selectedByLabel = new Map<string, number>();
+  for (const id of selected) {
+    const e = entryById.get(id);
+    if (e && selectable(e) && e.label && !selectedByLabel.has(e.label)) {
+      selectedByLabel.set(e.label, id);
+    }
+  }
+  /** 端点解析：已选 → 自身；未选但存在同 label 已选副本 → 该副本（否则 null） */
+  const resolveSelected = (id: number): number | null => {
+    if (selected.has(id)) return id;
+    const e = entryById.get(id);
+    if (e && selectable(e) && e.label && selectedByLabel.has(e.label)) {
+      return selectedByLabel.get(e.label)!;
+    }
+    return null;
+  };
+
   let edgeIdx = 0;
   for (const { src, dst, rel } of flatRelations) {
-    if (!selected.has(src) || !selected.has(dst)) continue;
-    const srcId = idByEntry.get(src);
-    const dstId = idByEntry.get(dst);
+    const srcSel = resolveSelected(src);
+    const dstSel = resolveSelected(dst);
+    if (srcSel === null || dstSel === null || srcSel === dstSel) continue;
+    const srcId = idByEntry.get(srcSel);
+    const dstId = idByEntry.get(dstSel);
     if (!srcId || !dstId || srcId === dstId) continue;
     allEdges.push({
       id: `ce${edgeIdx++}`,
@@ -508,6 +713,81 @@ export function extractCoreSubgraph(
     }
   }
 
+  // ---------- 8. 配体出边修复（v7：label 副本边恢复的补充） ----------
+  // 种子截断可能切掉持有配体→受体关系的“输入侧副本”（如 NF-κB 的 BAFF
+  // 输入副本落选而输出副本入选）—— 合并后的配体节点因此失去全部出边。
+  // 此处对每个无出边的配体节点：按 label 找回其全部 entry 副本的出边关系；
+  // 目标已是节点 → 直接补边；目标不是节点 → 拉入目标节点（同步补全它与其
+  // 他已选节点的全部边）
+  {
+    const nodeByLabel = new Map<string, string>();
+    for (const n of nodes) {
+      if (n.label && !nodeByLabel.has(n.label)) nodeByLabel.set(n.label, n.id);
+    }
+    const entriesByLabel = new Map<string, KeggEntry[]>();
+    for (const en of entries) {
+      if (!selectable(en) || !en.label) continue;
+      if (!entriesByLabel.has(en.label)) entriesByLabel.set(en.label, []);
+      entriesByLabel.get(en.label)!.push(en);
+    }
+    /** 目标 entry → 已有节点 id（直接选中或 label 匹配） */
+    const nodeForEntry = (te: KeggEntry): string | null => {
+      if (idByEntry.has(te.entryId)) return idByEntry.get(te.entryId)!;
+      const nid = nodeByLabel.get(te.label);
+      return nid ?? null;
+    };
+    let repairIdx = 0;
+    let ligandRepairs = 0;
+    for (const lig of nodes.filter((n) => n.kind === 'ligand')) {
+      if (ligandRepairs >= 6) break;
+      if (allEdges.some((e) => e.source === lig.id)) continue; // 已有出边
+      const copies = entriesByLabel.get(lig.label) ?? [];
+      let added = false;
+      for (const copy of copies) {
+        for (const { src, dst, rel } of flatRelations) {
+          if (src !== copy.entryId) continue;
+          const te = entryById.get(dst);
+          if (!te || !selectable(te)) continue;
+          let targetId = nodeForEntry(te);
+          if (!targetId) {
+            // 拉入目标节点（允许小幅超额，配体入口优先于硬限）
+            if (nodes.length >= HARD_LIMIT + 4) continue;
+            const n = toCoreNode(te);
+            nodes.push(n);
+            selected.add(te.entryId);
+            targetId = n.id;
+            // 同步补全新节点与已选节点间的全部边（保持一致性）
+            for (const { src: s2, dst: d2, rel: r2 } of flatRelations) {
+              if (s2 !== te.entryId && d2 !== te.entryId) continue;
+              const other = s2 === te.entryId ? d2 : s2;
+              const otherEntry = entryById.get(other);
+              if (!otherEntry || !selectable(otherEntry)) continue;
+              const otherId = nodeForEntry(otherEntry);
+              if (!otherId || otherId === targetId) continue;
+              allEdges.push({
+                id: `lr${repairIdx++}`,
+                source: s2 === te.entryId ? targetId : otherId,
+                target: s2 === te.entryId ? otherId : targetId,
+                kind: mapEdgeKind(r2),
+                subtypes: r2.subtypes,
+              });
+            }
+          }
+          if (targetId === lig.id) continue;
+          allEdges.push({
+            id: `lr${repairIdx++}`,
+            source: lig.id,
+            target: targetId,
+            kind: mapEdgeKind(rel),
+            subtypes: rel.subtypes,
+          });
+          added = true;
+        }
+      }
+      if (added) ligandRepairs++;
+    }
+  }
+
   // ---------- 6. tier 修正：GErel 表达目标 → 靶基因（tier 6 / nucleus） ----------
   applyExpressionTargets(nodes, allEdges);
 
@@ -517,28 +797,46 @@ export function extractCoreSubgraph(
     nodeDegree.set(e.source, (nodeDegree.get(e.source) ?? 0) + 1);
     nodeDegree.set(e.target, (nodeDegree.get(e.target) ?? 0) + 1);
   }
-  const finalNodes = nodes.filter(
+  let finalNodes = nodes.filter(
     (n) => n.kind === 'ligand' || (nodeDegree.get(n.id) ?? 0) > 0
   );
 
   // 硬上限保护（合成配体注入后的极端情况）：优先保留高连接节点
+  // 配体靶点豁免：配体节点本身与它们的直接结合目标（tier≤1 的信号入口，
+  // 如 TNF→TNFRSF1A、LPS→TLR4）是演示起点，度数低也不得被裁剪
   if (finalNodes.length > HARD_LIMIT) {
+    const protectedIds = new Set<string>(
+      finalNodes.filter((n) => n.kind === 'ligand').map((n) => n.id)
+    );
+    for (const e of allEdges) {
+      if (protectedIds.has(e.source) && !protectedIds.has(e.target)) {
+        const t = finalNodes.find((n) => n.id === e.target);
+        if (t && (t.kind === 'receptor' || t.kind === 'channel' || t.tier <= 1)) {
+          protectedIds.add(e.target);
+        }
+      }
+    }
+    const protectedNodes = finalNodes.filter((n) => protectedIds.has(n.id));
+    const rest = finalNodes.filter((n) => !protectedIds.has(n.id));
     const keep = new Set(
-      [...finalNodes]
+      [...rest]
         .sort((a, b) => (nodeDegree.get(b.id) ?? 0) - (nodeDegree.get(a.id) ?? 0))
-        .slice(0, HARD_LIMIT)
+        .slice(0, Math.max(0, HARD_LIMIT - protectedNodes.length))
         .map((n) => n.id)
     );
-    const keptNodes = finalNodes.filter((n) => keep.has(n.id));
-    return {
-      nodes: keptNodes,
-      edges: allEdges.filter((e) => keep.has(e.source) && keep.has(e.target)),
-    };
+    finalNodes = [...protectedNodes, ...rest.filter((n) => keep.has(n.id))];
+    const keepAll = new Set(finalNodes.map((n) => n.id));
+    allEdges = allEdges.filter((e) => keepAll.has(e.source) && keepAll.has(e.target));
   }
 
   // 同步剔除清理后悬空的边（理论上不会出现，防御性处理）
   const validIds = new Set(finalNodes.map((n) => n.id));
   const finalEdges = allEdges.filter((e) => validIds.has(e.source) && validIds.has(e.target));
+  if (process.env.DEBUG_RESCUE) {
+    for (const n of nodes.filter(x => /LPS/i.test(x.id) || /LPS/i.test(x.label))) console.error('[node] id=' + n.id + ' label=' + n.label + ' kind=' + n.kind + ' deg=' + (nodeDegree.get(n.id) ?? 0) + ' inFinal=' + finalNodes.some(f => f.id === n.id));
+    for (const e of allEdges.filter(x => /LPS/i.test(x.source) || /LPS/i.test(x.target))) console.error('[edge] ' + e.source + ' --' + e.kind + '--> ' + e.target);
+    console.error('[counts] nodes=' + nodes.length + ' finalNodes=' + finalNodes.length + ' synLig=' + syntheticLigandNodes.map(n => n.id).join(','));
+  }
 
   return mergeDuplicateNodes(finalNodes, finalEdges);
 }
