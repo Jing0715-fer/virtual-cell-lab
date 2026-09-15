@@ -91,8 +91,8 @@ export const T: Record<string, Entry> = {
     en: 'Fullscreen popup · much larger view · scroll / pinch to zoom · ESC to exit',
   },
   'hud.fsHint': {
-    zh: '拖拽旋转 · 滚轮缩放 · 中键/右键平移 · 点击分子查看档案',
-    en: 'Drag to rotate · scroll to zoom · middle/right-drag to pan · click a molecule for profile',
+    zh: '拖拽旋转 · 滚轮缩放 · 中键/右键平移 · 点击分子球或标签查看档案',
+    en: 'Drag to rotate · scroll to zoom · middle/right-drag to pan · click spheres or labels for profiles',
   },
   'hud.gear': { zh: '显示', en: 'View' },
   'hud.snap': { zh: '信号贴面', en: 'Section snap' },
@@ -115,13 +115,17 @@ export const T: Record<string, Entry> = {
   'legend.phospho': { zh: '磷酸化 (P)', en: 'Phosphorylated (P)' },
   'legend.mrna': { zh: 'mRNA 出核', en: 'mRNA export' },
   'legend.pulse': { zh: '信号事件脉冲', en: 'Signal event pulse' },
+  'legend.hint': {
+    zh: '点击分子球或标签 → 查看分子档案',
+    en: 'Click a sphere or label → molecule profile',
+  },
   'hud.tip.free': {
-    zh: '拖拽旋转 · 滚轮缩放 · 中键/右键平移 · 点击分子查看档案 · 悬停显示分子卡',
-    en: 'Drag to rotate · scroll to zoom · middle/right-drag to pan · click for profile · hover for molecule card',
+    zh: '拖拽旋转 · 滚轮缩放 · 中键/右键平移 · 点击分子球或标签查看档案 · 悬停显示分子卡',
+    en: 'Drag to rotate · scroll to zoom · middle/right-drag to pan · click spheres or labels for profiles · hover for molecule card',
   },
   'hud.tip.section': {
-    zh: '剖面模式 · 旋转视角观察细胞器内部结构与核内分子',
-    en: 'Section mode · rotate to inspect organelle interiors and nuclear molecules',
+    zh: '剖面模式 · 旋转观察内部结构 · 点击分子球或标签查看档案',
+    en: 'Section mode · rotate to inspect interiors · click spheres or labels for profiles',
   },
 
   /* ============ 3D 加载/错误 ============ */

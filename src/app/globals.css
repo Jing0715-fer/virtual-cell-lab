@@ -289,6 +289,31 @@
 .mol3d-label.is-active .mol3d-sym { color: #d1fae5; }
 .mol3d-label.is-phospho .mol3d-p { display: inline; }
 
+/* 点击选中（用户需求: 球体/标签均可点选分子）
+   · is-pick: 标签可命中, 悬停浮起强化可点击暗示
+   · is-selected: 金框高亮 —— 与 3D 选中环（#fef3c7）同色系, 双重反馈 */
+.mol3d-label.is-pick {
+  pointer-events: auto;
+  cursor: pointer;
+  transition:
+    border-color 0.25s ease,
+    box-shadow 0.25s ease,
+    background 0.25s ease,
+    transform 0.18s ease;
+}
+.mol3d-label.is-pick:hover {
+  border-color: rgba(52, 211, 153, 0.75);
+  background: rgba(6, 46, 38, 0.94);
+  transform: translateY(-1px) scale(1.05);
+}
+.mol3d-label.is-selected {
+  border-color: rgba(254, 243, 199, 0.8);
+  background: rgba(66, 44, 8, 0.92);
+  box-shadow: 0 0 18px rgba(254, 243, 199, 0.45);
+}
+.mol3d-label.is-selected .mol3d-sym { color: #fef3c7; }
+.mol3d-label.is-selected:hover { border-color: rgba(254, 243, 199, 0.95); }
+
 /* 类别色点 */
 .mol3d-label.k-ligand .mol3d-sym { color: #fde68a; }
 .mol3d-label.k-receptor .mol3d-sym,
@@ -402,8 +427,16 @@
   white-space: nowrap;
   font-family: var(--font-mono, ui-monospace, monospace);
   box-shadow: 0 0 18px rgba(192, 132, 252, 0.3), inset 0 1px 0 rgba(233, 213, 255, 0.14);
-  transition: opacity 0.4s ease;
+  transition: opacity 0.4s ease, border-color 0.25s ease, box-shadow 0.25s ease, transform 0.18s ease;
   opacity: 0;
+  /* 可点击选中靶点（与分子标签同一交互语言） */
+  pointer-events: auto;
+  cursor: pointer;
+}
+.drug3d-label:hover {
+  border-color: rgba(216, 180, 254, 0.9);
+  box-shadow: 0 0 22px rgba(192, 132, 252, 0.5), inset 0 1px 0 rgba(233, 213, 255, 0.14);
+  transform: translateY(-1px) scale(1.04);
 }
 .drug3d-name {
   font-size: 12px;

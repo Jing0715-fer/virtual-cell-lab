@@ -85,6 +85,7 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
   const haloRef = useRef<THREE.Mesh>(null);
   const phosphoRef = useRef<THREE.Mesh>(null);
   const inhibRingRef = useRef<THREE.Mesh>(null);
+  const selRingRef = useRef<THREE.Mesh>(null);
   const labelRef = useRef<HTMLDivElement>(null);
   const phase = useMemo(() => (node.id.charCodeAt(0) % 7) * 0.9, [node.id]);
 
@@ -149,6 +150,55 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
     },
     [coreMat, haloMat, phosphoMat, inhibMat, hitMat],
   );
+
+  // 标签点击选中（用户需求: 点击标签与点击球体同样选中分子）。
+  // 必须用「原生监听 + stopPropagation」: 标签 div 是 R3F 事件容器（画布父元素）的子元素,
+  // React 合成事件在根节点触发时 R3F 已先处理过 —— click 会命中 onPointerMissed 把刚选中的又取消;
+  // 原生监听在标签元素层级拦截冒泡, R3F 完全看不到这次点击。同步阻断 pointermove/down/up,
+  // 避免悬停标签时射线打到标签后方的其它分子造成悬停抖动。
+  // ⚠ drei Html 内容在独立 React root 中异步挂载 —— effect 首次执行时 labelRef.current 可能为
+  // null（此前监听器从未挂上, 标签点击静默失效）→ rAF 轮询重试直至元素就绪。
+  useEffect(() => {
+    let el: HTMLDivElement | null = null;
+    let raf = 0;
+    const stop = (e: Event) => e.stopPropagation();
+    const onSelect = (e: MouseEvent) => {
+      e.stopPropagation();
+      useLabStore.getState().selectNode(node.id);
+    };
+    const onEnter = () => {
+      onHover(node.id);
+      document.body.style.cursor = 'pointer';
+    };
+    const onLeave = () => {
+      onHover(null);
+      document.body.style.cursor = 'auto';
+    };
+    const attach = () => {
+      el = labelRef.current;
+      if (!el) {
+        raf = requestAnimationFrame(attach);
+        return;
+      }
+      el.addEventListener('click', onSelect);
+      el.addEventListener('mouseenter', onEnter);
+      el.addEventListener('mouseleave', onLeave);
+      el.addEventListener('pointermove', stop);
+      el.addEventListener('pointerdown', stop);
+      el.addEventListener('pointerup', stop);
+    };
+    attach();
+    return () => {
+      cancelAnimationFrame(raf);
+      if (!el) return;
+      el.removeEventListener('click', onSelect);
+      el.removeEventListener('mouseenter', onEnter);
+      el.removeEventListener('mouseleave', onLeave);
+      el.removeEventListener('pointermove', stop);
+      el.removeEventListener('pointerdown', stop);
+      el.removeEventListener('pointerup', stop);
+    };
+  }, [node.id, onHover]);
 
   useFrame((state) => {
     const t = state.clock.elapsedTime;
@@ -218,18 +268,21 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
       inhibRingRef.current.rotation.x = -Math.PI / 3;
       inhibMat.opacity = Math.min(0.9, inh * 1.1);
     }
+    // 选中环缓慢旋转（点击反馈动感; 与标签 is-selected 高亮同步强化「已选中」感知）
+    if (selRingRef.current) selRingRef.current.rotation.z = t * 0.85;
     // 标签（DOM imperative; 剖切掉的分子不显示; 远距离淡出; 窄视口智能降噪）
     const el = labelRef.current;
     if (el) {
       const bright = a > 0.25 || selected || isTourTarget;
       el.classList.toggle('is-active', bright);
+      el.classList.toggle('is-selected', selected);
       el.classList.toggle('is-phospho', ph > 0.25);
       el.classList.toggle('is-inhibited', inh > 0.25);
       // 窄视口（移动端 <480px）智能降噪: 恒定尺寸标签在 390px 宽度下必然互相遮挡
       // → 仅保留激活/选中/教学引导相关标签, 其余隐藏（点击分子即选中亮起, 交互可达性不变）
       // 阈值 640→480: 桌面实验台卡片画布约 556px 宽, 不应误触发移动端降噪
       const smartHide = state.size.width < 480 && !bright && !isTourNeighbor;
-      el.style.opacity =
+      const op =
         clipped || smartHide
           ? '0'
           : showLabel
@@ -237,6 +290,10 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
             : bright
               ? String(distFade)
               : '0';
+      el.style.opacity = op;
+      // 隐藏标签不得拦截画布交互（opacity:0 的元素仍参与命中测试, 必须显式关闭 pointer-events）
+      const pe = op === '0' ? 'none' : 'auto';
+      if (el.style.pointerEvents !== pe) el.style.pointerEvents = pe;
     }
   });
 
@@ -302,10 +359,10 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
         <torusGeometry args={[node.r * 1.85 + 0.16, 0.055, 8, 36]} />
       </mesh>
 
-      {/* 选中环（装饰 —— 不参与拾取） */}
+      {/* 选中环（装饰 —— 不参与拾取; 缓慢旋转 + 金色与标签 is-selected 同色系） */}
       {selected && (
-        <mesh rotation={[Math.PI / 2.4, 0, 0]} raycast={() => null}>
-          <torusGeometry args={[isReceptor ? 1.3 : node.r + 0.42, 0.03, 8, 40]} />
+        <mesh ref={selRingRef} rotation={[Math.PI / 2.4, 0, 0]} raycast={() => null}>
+          <torusGeometry args={[isReceptor ? 1.3 : node.r + 0.44, 0.048, 8, 48]} />
           <meshBasicMaterial color="#fef3c7" transparent opacity={0.95} depthWrite={false} />
         </mesh>
       )}
@@ -318,15 +375,15 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
         </mesh>
       )}
 
-      {/* 分子标签（屏幕空间模式: 原生分辨率清晰文字, 任意视角可读; 远距自动淡出保深度感知） */}
+      {/* 分子标签（屏幕空间模式: 原生分辨率清晰文字, 任意视角可读; 远距自动淡出保深度感知）
+          · 可点击选中（原生监听见上） · zIndex ≤ 9 恒低于 HUD 覆盖层（z-10+）, 不遮挡/不截获 HUD 交互 */}
       <Html
         position={[0, isReceptor ? 1.35 : node.r + 0.5, 0]}
         center
-        zIndexRange={[24, 0]}
-        pointerEvents="none"
+        zIndexRange={[9, 0]}
         style={{ pointerEvents: 'none', userSelect: 'none' }}
       >
-        <div ref={labelRef} className={`mol3d-label k-${node.kind}`}>
+        <div ref={labelRef} className={`mol3d-label is-pick k-${node.kind}`} style={{ pointerEvents: 'auto' }}>
           <span className="mol3d-sym">{node.label}</span>
           <span className="mol3d-kind">{kindZh}</span>
           <span className="mol3d-p">P</span>

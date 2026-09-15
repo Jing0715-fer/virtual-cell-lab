@@ -836,3 +836,36 @@ Stage Summary:
 - 用户四项问题全部修复并端到端验证: ①悬停错位（双层根因: 光晕拾取 + offsetX 目标相对坐标）②中键平移（含 autoscroll 防护）③移动端图例/HUD 遮挡（折叠交互 + 限高滚动）④全屏弹窗（原生 API + 降级 + 信息条）
 - R3F 事件坐标修正为通用基础设施（canvasRelativePointerEvents）, 后续任何 HUD 覆盖层交互不再产生射线错位
 - 遗留: 画布全屏切换尺寸回落有 ~1-2s RO 异步延迟（可接受）; agent-browser errors 有 3 条空消息条目（环境噪声）; console 有先于本轮的 Next params Promise 警告（未定位, 非阻断）
+
+---
+Task ID: 25
+Agent: 主协调 Agent (Z.ai Code)
+Task: 点击选中分子（球体+标签）+ HUD 隐形死区修复 + 选中反馈强化 + 整体打磨
+
+Work Log:
+- 读 worklog + git log 确认状态: Task 24 已提交（b0a5692）, 工作树干净, dev server 正常
+- 【需求解读】用户: "点击表示蛋白的球要可以选中分子, 点击标签也应该可以同样选中分子" —— 实测发现球体 onClick 本已存在且工作（点击命中 NFATC3）, 真正缺失的是标签点击（标签 pointerEvents:none 不可点）; 另发现两个隐藏根因（见下）
+- 【根因 A · drei Html 异步挂载时序】原生监听须挂标签 div, 但 drei Html 内容在独立 React root 中异步 render —— useEffect 首跑时 labelRef.current 为 null, 监听器静默丢失 → rAF 轮询重试直至元素就绪（molecules.tsx + drug-molecules.tsx 双文件）
+- 【根因 B · R3F onPointerMissed 抵消】标签 div 是 R3F 事件容器（画布父元素）的子元素: React 合成 click 在根节点触发时 R3F 已先行处理（raycast 落空 → selectNode(null)）→ 选中被立即取消 → 必须「原生监听 + e.stopPropagation()」在标签层级拦截冒泡; 同步阻断 pointermove/down/up 防悬停标签时射线打到后方分子（悬停抖动）
+- 【根因 C · HUD 隐形死区】右上开关列容器（因剖切面板 w-44 宽达 176px）无 pointer-events-none → 其整个 bounding box（约 x687-863）拦截画布事件 → 该区域分子无法悬停/点击（用户"点不中球"主因之一, agent-browser elementFromPoint 实证）。修复: 列容器/网格容器/相机按钮行容器全部 pointer-events-none, 按钮/面板本体 pointer-events-auto（HudToggle/CamBtn/齿轮按钮）
+- 【实现 · 分子标签可点】molecules.tsx: is-pick 类 + 原生监听（click→selectNode, mouseenter→onHover+cursor, mouseleave→还原）; useFrame 逐帧同步 el.style.pointerEvents（opacity='0' 时 'none' —— 透明元素仍参与命中测试, 移动端 smartHide 隐藏标签不得成隐形拦截块）; zIndexRange [24,0]→[9,0] 恒低于 HUD（z-10+）, 顺带修复了标签浮于图例/按钮之上的旧视觉 bug
+- 【实现 · 药物层同一交互语言】drug-molecules.tsx: 药物标签点击→selectNode(靶点 id)（如 Trametinib→MAP2K2）; 药物球棍模型 group 加 R3F onClick/onPointerOver（visRef>0.12 门控, 淡出中不截获）; 标签 pointerEvents 同步
+- 【实现 · 选中反馈强化】is-selected 类（金框 rgba(254,243,199,.8) + 金底 + 18px 辉光, 与 3D 选中环 #fef3c7 同色系）; :hover 浮起 (translateY(-1px) scale(1.05)); 选中环加 ref + useFrame 缓慢旋转（t*0.85）+ tube 0.03→0.048 更醒目
+- 【实现 · 可发现性】图例底部提示行（MousePointerClick 图标 + legend.hint 中英）; hud.tip.free/hud.tip.section/hud.fsHint 全部改为"点击分子球或标签查看档案"
+- 【防御性】section-view.tsx 剖面三盘（细胞质填充盘/发光边缘/核盘）raycast={()=>null} —— R3F 实测仅 raycast internal.interaction（带 handler 对象）, 盘片本不拦截, 此为意图文档化 + 防未来误加 handler
+- QA（agent-browser 端到端, 桌面 1280×800 + 移动 390×844）:
+  · 标签点击: MAPK1 位→MKNK1（该像素最顶层标签, 互叠属正常分层）、620,380→NFATC3（DOM 矩形含点实证像素级精准）; 悬停标签→cursor pointer + 该分子提示卡（视觉对齐, 反修复了"标签与悬停错位"的残余感知 —— 旧 raycast 穿透会显示标签后方其它分子的卡）
+  · 球体点击: (600,400) 无标签遮挡处 tooltip NFATC3 → 点击选中 NFATC3 ✓
+  · 空白点击→取消选中 ✓; Labels 开关回归（关后仅 1 激活标签可见）✓
+  · 药物: Trametinib 给药→2 分子+标签; 球棍模型点击→选中 MAP2K2 ✓; 标签点击→MAP2K2 ✓（首测被剖切面板遮挡 —— HUD 层级正确压制, 关剖面后直测通过）
+  · 移动端: 47 标签 smartHide 至 1（选中者）; 标签触点点击 ✓; 展开图例 50% 覆盖（用户主动展开、可收起, 默认收起 ~4%）
+  · 全屏（降级覆盖层 1262px 画布）: 标签点击选中 ATF2 ✓
+  · is-selected 计算样式验证: border rgba(254,243,199,.8) 金框 + bg rgba(66,44,8,.92) 金底 ✓（一次读数为 0.25s 过渡中间值, 稳态复测正确）
+  · lint 零错误; dev.log 无异常; console 仅热更新期 WebGL Context Lost（开发态正常, 全页刷新即恢复）
+- 中途问题: dev server 一度 OOM 崩溃（sandbox 3.9GB）→ 后台重启恢复; 两次热更新触发 ctxLost 遮罩 → 全页刷新清除
+
+Stage Summary:
+- 用户需求完成: 点击蛋白球选中（原有功能 + 死区修复后真正可达）+ 点击标签同样选中（分子标签/药物标签→靶点）, 并修复了三个隐藏根因（Html 异步挂载时序 / onPointerMissed 抵消 / HUD 容器死区）
+- 附带收益: ①标签悬停提示卡与所见标签严格一致（旧穿透行为是错位感来源）②标签不再浮于 HUD 之上③隐藏标签不再成隐形拦截块④选中反馈三重强化（金框标签+旋转金环+检测器档案）
+- 遗留/风险: ①核区标签桌面端仍密集互叠（点击取最顶层, 可缩放/旋转分离; smartHide 仅 <480px 生效）②药物标签可能落于剖切面板之下（HUD 压制, 属正确分层, 可关剖面或旋转视角）③WebGL 上下文在连续热更新后偶发丢失（自动恢复提示已有, 刷新即愈）
+- 下阶段建议: ①贴面模式下核区标签自动错位（force-simulate 防重叠）②SimEvent 文案双语化（Task 22 遗留）③PDF 报告 EN 版④hero 图换 3D 视图截图

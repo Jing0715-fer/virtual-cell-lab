@@ -139,6 +139,8 @@ const DrugMolecule3D = memo(function DrugMolecule3D({ drug, target, sim, showLab
   const seed = useMemo(() => hashStr(drug.id + slot), [drug.id, slot]);
   const motif = useMemo(() => motifOf(drug), [drug]);
   const atoms = useMemo(() => atomsForMotif(motif, seed), [motif, seed]);
+  // 当前可见度（useFrame 写入）—— 淡出中的药物不再截获点击/悬停
+  const visRef = useRef(0);
 
   // 原子材质缓存（按元素类型共享；transparent 常开避免运行时重编译）
   const mats = useMemo(() => {
@@ -172,6 +174,49 @@ const DrugMolecule3D = memo(function DrugMolecule3D({ drug, target, sim, showLab
     },
     [mats, bondMat],
   );
+
+  // 药物标签点击 → 选中其靶点分子（与分子标签同一交互语言; 原生监听阻断冒泡至 R3F 事件容器,
+  // 否则会触发 onPointerMissed 把刚选中的靶点又取消）
+  // ⚠ drei Html 异步挂载 —— rAF 轮询直至标签元素就绪再挂监听
+  useEffect(() => {
+    let el: HTMLDivElement | null = null;
+    let raf = 0;
+    const stop = (e: Event) => e.stopPropagation();
+    const onSelect = (e: MouseEvent) => {
+      e.stopPropagation();
+      useLabStore.getState().selectNode(target.id);
+    };
+    const onEnter = () => {
+      document.body.style.cursor = 'pointer';
+    };
+    const onLeave = () => {
+      document.body.style.cursor = 'auto';
+    };
+    const attach = () => {
+      el = labelRef.current;
+      if (!el) {
+        raf = requestAnimationFrame(attach);
+        return;
+      }
+      el.addEventListener('click', onSelect);
+      el.addEventListener('mouseenter', onEnter);
+      el.addEventListener('mouseleave', onLeave);
+      el.addEventListener('pointermove', stop);
+      el.addEventListener('pointerdown', stop);
+      el.addEventListener('pointerup', stop);
+    };
+    attach();
+    return () => {
+      cancelAnimationFrame(raf);
+      if (!el) return;
+      el.removeEventListener('click', onSelect);
+      el.removeEventListener('mouseenter', onEnter);
+      el.removeEventListener('mouseleave', onLeave);
+      el.removeEventListener('pointermove', stop);
+      el.removeEventListener('pointerdown', stop);
+      el.removeEventListener('pointerup', stop);
+    };
+  }, [target.id]);
 
   // 结合位姿: 靶点外缘（沿靶点→细胞外方向），slot 错开角度
   const bindPose = useMemo(() => {
@@ -223,6 +268,7 @@ const DrugMolecule3D = memo(function DrugMolecule3D({ drug, target, sim, showLab
     }
     // 透明度: 逼近期随浓度上升，洗脱期随浓度淡出
     const vis = Math.min(level * 1.6, 1) * (docked ? 1 : 0.35 + 0.65 * ease);
+    visRef.current = vis;
     for (const m of Object.values(mats)) {
       m.opacity = vis;
       m.emissiveIntensity = 0.32 + level * 0.5;
@@ -230,7 +276,11 @@ const DrugMolecule3D = memo(function DrugMolecule3D({ drug, target, sim, showLab
     bondMat.opacity = vis * 0.85;
     const el = labelRef.current;
     if (el) {
-      el.style.opacity = showLabel && docked ? String(Math.min(1, level * 1.4)) : '0';
+      const op = showLabel && docked ? String(Math.min(1, level * 1.4)) : '0';
+      el.style.opacity = op;
+      // 隐藏标签不拦截画布交互（透明元素仍参与命中测试）
+      const pe = op === '0' ? 'none' : 'auto';
+      if (el.style.pointerEvents !== pe) el.style.pointerEvents = pe;
     }
   });
 
@@ -241,7 +291,24 @@ const DrugMolecule3D = memo(function DrugMolecule3D({ drug, target, sim, showLab
   const badgeClass = lang === 'zh' ? drug.drugClass.split('（')[0] : drug.drugClassEn;
 
   return (
-    <group ref={groupRef} position={[spawn.x, spawn.y, spawn.z]} scale={scale}>
+    <group
+      ref={groupRef}
+      position={[spawn.x, spawn.y, spawn.z]}
+      scale={scale}
+      onClick={(e) => {
+        if (visRef.current <= 0.12) return;
+        e.stopPropagation();
+        useLabStore.getState().selectNode(target.id);
+      }}
+      onPointerOver={(e) => {
+        if (visRef.current <= 0.12) return;
+        e.stopPropagation();
+        document.body.style.cursor = 'pointer';
+      }}
+      onPointerOut={() => {
+        document.body.style.cursor = 'auto';
+      }}
+    >
       {/* 原子（球棍模型） */}
       {atoms.map((a, i) => (
         <mesh key={`at-${i}`} position={a.pos} material={mats[a.kind]}>
@@ -268,15 +335,14 @@ const DrugMolecule3D = memo(function DrugMolecule3D({ drug, target, sim, showLab
           </mesh>
         );
       })}
-      {/* 药物名徽标（停泊后显示; 屏幕空间恒定尺寸清晰可读） */}
+      {/* 药物名徽标（停泊后显示; 屏幕空间恒定尺寸清晰可读; 点击选中靶点分子） */}
       <Html
         position={[0, 1.5, 0]}
         center
-        zIndexRange={[30, 0]}
-        pointerEvents="none"
+        zIndexRange={[9, 0]}
         style={{ pointerEvents: 'none', userSelect: 'none' }}
       >
-        <div ref={labelRef} className="drug3d-label">
+        <div ref={labelRef} className="drug3d-label" style={{ pointerEvents: 'auto' }}>
           <span className="drug3d-name">{badgeName}</span>
           <span className="drug3d-class">{badgeClass}</span>
         </div>

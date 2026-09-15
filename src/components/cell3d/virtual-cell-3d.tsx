@@ -17,7 +17,7 @@ import { setSceneSnapshot } from '@/lib/simulation/scene-capture';
 import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, Noise, Vignette } from '@react-three/postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal } from 'lucide-react';
+import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
 import { layout3D, projectLayoutToPlane, type CellBodySpec, type Vec3 } from '@/lib/simulation/layout3d';
@@ -715,9 +715,12 @@ export function VirtualCell3D() {
         </div>
       </div>
 
-      {/* 右上: 显示开关（移动端折叠进「显示」齿轮面板, 避免整列遮挡画布; 全屏时下移避开顶部信息条） */}
+      {/* 右上: 显示开关（移动端折叠进「显示」齿轮面板, 避免整列遮挡画布; 全屏时下移避开顶部信息条）
+          · 容器 pointer-events-none —— 仅按钮/面板本体接收事件:
+            列容器因剖切面板（w-44）宽达 176px, 若容器可命中会在画布右侧形成大片隐形死区,
+            遮住其下方所有分子的悬停/点击（用户报告“点不中蛋白球”的根因之一） */}
       <div
-        className={`absolute right-3 z-10 flex flex-col items-end gap-1.5 ${
+        className={`pointer-events-none absolute right-3 z-10 flex flex-col items-end gap-1.5 ${
           fullscreen ? 'top-[68px] md:top-3' : 'top-3'
         }`}
       >
@@ -735,7 +738,7 @@ export function VirtualCell3D() {
           onClick={() => setHudOpen((v) => !v)}
           aria-label={t('hud.gear')}
           aria-expanded={hudOpen}
-          className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] backdrop-blur-md transition md:hidden ${
+          className={`pointer-events-auto flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] backdrop-blur-md transition md:hidden ${
             hudOpen
               ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
               : 'border-white/10 bg-slate-950/70 text-slate-400 hover:text-slate-200'
@@ -744,8 +747,8 @@ export function VirtualCell3D() {
           <SlidersHorizontal className="h-3 w-3" />
           {t('hud.gear')}
         </button>
-        {/* 其余开关: 桌面纵向恒显; 移动端 2 列网格按需展开 */}
-        <div className={`${hudOpen ? 'grid' : 'hidden md:grid'} w-[172px] grid-cols-2 gap-1.5 md:flex md:w-auto md:flex-col`}>
+        {/* 其余开关: 桌面纵向恒显; 移动端 2 列网格按需展开（网格容器同样穿透, 仅按钮本体可命中） */}
+        <div className={`pointer-events-none ${hudOpen ? 'grid' : 'hidden md:grid'} w-[172px] grid-cols-2 gap-1.5 md:flex md:w-auto md:flex-col`}>
           <HudToggle active={tourOpen} onClick={() => openTour(!tourOpen)} icon={BookOpen} label={t('hud.tour')} highlight
             disabled={tour.length === 0} />
           <HudToggle active={glow} onClick={() => setGlow(!glow)} icon={Sparkles} label={t('hud.glow')} />
@@ -816,8 +819,8 @@ export function VirtualCell3D() {
         )}
       </div>
 
-      {/* 右下: 相机预设 */}
-      <div className="absolute bottom-3 right-3 z-10 flex flex-wrap justify-end gap-1.5">
+      {/* 右下: 相机预设（容器穿透 —— 仅按钮本体可命中, 不遮挡其下方分子的交互） */}
+      <div className="pointer-events-none absolute bottom-3 right-3 z-10 flex flex-wrap justify-end gap-1.5">
         <CamBtn active={camMode === 'overview'} onClick={() => setCamMode('overview')} icon={Maximize} label={t('cam.overview')} />
         <CamBtn active={camMode === 'membrane'} onClick={() => setCamMode('membrane')} icon={Crosshair} label={t('cam.membrane')} />
         <CamBtn active={camMode === 'nucleus'} onClick={() => setCamMode('nucleus')} icon={Atom} label={t('cam.nucleus')} />
@@ -848,6 +851,11 @@ export function VirtualCell3D() {
                 <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full border border-amber-400" /><span className="text-[9px] text-slate-400">{t('legend.phospho')}</span></div>
                 <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-400/80 shadow-[0_0_6px_rgba(251,191,36,0.8)]" /><span className="text-[9px] text-slate-400">{t('legend.mrna')}</span></div>
                 <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.9)]" /><span className="text-[9px] text-slate-400">{t('legend.pulse')}</span></div>
+                {/* 交互提示（可发现性）: 球体/标签均可点选 */}
+                <div className="flex items-center gap-1.5 border-t border-white/8 pt-1.5 text-[9px] text-slate-500">
+                  <MousePointerClick className="h-3 w-3 shrink-0 text-emerald-400/80" />
+                  <span>{t('legend.hint')}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -994,7 +1002,7 @@ function HudToggle({ active, onClick, icon: Icon, label, highlight, disabled, ti
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] backdrop-blur-md transition ${
+      className={`pointer-events-auto flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] backdrop-blur-md transition ${
         active
           ? highlight
             ? 'border-amber-500/50 bg-amber-500/15 text-amber-300'
@@ -1020,7 +1028,7 @@ function CamBtn({ active, onClick, icon: Icon, label }: {
     <button
       onClick={onClick}
       title={label}
-      className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] backdrop-blur-md transition ${
+      className={`pointer-events-auto flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] backdrop-blur-md transition ${
         active
           ? 'border-amber-500/40 bg-amber-500/15 text-amber-300'
           : 'border-white/10 bg-slate-950/70 text-slate-400 hover:text-slate-200'

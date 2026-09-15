@@ -531,8 +531,9 @@ export function SectionClipController({
     <>
       {enabled && ready && cytoTex && nucTex && (
         <group ref={discGroupRef}>
-          {/* 细胞质剖面填充盘（相交圆半径动态缩放） */}
-          <mesh ref={cytoDiscRef} renderOrder={96}>
+          {/* 细胞质剖面填充盘（相交圆半径动态缩放; 纯视觉 —— 禁用 raycast,
+              否则会截获点击便既不选中分子也不触发 onPointerMissed 取消选中） */}
+          <mesh ref={cytoDiscRef} renderOrder={96} raycast={() => null}>
             <circleGeometry args={[R, 96]} />
             <meshBasicMaterial
               map={cytoTex}
@@ -545,13 +546,13 @@ export function SectionClipController({
               polygonOffsetFactor={-4}
             />
           </mesh>
-          {/* 剖面发光边缘（切割亮线, 随相交圆缩放） */}
-          <mesh ref={cytoRingRef} renderOrder={97}>
+          {/* 剖面发光边缘（切割亮线, 随相交圆缩放; 纯视觉 —— 不参与拾取） */}
+          <mesh ref={cytoRingRef} renderOrder={97} raycast={() => null}>
             <ringGeometry args={[R - 0.12, R, 96]} />
             <meshBasicMaterial color="#5eead4" transparent opacity={0.65} side={THREE.DoubleSide} depthWrite={false} fog={false} />
           </mesh>
-          {/* 核剖面盘（切面触核后渐入, 半径 √(N²-h²)） */}
-          <mesh ref={nucDiscRef} renderOrder={98}>
+          {/* 核剖面盘（切面触核后渐入, 半径 √(N²-h²); 纯视觉 —— 不参与拾取） */}
+          <mesh ref={nucDiscRef} renderOrder={98} raycast={() => null}>
             <circleGeometry args={[N, 64]} />
             <meshBasicMaterial
               map={nucTex}
