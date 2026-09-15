@@ -21,7 +21,7 @@ import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import type { CellBodySpec } from '@/lib/simulation/layout3d';
-import { SHAPE_EXTENT } from '@/lib/simulation/cell-shape';
+import { NUCLEUS_EXTENT, NUCLEUS_FORM, SHAPE_EXTENT } from '@/lib/simulation/cell-shape';
 
 /** 剖切轴向 → 形状延伸轴索引（法向主轴; front≈z / top≈y / side≈x）—— 与盘缩放/扫描范围/贴附平面三处共用 */
 export const AXIS_N: Record<SectionAxis, number> = { front: 2, top: 1, side: 0 };
@@ -399,10 +399,26 @@ export function SectionClipController({
   const [discA1, discA2] = DISC_AXES[axis];
   const ex1 = extent[discA1];
   const ex2 = extent[discA2];
+  // v6 核形状体系: 椭球核轴向延伸 + 核中心偏移（核盘椭圆截面 + 核偏移贴合）
+  const nucEx = NUCLEUS_EXTENT[spec.shape] ?? NUCLEUS_EXTENT.sphere;
+  const nucForm = NUCLEUS_FORM[spec.shape] ?? NUCLEUS_FORM.sphere;
+  const nucC = [nucForm.offset[0] * R, nucForm.offset[1] * R, nucForm.offset[2] * R] as const;
+  const ni = AXIS_N[axis];
+  const aN = N * nucEx[ni]; // 核在剖切法向轴的半轴
 
   const plane = useMemo(() => new THREE.Plane(SECTION_ORIENTS.front.normal.clone(), R * 0.35), []);
   const targetNormal = useRef(plane.normal.clone());
   const targetConstant = useRef(R * 0.35);
+  // v6: 核中心在切平面内的投影 → disc local 坐标（四元数逆变换, 精确对齐无镜像歧义）
+  // （front 轴 disc local y ≈ world −y, 直接拿 nucC[discA2] 会镜像翻转 —— 上皮基底核盘会跑到核上方）
+  const nucDiscLocal = useMemo(() => {
+    const n = SECTION_ORIENTS[axis].normal;
+    const nWorld = new THREE.Vector3(nucC[0], nucC[1], nucC[2]);
+    const proj = nWorld.clone().addScaledVector(n, -nWorld.dot(n));
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), n).invert();
+    const local = proj.applyQuaternion(q);
+    return { x: local.x, y: local.y };
+  }, [axis, nucC]);
   const origSides = useRef<Map<THREE.Material, THREE.Side>>(new Map());
   const discGroupRef = useRef<THREE.Group | null>(null);
   const cytoDiscRef = useRef<THREE.Mesh | null>(null);
@@ -523,11 +539,22 @@ export function SectionClipController({
       if (cytoDiscRef.current) cytoDiscRef.current.visible = discVisible;
       if (cytoRingRef.current) cytoRingRef.current.visible = discVisible;
 
-      // 核盘: 相交圆半径 √(N²-h²), h < N 时渐入
-      const rn = h < N ? Math.sqrt(N * N - h * h) : 0;
+      // 核盘 v6: 椭球核相交椭圆 —— 半轴随核形状（杆状核在纵切面呈长椭圆, 横切面近圆）;
+      // 有向距离相对核中心沿真实法向投影（含偏移）, 切面掠过核时渐入渐出
+      const dN = -plane.constant - (nucC[0] * plane.normal.x + nucC[1] * plane.normal.y + nucC[2] * plane.normal.z);
+      const sN = Math.abs(dN) < aN ? Math.sqrt(1 - (dN / aN) ** 2) : 0;
       if (nucDiscRef.current) {
-        nucDiscRef.current.scale.setScalar(Math.max(0.001, rn / N));
-        nucDiscRef.current.visible = rn > N * 0.12;
+        nucDiscRef.current.scale.set(
+          Math.max(0.001, sN * nucEx[discA1]),
+          Math.max(0.001, sN * nucEx[discA2]),
+          1,
+        );
+        // 核盘位置 = 核中心在切平面内的投影（group 四元数逆变换 → disc local, 各轴向精确无镜像）
+        const proj = new THREE.Vector3(nucC[0], nucC[1], nucC[2]);
+        proj.addScaledVector(plane.normal, -(proj.dot(plane.normal) + plane.constant));
+        const local = proj.applyQuaternion(discGroupRef.current.quaternion.clone().invert());
+        nucDiscRef.current.position.set(local.x, local.y, 0.008);
+        nucDiscRef.current.visible = sN > 0.12;
       }
     }
     // 广播裁剪平面（分子标签层读取; 关闭时置 null）
@@ -536,11 +563,12 @@ export function SectionClipController({
 
   const annos = useMemo(
     () => [
-      { local: [0, 0.06, 0.14], text: labels.nucleus, show: true },
+      // 核标注跟随核中心投影（nucDiscLocal 已含轴向精确变换）
+      { local: [nucDiscLocal.x / R, nucDiscLocal.y / R + 0.06, 0.14], text: labels.nucleus, show: true },
       { local: [0.58, 0.34, 0], text: labels.cytosol, show: true },
       { local: [1.0, 0.18, 0], text: labels.membrane, show: true },
     ],
-    [labels],
+    [labels, nucDiscLocal, R],
   );
 
   return (

@@ -7,7 +7,7 @@
  */
 import type { CoreNode, CoreEdge } from '@/types/kegg';
 import type { MorphologyKey as CellMorphKey } from '@/data/cell-types';
-import { shapeFactor, type ShapeKind } from './cell-shape';
+import { nucleusCenter, nucleusFactor, nucleusRayExit, shapeFactor, type ShapeKind } from './cell-shape';
 
 export interface Vec3 {
   x: number;
@@ -192,6 +192,27 @@ export function layout3D(
       { x: Math.cos(lat) * Math.cos(lon), y: Math.sin(lat), z: Math.cos(lat) * Math.sin(lon) },
       spec.shape,
     );
+  // v6 核形状体系: 核中心偏移 + 成形核面半径 + 射线避核（与 organelles.tsx 同源）
+  const nucC = nucleusCenter(spec.shape, R);
+  const nucF = (lat: number, lon: number): number =>
+    nucleusFactor(
+      { x: Math.cos(lat) * Math.cos(lon), y: Math.sin(lat), z: Math.cos(lat) * Math.sin(lon) },
+      spec.shape,
+    );
+  const nucExit = (lat: number, lon: number): number =>
+    nucleusRayExit(
+      { x: Math.cos(lat) * Math.cos(lon), y: Math.sin(lat), z: Math.cos(lat) * Math.sin(lon) },
+      spec.shape, N, R,
+    );
+  // 核内世界坐标: 自核中心沿 (lat,lon) 方向取核面半径的 frac 倍（TF/靶基因落入成形核内含偏移）
+  const nucWorld = (lat: number, lon: number, frac: number): Vec3 => {
+    const f = Math.max(0.08, nucF(lat, lon) * Math.min(1, Math.max(0, frac)));
+    return {
+      x: nucC.x + Math.cos(lat) * Math.cos(lon) * N * f,
+      y: nucC.y + Math.sin(lat) * N * f,
+      z: nucC.z + Math.cos(lat) * Math.sin(lon) * N * f,
+    };
+  };
 
   const byId = new Map(nodes.map((n) => [n.id, n]));
 
@@ -293,14 +314,15 @@ export function layout3D(
       const shellF = node.tier === 2 ? 0.845 : node.tier === 3 ? 0.715 : 0.59;
       const lat = Math.max(-0.82, Math.min(0.82, ang.lat + off.dLat));
       const lon = ang.lon + off.dLon;
-      const rr = Math.max(R * shellF * shapeF(lat, lon), N + 0.85) + hash01(node.id, 21) * 0.35;
+      // v6: 球形 N+0.85 避核改为射线避核（长形核在长轴方向占径更大, 窄向更小 —— 分子不再悬空/穿核）
+      const rr = Math.max(R * shellF * shapeF(lat, lon), nucExit(lat, lon) + 0.85) + hash01(node.id, 21) * 0.35;
       positions.set(node.id, sph(rr, lat, lon));
     } else if (node.tier === 5) {
       const off = nucOffset.get(node.id) ?? { lon: Math.PI * 0.5, lat: 0.4 };
-      positions.set(node.id, sph(N * 0.74, off.lat, off.lon));
+      positions.set(node.id, nucWorld(off.lat, off.lon, 0.74));
     } else {
       const off = nucOffset.get(node.id) ?? { lon: Math.PI * 0.5, lat: -0.4 };
-      positions.set(node.id, sph(N * 0.45, off.lat, off.lon));
+      positions.set(node.id, nucWorld(off.lat, off.lon, 0.45));
     }
   }
 

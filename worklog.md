@@ -1062,3 +1062,54 @@ Stage Summary:
 - 产出: pathway-cell-matrix.ts(新 159 行) / pathway-library.tsx(三层筛选 UI) / lab-store.ts(setCell 联动) / cell-picker.tsx(toast) / workspace.tsx(警告横幅) / i18n.tsx(+11 键) / organelles.tsx(+~310 行) / layout3d.ts(spec+6 flag)
 - 遗留/风险: ①贴面模式核区标签互叠（Task 25 遗留）②SimEvent 双语化/PDF EN（Task 22 遗留）③癌细胞 3 个核仁与微核的碰撞检测未做（视觉重叠概率低）④390px 真机断点未复测（环境无 viewport 命令）
 - 下阶段建议: ①配体级受体表达 gating（配体面板标记"受体未表达"——比通路级更细一层）②贴面核区标签 force-simulate 防重叠 ③溶酶体自噬演示（mTOR 抑制→自噬体融合事件）④hero 图换 3D 视图截图
+
+---
+Task ID: 30
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户需求——①head 区域空隙再减小 ②细胞 3D 模型"还都是保留原来的圆球形轮廓"——核/细胞器/分子布局全面按真实形状显示, 消除一切不匹配
+
+Work Log:
+- 读 worklog + git log 确认状态: Task 29 已提交（8045664）, dev server 正常（HTTP 200）
+- 【需求根因分析】Task 28 已把质膜形状化, 但用户仍看到"圆球形轮廓"——审计 organelles.tsx/layout3d.ts/section-view.tsx 定位出 5 类球形残留:
+  ①外缘辉光壳 SphereGeometry(R×1.075) —— 杆状/梭状/柱状窄轴处凸出成显性"球轮廓"
+  ②细胞核 displacedSphere(N) 全类型球形 + 核被膜/核孔/染色质/核仁/核质全部绕球心
+  ③~12 处细胞器球形壳放置 sph(R×frac)（线粒体/溶酶体/过氧化物酶体/脂滴/囊泡/多聚核糖体/SER/糖原/430+胞质颗粒）—— 窄轴穿膜、长轴端悬空
+  ④骨架球形化: 微管终点 0.96R 穿膜、皮层 actin R-0.5 穿膜、中间丝球形插值、中心体固定原点
+  ⑤【隐藏 bug】帧驱动 membraneGroup.rotation.y = t×0.012 / cytosol.rotation.y = t×0.018 刚体旋转 —— 非球形状下把贴膜脂头/胞质颗粒甩出窄轴膜面外（杆端脂头 20° 时漂出 ~5 单位）
+  另: 布局 tier2-4 球形 N+0.85 避核、tier5/6 球形核内环、剖面核盘 √(N²-h²) 圆形、核机位对准原点
+- 【Hero 空隙】page.tsx: hero py-12/lg:py-16 → py-7/lg:py-9, gap-8→gap-6 lg:gap-12→10 xl:16→14; h1/p mt-5→mt-4, cta mt-6→mt-5, stats mt-8→mt-6; cells 区 py-10/12→8/10 —— header→h1 实测 172px→104px（-68px）
+- 【核形状体系 v6 —— 新唯一真源】cell-shape.ts +NUCLEUS_FORM（7 类型: axes 椭球三轴/offset 核中心偏移/lobes 分叶幅度）:
+  · 肝圆核 / 神经元大圆泡状核 / T 大圆核（高核质比）/ 上皮卵圆核偏基底(-0.17R, 顶端-基底极性标志) / 心肌杆状核沿长轴(1.85N×0.58N) / 成纤维长卵圆核(1.7N) / 癌核增大+分叶不规则(lobes 0.15 核多形性)
+  · nucleusFactor/nucleusRadius（椭球×分叶谐波, 与 shapeFactor 同构）/ nucleusCenter（offset×R）/ NUCLEUS_EXTENT / nucleusRayExit（射线-核椭球远交点, 体内采样避核基准, 精确二次方程解）
+- 【organelles.tsx 全面成形】:
+  · 辉光壳 → shapedCellGeometry(R×1.075)（随类型轮廓+FBM, 球轮廓消除）
+  · shapedNucleusGeometry 新函数（核椭球×分叶×FBM, inset 平行内缩）; 核被膜双层/核质全部成形 + mesh.position = 核中心
+  · 核系配套: 核孔贴 nucSurf(dir)+核中心偏移 / 异染色质 nucPoint(-0.34) / 常染色质 nucInnerPoint / 核仁核内置于核内随形状展开
+  · insidePos(dir, frac, r, pad) 体内采样器: [核射线边界+pad+r, 膜面-(r+0.35)] 区间插值 + 挤压方向硬钳至膜面（宁擦核不穿膜）—— 替换全部 12 处球形壳放置
+  · 线粒体长轴取向: rod/spindle 沿 x（rotation.z≈π/2）、columnar 沿 y、圆形随机 —— 心肌线粒体伴肌原纤维的真实位形
+  · rER 囊池包绕成形核面（nucPoint(dir, 0.62+wobble), 杆状核旁沿长轴延展）; 高尔基 v6 位姿: 贴核外延 + 上皮核上位（教科书位形: 核与刷状缘之间）+ 膜面回拉防溢出
+  · 骨架: 中心体贴核（上皮核上顶端 MTOC）/ 微管终点 cellSurf(-0.35) 贴膜 / 中间丝自成形核面 lerp 到类型化膜面 / 皮层 actin cellSurf(-0.45-h×0.35)
+  · 胶原纤维起点锚定膜面; 癌细胞微核 nucExit 避核放置; 中心体/微管/中间丝/囊泡/溶酶体/过氧化物酶体/脂滴/糖原/SER 标注全部锚定实际结构位置
+  · 【旋转 bug 修复】非球形状: 膜对流/胞质旋转改微幅摆动 sin(t×0.4)×0.018（保留流动感）; 球状保留全速旋转
+- 【layout3d.ts 分子布局核感知】tier2-4 避核 N+0.85 → nucExit(lat,lon)+0.85（射线避核）; tier5/6 核内环 sph(N×0.74) → nucWorld(lat,lon,frac)（落入成形核内含中心偏移, TF/靶基因不再在杆状核窄轴穿出核外）
+- 【section-view.tsx 核盘 v6】椭球核相交椭圆: 半轴 sN×nucEx[discA1/2], 渐入渐出按真实法向投影 dN; 核盘位置 = 核中心切平面投影经 group 四元数逆变换（修复 front 轴 local y≈world−y 镜像 —— 上皮基底核盘曾跑到核上方）; 核标注跟随投影
+- 【virtual-cell-3d.tsx 核机位 v6】target = nucleusCenter(shape,R)（上皮基底核不脱靶）, dist = max(3.4, 核最大半轴×2.35)（杆状核拉远看全）
+- 【mrna-flow.tsx】核孔穿越点 nucleusRadius(outDir)+核中心（mRNA 出核轨迹贴合成形核面）
+- 【数值验证 scripts/verify-nucleus-shape.ts】5 组 400 采样/类型: 核轴向半径符合 NUCLEUS_FORM（分叶容差）/ rayExit 交点语义 / insidePos 全部 ∈ [核外+pad, 膜内-margin] 越界余量 0.000 / 旧球形壳 6 主方向穿膜 10 处 → 新采样 0 处 / 核偏移 < 0.25R 全通过
+- 【中途迭代】首版 insidePos 在挤压方向（神经元顶区/梭形尖端/上皮基底极, 核几乎贴膜）lo>outer 时把采样顶出膜外 —— 数值验证抓出后加硬钳 Math.min(t, outer)
+- QA（agent-browser 端到端, 1280×800）:
+  · Hero: header→h1 104px（原 172px）, badge/h1/stats 间距同步收紧, 无横向溢出
+  · 7/7 细胞型全结构标签逐一验证（网页内全屏 1261px 画布）: 肝 18（SER/糖原/胆小管/过氧化物酶体✓）/神经元 18（突触扣结/顶丛/髓鞘✓）/T 15（TCR 微簇✓）/上皮 19（终末网/桥粒/微绒毛/紧密连接/基底膜✓）/心肌 19（T 小管/肌浆网/肌原纤维/闰盘✓）/成纤维 16（应力纤维/胶原✓）/癌 17（微核/出芽✓）—— 与 Task 28/29 基线完全一致
+  · 剖面核盘: 上皮基底核标注 relY=+62（画布中心下方, 修复前 -27 上方镜像）✓; 肝中心核 relY=+11 ✓; 剖深滑杆/三盘标注正常
+  · 回归: 分子点击选中（ATF4 is-selected✓）/ 播放+自动注射 T+8s 阶段 3/4 级联传播✓ / 核机位（Atom 图标）✓ / 网页内全屏反复进出✓ / console 零错误 / dev.log 全 200 无异常
+  · lint 零错误; tsc 本任务文件零错误（examples/audit/skills 历史遗留不计）
+- 环境备注: VLM 429 限流持续 → 以 DOM 几何量化（relY/标签计数/包围盒）+ bun 数值验证脚本替代视觉复验
+
+Stage Summary:
+- 用户两项需求全部落地并端到端验证: ①Hero head 空隙 172→104px ②3D 模型球形残留彻底清除 —— 核形状体系 v6（7 类型核形/偏移/分叶）+ 12 处细胞器体内形状化采样 + 骨架/辉光壳/微管/actin 成形 + 分子布局核感知 + 剖面核盘椭圆化
+- 架构沉淀: NUCLEUS_FORM 成为核形状第四处共享真源消费方（organelles/layout3d/section-view/virtual-cell-3d 同源零漂移）; insidePos 采样器 + nucleusRayExit 射线避核成为后续任何胞内结构放置的标准范式
+- 科学性: 心肌杆状核沿长轴/上皮基底卵圆核/癌细胞分叶核（Ross Histology）/高尔基核上位（上皮极性）/线粒体长轴排列（心肌）/ER 包绕核周 —— 全部有教材参照
+- 附带修复 2 个隐藏 bug: ①非球形状下膜/胞质刚体旋转把贴膜结构甩出膜外 ②剖面核盘 front 轴镜像翻转
+- 产出: cell-shape.ts(+100 行核体系) / organelles.tsx(~24 处成形改造) / layout3d.ts(核感知布局) / section-view.tsx(核盘椭圆+镜像修复) / virtual-cell-3d.tsx(核机位) / mrna-flow.tsx(出核轨迹) / page.tsx(hero 空隙) / scripts/verify-nucleus-shape.ts(新, 数值验证工具)
+- 遗留/风险: ①贴面模式核区标签互叠（Task 25 遗留未变）②SimEvent 双语化/PDF EN（Task 22 遗留）③挤压方向细胞器轻擦核面（硬钳策略, 视觉可接受）④390px 真机断点未复测（环境无 viewport 命令）
+- 下阶段建议: ①肝细胞双核（真实肝板常见）②核仁在杆状核内串珠排列增强③贴面核区标签 force-simulate 防重叠④hero 图换 3D 视图截图

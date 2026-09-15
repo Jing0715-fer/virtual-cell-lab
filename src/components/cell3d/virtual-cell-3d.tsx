@@ -29,7 +29,7 @@ import { EdgeLayer } from './signal-edges';
 import { MrnaFlow } from './mrna-flow';
 import { EventPulses } from './event-pulses';
 import { SectionClipController, SECTION_ORIENTS, AXIS_N, type SectionAxis } from './section-view';
-import { SHAPE_EXTENT } from '@/lib/simulation/cell-shape';
+import { NUCLEUS_EXTENT, SHAPE_EXTENT, nucleusCenter, type ShapeKind } from '@/lib/simulation/cell-shape';
 import { useLang } from '@/lib/i18n';
 
 type CamMode = 'free' | 'overview' | 'membrane' | 'nucleus' | 'follow' | 'tour';
@@ -106,7 +106,7 @@ class Cell3DErrorBoundary extends Component<
 function CameraRig({ mode, layout, spec, controlsRef, tourTarget }: {
   mode: CamMode;
   layout: ReturnType<typeof layout3D> | null;
-  spec: { viewDist: number };
+  spec: { viewDist: number; membraneR: number; nucleusR: number; shape: ShapeKind };
   controlsRef: RefObject<OrbitControlsImpl | null>;
   /** 教学引导: 当前聚焦分子世界坐标 */
   tourTarget: Vec3 | null;
@@ -137,7 +137,16 @@ function CameraRig({ mode, layout, spec, controlsRef, tourTarget }: {
   useEffect(() => {
     modeSince.current = performance.now();
     if (mode === 'overview') desired.current = { target: new THREE.Vector3(0, 0, 0), dist: spec.viewDist, dir: new THREE.Vector3(0, 0.33, 0.94) };
-    else if (mode === 'nucleus') desired.current = { target: new THREE.Vector3(0, 0, 0), dist: 3.4, dir: new THREE.Vector3(0.35, 0.25, 0.9) };
+    else if (mode === 'nucleus') {
+      // v6: 核机位对准成形核中心（上皮基底核等偏移核不再脱靶）; 距离随核最大半轴自适应
+      const nc = nucleusCenter(spec.shape, spec.membraneR);
+      const nucMax = spec.nucleusR * Math.max(...(NUCLEUS_EXTENT[spec.shape] ?? NUCLEUS_EXTENT.sphere));
+      desired.current = {
+        target: new THREE.Vector3(nc.x, nc.y, nc.z),
+        dist: Math.max(3.4, nucMax * 2.35),
+        dir: new THREE.Vector3(0.35, 0.25, 0.9),
+      };
+    }
     else if (mode === 'membrane') {
       const rec = bestReceptor(layout);
       if (rec) desired.current = { target: toWorld(rec.pos), dist: 6.2, dir: new THREE.Vector3(0.15, 0.28, 0.94) };
@@ -454,9 +463,14 @@ export function VirtualCell3D() {
     () => (graph ? layout3D(graph.core.nodes, graph.core.edges, morph) : null),
     [graph, morph],
   );
-  // 相机视野参数: 类型化形状的全景距离（形状已烘焙进几何, 无需非等比 group 缩放）
+  // 相机视野参数: 类型化形状的全景距离（形状已烘焙进几何, 无需非等比 group 缩放）+ 核机位参数（v6）
   const layoutSpec = useMemo(
-    () => ({ viewDist: layout?.spec.viewDist ?? FALLBACK_SPEC.viewDist }),
+    () => ({
+      viewDist: layout?.spec.viewDist ?? FALLBACK_SPEC.viewDist,
+      membraneR: layout?.spec.membraneR ?? FALLBACK_SPEC.membraneR,
+      nucleusR: layout?.spec.nucleusR ?? FALLBACK_SPEC.nucleusR,
+      shape: layout?.spec.shape ?? FALLBACK_SPEC.shape,
+    }),
     [layout],
   );
   // 剖面贴附平面（与剖切控制器同参数, 向保留侧偏移 0.3 → 分子半球完整可见不被裁; 扫描范围按形状法向轴延伸）

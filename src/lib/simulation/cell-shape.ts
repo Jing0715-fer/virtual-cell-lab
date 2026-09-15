@@ -125,6 +125,93 @@ export function shapeRadius(d: Dir3, kind: ShapeKind, R: number): number {
   return shapeFactor({ x: d.x / l, y: d.y / l, z: d.z / l }, kind) * R;
 }
 
+/* ============ 细胞核形状体系（v6 —— 核形与细胞形态匹配的唯一真源） ============ */
+
+/** 类型化核形态：椭球三轴倍率（× nucleusR, x=细胞长轴）+ 核中心偏移（× membraneR）+ 分叶幅度 */
+export interface NucleusForm {
+  /** 核椭球三轴倍率（相对 nucleusR） */
+  axes: readonly [number, number, number];
+  /** 核中心偏移（相对 membraneR; 如上皮基底核 -y、神经元轻微上位） */
+  offset: readonly [number, number, number];
+  /** 分叶/不规则幅度（0 = 光滑椭球; 癌细胞核多形性显著） */
+  lobes: number;
+}
+
+/** 形态学参照（Ross Histology / Alberts MBoC）:
+ *   hepatocyte   圆形核（常见双核, 此处单核）
+ *   neuron      大而圆的泡状核（位居胞体中央）
+ *   tcell       大圆核（高核质比, 几乎充满细胞）
+ *   epithelial  卵圆形核偏基底（肠上皮顶端-基底极性的标志性特征）
+ *   cardiomyocyte 杆状核沿细胞长轴（1-2 个, 此处 1 个）
+ *   fibroblast  长期圆形核沿长轴
+ *   cancer      核增大 + 分叶不规则（核多形性/核非典型性）
+ */
+export const NUCLEUS_FORM: Record<ShapeKind, NucleusForm> = {
+  polyhedral: { axes: [1.0, 0.96, 1.0], offset: [0, 0.02, 0], lobes: 0.03 },
+  pyramidal: { axes: [1.02, 0.98, 1.02], offset: [0, 0.06, 0], lobes: 0.025 },
+  sphere: { axes: [1.0, 1.0, 1.0], offset: [0, 0, 0], lobes: 0.035 },
+  columnar: { axes: [0.85, 1.12, 0.85], offset: [0, -0.17, 0], lobes: 0.03 },
+  rod: { axes: [1.85, 0.58, 0.6], offset: [0, 0, 0], lobes: 0.025 },
+  spindle: { axes: [1.7, 0.6, 0.66], offset: [0, 0, 0], lobes: 0.03 },
+  amoeboid: { axes: [1.14, 1.05, 1.1], offset: [0.05, 0.04, 0], lobes: 0.15 },
+};
+
+/** 核形状函数：椭球径向倍率 × 分叶谐波（与 shapeFactor 同构 —— dir 无需归一） */
+export function nucleusFactor(d: Dir3, kind: ShapeKind): number {
+  const l = Math.hypot(d.x, d.y, d.z) || 1;
+  const u = { x: d.x / l, y: d.y / l, z: d.z / l };
+  const f = NUCLEUS_FORM[kind];
+  let r = ellip(u, f.axes[0], f.axes[1], f.axes[2]);
+  if (f.lobes > 0) {
+    const lon = Math.atan2(u.z, u.x);
+    const lat = Math.asin(clamp(u.y, -1, 1));
+    r *= 1 + f.lobes * (
+      0.6 * Math.cos(3 * lon + 0.8) * Math.cos(2 * lat)
+      + 0.4 * Math.sin(2 * lon + 2.2) * Math.sin(3 * lat + 0.6)
+    );
+  }
+  return r;
+}
+
+/** 核表面半径（含分叶; 不含局部噪声 —— 噪声由消费方叠加） */
+export function nucleusRadius(d: Dir3, kind: ShapeKind, N: number): number {
+  return nucleusFactor(d, kind) * N;
+}
+
+/** 核中心世界坐标（细胞局部系; offset × membraneR） */
+export function nucleusCenter(kind: ShapeKind, R: number): Dir3 {
+  const o = NUCLEUS_FORM[kind].offset;
+  return { x: o[0] * R, y: o[1] * R, z: o[2] * R };
+}
+
+/** 核椭球轴向延伸（核盘椭圆缩放 / 相机核机位距离用） */
+export const NUCLEUS_EXTENT: Record<ShapeKind, readonly [number, number, number]> = {
+  polyhedral: [1.0, 0.96, 1.0],
+  pyramidal: [1.02, 0.98, 1.02],
+  sphere: [1.0, 1.0, 1.0],
+  columnar: [0.85, 1.12, 0.85],
+  rod: [1.85, 0.58, 0.6],
+  spindle: [1.7, 0.6, 0.66],
+  amoeboid: [1.14, 1.05, 1.1],
+};
+
+/** 射线-核椭球占用边界：从细胞中心沿单位方向 dir 的核占据远交点距离（未命中返回 0）。
+ *  体内采样的"避开细胞核"基准（分叶幅度小, 近似平滑椭球 + 消费方加 pad） */
+export function nucleusRayExit(d: Dir3, kind: ShapeKind, N: number, R: number): number {
+  const l = Math.hypot(d.x, d.y, d.z) || 1;
+  const dx = d.x / l, dy = d.y / l, dz = d.z / l;
+  const f = NUCLEUS_FORM[kind];
+  const cx = f.offset[0] * R, cy = f.offset[1] * R, cz = f.offset[2] * R;
+  const ax = f.axes[0] * N, ay = f.axes[1] * N, az = f.axes[2] * N;
+  const A = (dx / ax) ** 2 + (dy / ay) ** 2 + (dz / az) ** 2;
+  if (A <= 0) return 0;
+  const B = -2 * (dx * cx / (ax * ax) + dy * cy / (ay * ay) + dz * cz / (az * az));
+  const C = (cx / ax) ** 2 + (cy / ay) ** 2 + (cz / az) ** 2 - 1;
+  const D = B * B - 4 * A * C;
+  if (D < 0) return 0;
+  return Math.max(0, (-B + Math.sqrt(D)) / (2 * A));
+}
+
 /** 轴向最大延伸倍率（相机视野 / 剖切盘椭圆缩放; 取轴向 ± 采样的保守最大值） */
 export const SHAPE_EXTENT: Record<ShapeKind, readonly [number, number, number]> = {
   polyhedral: [1.0, 0.98, 1.0],

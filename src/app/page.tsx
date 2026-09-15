@@ -231,7 +231,7 @@ export default function Home() {
           <div className="pointer-events-none absolute -right-40 -top-40 h-[480px] w-[480px] rounded-full bg-emerald-500/[0.07] blur-[120px]" />
           <div className="pointer-events-none absolute -left-40 top-20 h-[380px] w-[380px] rounded-full bg-teal-500/[0.05] blur-[100px]" />
 
-          <div className="mx-auto grid max-w-[1680px] items-center gap-8 px-4 py-12 lg:grid-cols-[23fr_27fr] lg:gap-12 lg:px-6 lg:py-16 xl:gap-16">
+          <div className="mx-auto grid max-w-[1680px] items-center gap-6 px-4 py-7 lg:grid-cols-[23fr_27fr] lg:gap-10 lg:px-6 lg:py-9 xl:gap-14">
             <div>
               <motion.div
                 initial={{ opacity: 0, y: 16 }}
@@ -247,7 +247,7 @@ export default function Home() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.08 }}
-                className="mt-5 text-4xl font-bold leading-[1.12] tracking-tight text-slate-50 sm:text-5xl lg:text-[44px] xl:text-[54px] 2xl:text-[58px]"
+                className="mt-4 text-4xl font-bold leading-[1.12] tracking-tight text-slate-50 sm:text-5xl lg:text-[44px] xl:text-[54px] 2xl:text-[58px]"
               >
                 {t('hero.h1a')}
                 <br />
@@ -260,7 +260,7 @@ export default function Home() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.16 }}
-                className="mt-5 max-w-xl text-[15px] leading-7 text-slate-400"
+                className="mt-4 max-w-xl text-[15px] leading-7 text-slate-400"
               >
                 {t('hero.p')}
               </motion.p>
@@ -269,7 +269,7 @@ export default function Home() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.24 }}
-                className="mt-6 flex flex-wrap gap-3"
+                className="mt-5 flex flex-wrap gap-3"
               >
                 <a
                   href="#lab"
@@ -291,7 +291,7 @@ export default function Home() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.8, delay: 0.35 }}
-                className="mt-8 grid max-w-lg grid-cols-2 gap-3 sm:grid-cols-4"
+                className="mt-6 grid max-w-lg grid-cols-2 gap-3 sm:grid-cols-4"
               >
                 {stats.map((s) => (
                   <div
@@ -313,7 +313,7 @@ export default function Home() {
         </section>
 
         {/* ============ 细胞系选择 ============ */}
-        <section id="cells" className="mx-auto max-w-[1680px] scroll-mt-20 px-4 py-10 lg:px-6 lg:py-12">
+        <section id="cells" className="mx-auto max-w-[1680px] scroll-mt-20 px-4 py-8 lg:px-6 lg:py-10">
           <SectionHeading
             index="01"
             title={t('cells.h2a')}
