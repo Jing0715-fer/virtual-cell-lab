@@ -7,6 +7,7 @@
  */
 import type { CoreNode, CoreEdge } from '@/types/kegg';
 import type { MorphologyKey as CellMorphKey } from '@/data/cell-types';
+import { shapeFactor, type ShapeKind } from './cell-shape';
 
 export interface Vec3 {
   x: number;
@@ -25,12 +26,14 @@ function hash01(s: string, salt = 0): number {
 }
 
 export interface CellBodySpec {
-  /** 质膜半径（模型单位） */
+  /** 质膜基础半径（模型单位; 实际表面 = R × 形状函数 + FBM） */
   membraneR: number;
   /** 核被膜半径 */
   nucleusR: number;
-  /** 细胞体非等比拉伸（形态学） */
-  scale: [number, number, number];
+  /** 细胞类型形状（形态学差异化的核心; 见 cell-shape.ts） */
+  shape: ShapeKind;
+  /** 全景机位距离（按形状最大延伸调校） */
+  viewDist: number;
   mitoCount: number;
   erSheets: number;
   vesicleCount: number;
@@ -38,18 +41,34 @@ export interface CellBodySpec {
   nucleolus: { count: number; r: number };
   /** 肝细胞糖原颗粒 */
   glycogen?: boolean;
+  /** 肝细胞胆小管（顶面局部管道凹陷 + 微绒毛圈） */
+  bileCanaliculus?: boolean;
   /** 上皮细胞顶端微绒毛 */
   microvilli?: boolean;
+  /** 上皮顶端极性（微绒毛集中顶面 + 基底膜片） */
+  apicalPolarity?: boolean;
+  /** 上皮基底膜（基底层薄网片） */
+  basalLamina?: boolean;
   /** 成纤维细胞胞外胶原纤维 */
   collagen?: boolean;
+  /** 成纤维应力纤维（沿长轴平行粗 actin 束 + 两端黏着斑） */
+  stressFibers?: boolean;
   /** 癌细胞膜出芽 */
   blebs?: boolean;
   /** 癌细胞不规则核（多形性） */
   nucleusBumpy?: boolean;
-  /** 神经元髓鞘轴突 + 树突 */
+  /** 神经元锥体胞体 + 顶端树突丛 + 髓鞘轴突 */
   neurites?: boolean;
+  /** 神经元顶端树突丛（主树 + 顶丛分叉） */
+  apicalTuft?: boolean;
   /** 上皮紧密连接带 */
   tightJunction?: boolean;
+  /** 心肌肌原纤维束 + 肌节横纹 */
+  striated?: boolean;
+  /** 心肌闰盘（端-端阶梯盘 + 缝隙连接亮点） */
+  intercalated?: boolean;
+  /** T 细胞表面微褶皱（全表面短刺） */
+  surfaceFolds?: boolean;
   /** 溶酶体数量（酸性水解酶细胞器） */
   lysosomeCount: number;
   /** 过氧化物酶体数量（过氧化氢酶晶体核心） */
@@ -58,46 +77,47 @@ export interface CellBodySpec {
   lipidDroplets?: boolean;
 }
 
-/** 各细胞类型的 3D 形态学参数（直径参考 KEGG/Cell Biology 数据，非等比示意） */
+/** 各细胞类型的 3D 形态学参数（形状差异由 cell-shape.ts 类型化函数承担, 直径参考 KEGG/Cell Biology） */
 export const CELL_BODY_SPECS: Record<CellMorphKey, CellBodySpec> = {
   hepatocyte: {
-    membraneR: 10, nucleusR: 4.1, scale: [1, 0.96, 1],
+    membraneR: 10, nucleusR: 4.1, shape: 'polyhedral', viewDist: 31,
     mitoCount: 9, erSheets: 4, vesicleCount: 14, microtubules: 12,
-    nucleolus: { count: 1, r: 0.95 }, glycogen: true,
+    nucleolus: { count: 1, r: 0.95 }, glycogen: true, bileCanaliculus: true,
     lysosomeCount: 5, peroxisomeCount: 6, lipidDroplets: true,
   },
   neuron: {
-    membraneR: 10, nucleusR: 3.9, scale: [1, 1, 1],
+    membraneR: 10, nucleusR: 3.9, shape: 'pyramidal', viewDist: 33,
     mitoCount: 6, erSheets: 2, vesicleCount: 10, microtubules: 14,
-    nucleolus: { count: 1, r: 0.9 }, neurites: true,
+    nucleolus: { count: 1, r: 0.9 }, neurites: true, apicalTuft: true,
     lysosomeCount: 4, peroxisomeCount: 3,
   },
   tcell: {
-    membraneR: 9, nucleusR: 5.4, scale: [1, 1, 1],
+    membraneR: 8.6, nucleusR: 5.2, shape: 'sphere', viewDist: 27,
     mitoCount: 4, erSheets: 1, vesicleCount: 6, microtubules: 8,
-    nucleolus: { count: 1, r: 0.85 },
+    nucleolus: { count: 1, r: 0.85 }, surfaceFolds: true,
     lysosomeCount: 3, peroxisomeCount: 2,
   },
   epithelial: {
-    membraneR: 10, nucleusR: 4.0, scale: [1, 1.05, 0.92],
+    membraneR: 11, nucleusR: 4.0, shape: 'columnar', viewDist: 30,
     mitoCount: 6, erSheets: 3, vesicleCount: 12, microtubules: 10,
-    nucleolus: { count: 1, r: 0.85 }, microvilli: true, tightJunction: true,
+    nucleolus: { count: 1, r: 0.85 }, microvilli: true, apicalPolarity: true,
+    tightJunction: true, basalLamina: true,
     lysosomeCount: 4, peroxisomeCount: 3,
   },
   cardiomyocyte: {
-    membraneR: 10.5, nucleusR: 3.6, scale: [1.18, 0.82, 0.78],
+    membraneR: 9, nucleusR: 3.6, shape: 'rod', viewDist: 37,
     mitoCount: 16, erSheets: 2, vesicleCount: 8, microtubules: 8,
-    nucleolus: { count: 2, r: 0.7 },
+    nucleolus: { count: 2, r: 0.7 }, striated: true, intercalated: true,
     lysosomeCount: 4, peroxisomeCount: 5, lipidDroplets: true,
   },
   fibroblast: {
-    membraneR: 10, nucleusR: 3.9, scale: [1.36, 0.76, 0.8],
+    membraneR: 10.5, nucleusR: 3.9, shape: 'spindle', viewDist: 35,
     mitoCount: 5, erSheets: 2, vesicleCount: 8, microtubules: 10,
-    nucleolus: { count: 1, r: 0.85 }, collagen: true,
+    nucleolus: { count: 1, r: 0.85 }, collagen: true, stressFibers: true,
     lysosomeCount: 3, peroxisomeCount: 2,
   },
   cancer: {
-    membraneR: 10.2, nucleusR: 4.5, scale: [1.06, 1, 0.96],
+    membraneR: 10.2, nucleusR: 4.5, shape: 'amoeboid', viewDist: 32,
     mitoCount: 7, erSheets: 2, vesicleCount: 16, microtubules: 12,
     nucleolus: { count: 3, r: 0.75 }, blebs: true, nucleusBumpy: true,
     lysosomeCount: 7, peroxisomeCount: 3, lipidDroplets: true,
@@ -153,6 +173,13 @@ export function layout3D(
   const spec = CELL_BODY_SPECS[morph];
   const R = spec.membraneR;
   const N = spec.nucleusR;
+  // 形状因子（方向 → 半径倍率）: 受体贴真实膜面 / 配体外带 / 胞质壳层随形状收缩 ——
+  // 与 organelles.tsx 的 cellSurf 同源（cell-shape.ts 唯一真源），分子永远在正确的区室位置
+  const shapeF = (lat: number, lon: number): number =>
+    shapeFactor(
+      { x: Math.cos(lat) * Math.cos(lon), y: Math.sin(lat), z: Math.cos(lat) * Math.sin(lon) },
+      spec.shape,
+    );
 
   const byId = new Map(nodes.map((n) => [n.id, n]));
 
@@ -244,17 +271,17 @@ export function layout3D(
     if (node.tier === 0) {
       const rec = ligandAnchor.get(node.id);
       const ang = rec ? recAngles.get(rec)! : { lon: Math.PI * 0.5, lat: 0.1 };
-      positions.set(node.id, sph(R * 1.235 + hash01(node.id, 3) * 0.5, ang.lat, ang.lon));
+      positions.set(node.id, sph((R * 1.235 + hash01(node.id, 3) * 0.5) * shapeF(ang.lat, ang.lon), ang.lat, ang.lon));
     } else if (node.tier === 1) {
       const ang = recAngles.get(node.id) ?? { lon: Math.PI * 0.5, lat: 0 };
-      positions.set(node.id, sph(R, ang.lat, ang.lon));
+      positions.set(node.id, sph(R * shapeF(ang.lat, ang.lon), ang.lat, ang.lon));
     } else if (node.tier >= 2 && node.tier <= 4) {
       const ang = recAngles.get(clusterOf.get(node.id) ?? '') ?? { lon: Math.PI * 0.5, lat: 0.15 };
       const off = cytoOffset.get(node.id) ?? { dLon: 0, dLat: 0 };
       const shellF = node.tier === 2 ? 0.845 : node.tier === 3 ? 0.715 : 0.59;
-      const rr = Math.max(R * shellF, N + 0.85) + hash01(node.id, 21) * 0.35;
       const lat = Math.max(-0.82, Math.min(0.82, ang.lat + off.dLat));
       const lon = ang.lon + off.dLon;
+      const rr = Math.max(R * shellF * shapeF(lat, lon), N + 0.85) + hash01(node.id, 21) * 0.35;
       positions.set(node.id, sph(rr, lat, lon));
     } else if (node.tier === 5) {
       const off = nucOffset.get(node.id) ?? { lon: Math.PI * 0.5, lat: 0.4 };

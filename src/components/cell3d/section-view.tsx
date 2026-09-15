@@ -21,6 +21,16 @@ import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import type { CellBodySpec } from '@/lib/simulation/layout3d';
+import { SHAPE_EXTENT } from '@/lib/simulation/cell-shape';
+
+/** 剖切轴向 → 形状延伸轴索引（法向主轴; front≈z / top≈y / side≈x）—— 与盘缩放/扫描范围/贴附平面三处共用 */
+export const AXIS_N: Record<SectionAxis, number> = { front: 2, top: 1, side: 0 };
+/** 剖切轴向 → 相交盘平面内两主轴（盘 local x/y → 近似 world 轴; 用于椭圆缩放） */
+const DISC_AXES: Record<SectionAxis, [number, number]> = {
+  front: [0, 1],
+  top: [0, 2],
+  side: [2, 1],
+};
 
 /* ============ 剖面方位预设（解剖学标准切面） ============ */
 
@@ -383,6 +393,12 @@ export function SectionClipController({
 
   const R = spec.membraneR;
   const N = spec.nucleusR;
+  // 类型化形状轴向延伸（v4）: 剖切扫描范围（法向轴有效半径 Rn）+ 相交盘椭圆缩放
+  const extent = SHAPE_EXTENT[spec.shape] ?? SHAPE_EXTENT.sphere;
+  const Rn = R * extent[AXIS_N[axis]];
+  const [discA1, discA2] = DISC_AXES[axis];
+  const ex1 = extent[discA1];
+  const ex2 = extent[discA2];
 
   const plane = useMemo(() => new THREE.Plane(SECTION_ORIENTS.front.normal.clone(), R * 0.35), []);
   const targetNormal = useRef(plane.normal.clone());
@@ -410,10 +426,10 @@ export function SectionClipController({
     targetNormal.current.copy(SECTION_ORIENTS[axis].normal);
   }, [axis]);
 
-  /* 深度 → 平面常数（+R 前缘 → -R 后缘, 0.5 过球心 = 最大剖面） */
+  /* 深度 → 平面常数（+Rn 前缘 → -Rn 后缘, 0.5 过形状轴心 = 最大剖面） */
   useEffect(() => {
-    targetConstant.current = R - depth * 2 * R;
-  }, [depth, R]);
+    targetConstant.current = Rn - depth * 2 * Rn;
+  }, [depth, Rn]);
 
   /* 开/关剖切: 全局裁剪平面挂载 + 结构材质临时双面化（记忆原 side 以还原） */
   useEffect(() => {
@@ -498,12 +514,12 @@ export function SectionClipController({
         plane.normal,
       );
 
-      // 细胞质盘: 相交圆半径 √(R²-h²)
-      const rc = h < R ? Math.sqrt(R * R - h * h) : 0;
-      const cytoScale = Math.max(0.001, rc / R);
-      if (cytoDiscRef.current) cytoDiscRef.current.scale.setScalar(cytoScale);
-      if (cytoRingRef.current) cytoRingRef.current.scale.setScalar(cytoScale);
-      const discVisible = rc > R * 0.08;
+      // 细胞质盘: 相交圆半径 √(Rn²-h²)（Rn = 形状法向轴有效半径; 盘椭圆缩放贴合类型化截面）
+      const rc = h < Rn ? Math.sqrt(Rn * Rn - h * h) : 0;
+      const cytoScale = Math.max(0.001, rc / Rn);
+      if (cytoDiscRef.current) cytoDiscRef.current.scale.set(cytoScale * ex1, cytoScale * ex2, 1);
+      if (cytoRingRef.current) cytoRingRef.current.scale.set(cytoScale * ex1, cytoScale * ex2, 1);
+      const discVisible = rc > Rn * 0.08;
       if (cytoDiscRef.current) cytoDiscRef.current.visible = discVisible;
       if (cytoRingRef.current) cytoRingRef.current.visible = discVisible;
 

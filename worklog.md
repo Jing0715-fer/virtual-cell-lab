@@ -973,3 +973,48 @@ Stage Summary:
 - 产出: organelles.tsx(+~330 行) / layout3d.ts(spec+3 字段) / virtual-cell-3d.tsx(全屏改造) / i18n.tsx(文案) / globals.css(vcFsIn)
 - 遗留/风险: ①SwiftShader 软渲染环境无法测真实 GPU 帧率（新增 ~28 draw call 为边际成本, 真机应无感）②贴面模式下核区标签互叠（Task 25 遗留）③SimEvent 双语化/PDF EN（Task 22 遗留）
 - 下阶段建议: ①贴面核区标签 force-simulate 防重叠 ②溶酶体自噬演示（mTOR 抑制 → 自噬体-溶酶体融合事件）③剖面切面显示细胞器截面（真实标本切面感）④hero 图换 3D 截图
+
+---
+Task ID: 28
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户需求——①确认 3D 技术栈 ②继续提升精细度和美观度 ③体现不同细胞类型的特点和差异性（形态学差异化）
+
+Work Log:
+- 答复: 3D 用 React Three Fiber + Three.js（含 drei/postprocessing）; 旧实现所有细胞体共用"位移球体", 类型差异仅靠轻微 group 拉伸 + 少量特化 flag —— 形态学差异化缺失
+- 【形状系统 v4 核心架构】新建 src/lib/simulation/cell-shape.ts —— 类型化径向形状函数 shapeFactor(dir, kind) 作为唯一真源:
+  · polyhedral（肝: 超椭球 n=3.4 圆角立方 + 赤道带六边形谐波——肝板贴壁多边形轮廓）
+  · pyramidal（神经元锥体: +y 顶端收窄 46% 成金字塔 + 基底宽展 + 基底角树突根鼓起）
+  · sphere（T: 低频皱褶谐波）
+  · columnar（上皮柱状: 椭球(0.64,1.18,0.64) 高:宽≈2:1 + 顶端圆拱/基底平坦——极性）
+  · rod（心肌杆状: 椭球(2.02,0.7,0.66) 长:宽≈3:1 + 端面阶梯收窄=闰盘位 + 侧支芽鼓包）
+  · spindle（成纤维梭形: 两端尖 58% 渐收纺锤）
+  · amoeboid（癌: 三频谐波变形 + 不对称大鼓包——恶性多形性）
+  · 配套 SHAPE_EXTENT（轴向最大延伸, 相机/剖切盘用）+ SHAPE_NOISE（类型化 FBM: 心肌规整 0.10 → 癌杂乱 0.26）
+- 【三处共享同一真源（膜面结构严格对齐）】:
+  1. organelles.tsx: shapedCellGeometry（质膜几何按类型成形）+ cellSurf()（表面半径 = 形状 + FBM + offset）——脂双层脂头/跨膜蛋白/糖萼/小窝/微绒毛/出芽/紧密连接环 8 处贴附全部替换
+  2. layout3d.ts: shapeF(lat,lon) —— 受体贴真实膜面（tier1 半径×形状因子）、配体外带、胞质壳层（防撞核 Math.max 兜底）
+  3. section-view.tsx: SHAPE_EXTENT 椭圆剖切盘 + 形状法向轴扫描范围 Rn（front≈z/top≈y/side≈x; AXIS_N/DISC_AXES 映射表, AXIS_N 导出共享）
+- 【scale 退役】CellBodySpec 删除 scale 字段 → 新增 shape/viewDist; 形状直接烘焙进几何 → group scale 归一 → 分子球不再被拉伸变形; CameraRig toWorld 简化 + overview 距离用类型化 viewDist（T 27 → 心肌 37）; virtual-cell-3d 内嵌 specScale 表删除; FALLBACK_SPEC 同步（shape:'sphere'）
+- 【7 类特化结构增强（organelles.tsx +~250 行）】:
+  · 心肌: 肌原纤维束 10 根平行管（merged + 逐顶点横纹着色: 肌节周期 0.62, Z 线金亮/A 带暗/I 带亮）+ 闰盘（两端 3 段阶梯折面盘 + 7×2 个 Cx43 缝隙连接金点）
+  · 神经元: 顶端树突主干 + 顶丛 3 分叉 + 末梢小棘（apicalTuft）; 轴突改基底侧发出（lat -0.62, 科学位形）; 基底树突 4 条扇形（lat -0.85~0.05）; 全部起点经 sphShape 贴真实膜面
+  · 上皮: 微绒毛极性采样（顶面权重 w² 概率保留, 2.2× 候选过滤）; 紧密连接环位姿按形状函数自适应（tDir 方向计算环半径与高度）; 基底膜薄盘（speckle 法线, 底部 -0.3）
+  · 成纤维: 应力纤维 8 根沿长轴平行束（α-SMA 玫瑰色发光）+ 两端黏着斑亮点
+  · T: 表面微褶皱 150+ 全表面短细刺（比微绒毛短 55%——静止淋巴细胞）
+  · 肝: 胆小管（顶面半嵌膜发光管道 + 14 根管周微绒毛环 + 5 颗胆汁微粒）
+- 【CellBodySpec 规格重调】membraneR 平衡形状体积感（上皮 11/心肌 9/成纤维 10.5/T 8.6）; 新 flag: bileCanaliculus/apicalPolarity/basalLamina/stressFibers/surfaceFolds/striated/intercalated/apicalTuft
+- 【关键修复】layoutSpec useMemo 引用后声明的 layout（TDZ ReferenceError）——调整声明顺序
+- QA（agent-browser 端到端, 桌面 1280×800 内嵌 556px + 网页内全屏 1280px）:
+  · 7/7 细胞类型切换全部正常: 肝 18 标签（+胆小管✓）/心肌 17 标签（+肌原纤维·肌节横纹✓ +闰盘·缝隙连接✓）/神经元 17 标签（+顶端树突丛✓ +基底树突✓）/成纤维 16 标签（+应力纤维·α-SMA✓ +胶原✓）/上皮 17 标签（+基底膜·基板✓ +微绒毛+紧密连接✓）/T 细胞 51 分子标签零错误/癌 16 标签（出芽+脂滴+溶酶体✓）
+  · 形状差异 DOM 量化（分子标签包围盒宽高比梯度）: 肝 1.61 / 上皮柱状 1.90 / 心肌杆状 2.18 —— 形状函数生效的直接证据
+  · 回归: 剖切开启（3 剖面标注 + 滑杆 + 形状化椭圆盘 + 零错误）/ 分子标签点击选中（DUSP5 is-selected✓）/ 网页内全屏反复进出 6 次✓ / 窄视口标签过滤（556px 画布 = MAJOR 6 标签, 移动端路径覆盖） / 无横向溢出 / lint 零错误 / tsc 本任务文件零错误（预存历史遗留不计） / dev.log 正常
+  · 环境限制: agent-browser 无 viewport/device 命令（macOS only）→ 390px 真机断点未复测（HUD 折叠为 <768px CSS 断点, 本轮未触及该层, 风险低）; VLM 视觉复验 429 限流持续 → 以 DOM 几何量化替代
+  · 画布全屏 RO 异步 ~4s 后标签全量出现（已知可接受延迟, Task 27 遗留）
+
+Stage Summary:
+- 用户三项需求全部落地: ①确认 R3F+Three.js 技术栈 ②精细度 v4（质膜类型化成形 + 全贴附结构严格对齐 + 剖切盘椭圆化）③7 种细胞类型形态学差异全面呈现（形状 + 特化结构 + 噪声规整度三层差异）
+- 架构沉淀: cell-shape.ts 成为形状唯一真源, 三处消费（几何/布局/剖切）零漂移; scale 机制退役消除分子球变形问题
+- 科学性: 各形状与结构均有教材参照（肝板多边形/锥体神经元顶树-基底树突-轴突位形/柱状极性/心肌杆状+肌节+闰盘/梭形+应力纤维/淋巴细胞褶皱/恶性多形性）
+- 产出: cell-shape.ts(新 165 行) / layout3d.ts(spec 重构+shapeF) / organelles.tsx(+~250 行特化结构+cellSurf) / section-view.tsx(椭圆盘+Rn 扫描) / virtual-cell-3d.tsx(scale 退役+viewDist+snapPlane 适配)
+- 遗留/风险: ①贴面模式核区标签互叠（Task 25 遗留未变）②SimEvent 双语化/PDF EN（Task 22 遗留）③SwiftShader 无法测真实 GPU 帧率（新增结构均 InstancedMesh/merged, 边际成本低）④390px 真机断点未复测（环境无 viewport 命令）⑤上皮微绒毛极性采样的 hash key 用 fibSphere 坐标量化（997/991 质数缩放防碰撞）
+- 下阶段建议: ①贴面核区标签 force-simulate 防重叠 ②溶酶体自噬演示（mTOR 抑制 → 自噬体融合事件）③hero 图换项目 3D 截图 ④剖切面细胞器截面（真实标本切面感）

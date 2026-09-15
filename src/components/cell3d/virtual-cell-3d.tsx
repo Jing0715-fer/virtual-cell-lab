@@ -28,7 +28,8 @@ import { DrugMoleculeLayer } from './drug-molecules';
 import { EdgeLayer } from './signal-edges';
 import { MrnaFlow } from './mrna-flow';
 import { EventPulses } from './event-pulses';
-import { SectionClipController, SECTION_ORIENTS, type SectionAxis } from './section-view';
+import { SectionClipController, SECTION_ORIENTS, AXIS_N, type SectionAxis } from './section-view';
+import { SHAPE_EXTENT } from '@/lib/simulation/cell-shape';
 import { useLang } from '@/lib/i18n';
 
 type CamMode = 'free' | 'overview' | 'membrane' | 'nucleus' | 'follow' | 'tour';
@@ -41,7 +42,8 @@ const MOUSE_MAP = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: TH
 const FALLBACK_SPEC: CellBodySpec = {
   membraneR: 10,
   nucleusR: 4.1,
-  scale: [1, 1, 1],
+  shape: 'sphere',
+  viewDist: 31,
   mitoCount: 0,
   erSheets: 0,
   vesicleCount: 0,
@@ -104,7 +106,7 @@ class Cell3DErrorBoundary extends Component<
 function CameraRig({ mode, layout, spec, controlsRef, tourTarget }: {
   mode: CamMode;
   layout: ReturnType<typeof layout3D> | null;
-  spec: { scale: [number, number, number] };
+  spec: { viewDist: number };
   controlsRef: RefObject<OrbitControlsImpl | null>;
   /** 教学引导: 当前聚焦分子世界坐标 */
   tourTarget: Vec3 | null;
@@ -118,8 +120,7 @@ function CameraRig({ mode, layout, spec, controlsRef, tourTarget }: {
   /** 用户最近一次交互（拖拽/滚轮/触摸）时间戳 */
   const lastUser = useRef(-1e9);
 
-  const toWorld = (p: Vec3): THREE.Vector3 =>
-    new THREE.Vector3(p.x * spec.scale[0], p.y * spec.scale[1], p.z * spec.scale[2]);
+  const toWorld = (p: Vec3): THREE.Vector3 => new THREE.Vector3(p.x, p.y, p.z);
 
   // 用户交互检测（直接监听画布事件, 不依赖 controls 实例时序）
   useEffect(() => {
@@ -135,7 +136,7 @@ function CameraRig({ mode, layout, spec, controlsRef, tourTarget }: {
 
   useEffect(() => {
     modeSince.current = performance.now();
-    if (mode === 'overview') desired.current = { target: new THREE.Vector3(0, 0, 0), dist: 31, dir: new THREE.Vector3(0, 0.33, 0.94) };
+    if (mode === 'overview') desired.current = { target: new THREE.Vector3(0, 0, 0), dist: spec.viewDist, dir: new THREE.Vector3(0, 0.33, 0.94) };
     else if (mode === 'nucleus') desired.current = { target: new THREE.Vector3(0, 0, 0), dist: 3.4, dir: new THREE.Vector3(0.35, 0.25, 0.9) };
     else if (mode === 'membrane') {
       const rec = bestReceptor(layout);
@@ -253,7 +254,7 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, sim, snapPlane }:
   if (!layout) return null;
 
   return (
-    <group scale={layout.spec.scale}>
+    <group>
       <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} />
       <EdgeLayer edges={layout.edges} sim={sim} />
       <MoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />
@@ -449,32 +450,24 @@ export function VirtualCell3D() {
     }
   }, [tourOpen, tourStep, graph]);
 
-  const specScale = useMemo<[number, number, number]>(() => {
-    const specs: Record<string, [number, number, number]> = {
-      hepatocyte: [1, 0.96, 1],
-      neuron: [1, 1, 1],
-      tcell: [1, 1, 1],
-      epithelial: [1, 1.05, 0.92],
-      cardiomyocyte: [1.18, 0.82, 0.78],
-      fibroblast: [1.36, 0.76, 0.8],
-      cancer: [1.06, 1, 0.96],
-    };
-    return specs[morph] ?? [1, 1, 1];
-  }, [morph]);
-
-  const layoutSpec = useMemo(() => ({ scale: specScale }), [specScale]);
   const layout = useMemo(
     () => (graph ? layout3D(graph.core.nodes, graph.core.edges, morph) : null),
     [graph, morph],
   );
-  // 剖面贴附平面（与剖切控制器同参数, 向保留侧偏移 0.3 → 分子半球完整可见不被裁）
+  // 相机视野参数: 类型化形状的全景距离（形状已烘焙进几何, 无需非等比 group 缩放）
+  const layoutSpec = useMemo(
+    () => ({ viewDist: layout?.spec.viewDist ?? FALLBACK_SPEC.viewDist }),
+    [layout],
+  );
+  // 剖面贴附平面（与剖切控制器同参数, 向保留侧偏移 0.3 → 分子半球完整可见不被裁; 扫描范围按形状法向轴延伸）
   const snapPlane = useMemo(() => {
     if (!clipView || !sectionSnap) return null;
     const o = SECTION_ORIENTS[clipAxis];
-    const R = layout?.spec.membraneR ?? FALLBACK_SPEC.membraneR;
+    const spec = layout?.spec;
+    const Rn = (spec?.membraneR ?? FALLBACK_SPEC.membraneR) * (SHAPE_EXTENT[spec?.shape ?? 'sphere'] ?? SHAPE_EXTENT.sphere)[AXIS_N[clipAxis]];
     return {
       normal: { x: o.normal.x, y: o.normal.y, z: o.normal.z },
-      constant: R - clipDepth * 2 * R - 0.3,
+      constant: Rn - clipDepth * 2 * Rn - 0.3,
     };
   }, [clipView, sectionSnap, clipAxis, clipDepth, layout]);
   // 有效布局: 贴面模式下级联投影到切面（相机跟随/教学引导同步使用投影后坐标）
