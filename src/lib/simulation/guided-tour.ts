@@ -333,6 +333,71 @@ const CURATED_TOURS: Record<string, CuratedChain> = {
       'c-Myc · 增殖基因终点',
     ],
   },
+  hsa04340: {
+    chain: ['SAG', 'SMO', 'ARRB1', 'GLI1', 'PTCH1', 'HHIP', 'CCND1'],
+    titles: [
+      '药理探针 · SMO 激动剂',
+      'SMO · 抑制解除后的七跨膜开关',
+      'ARRB1 · 纤毛运输机器',
+      'GLI1 · 转录因子活化型',
+      'PTCH1 · 靶基因与负反馈',
+      'HHIP · 第二重反馈封闭',
+      'Cyclin D1 · 增殖输出终点',
+    ],
+  },
+  hsa04014: {
+    chain: ['CSF1', 'CSF1R', 'SHC2', 'GRB2', 'SOS1', 'HRAS', 'RAF1', 'MAP2K1', 'MAPK1', 'ELK1'],
+    titles: [
+      '信号起点 · M-CSF 集落因子',
+      'CSF1R · RTK 自磷酸化平台',
+      'SHC2 · pY 接头停靠',
+      'GRB2 · SH2-SH3 接头',
+      'SOS1 · 鸟苷交换因子',
+      'RAS · GTP 装载开关',
+      'RAF · MAPKKK 膜招募',
+      'MEK · 双特异性磷酸化',
+      'ERK · 终端效应激酶',
+      'ELK1 · 转录终点',
+    ],
+  },
+  hsa04623: {
+    chain: ['dsDNA', 'CGAS', 'cpd:C20640', 'STING1', 'TBK1', 'IRF3', 'IFNB1'],
+    titles: [
+      '危险信号 · 胞质双链DNA',
+      'cGAS · 核苷酸转移酶感应器',
+      'cGAMP · 第二信使环二核苷酸',
+      'STING · 内质网哨兵',
+      'TBK1 · 干扰素级联激酶',
+      'IRF3 · Ser386 磷酸化',
+      'IFN-β · I 型干扰素终点',
+    ],
+  },
+  hsa04071: {
+    chain: ['TNF', 'TNFRSF1A', 'NSMAF', 'SMPD2', 'cpd:C00195', 'MAP3K5', 'MAPK8', 'BAX'],
+    titles: [
+      '信号起点 · TNF 死亡配体',
+      'TNFR1 · 死亡受体三聚',
+      'NSMAF · 鞘磷脂酶激活因子',
+      'SMPD2 · 中性鞘磷脂酶',
+      'Ceramide · 促凋亡脂信使',
+      'ASK1 · 应激激酶上游',
+      'JNK · 压力响应级联',
+      'BAX · 线粒体孔隙终点',
+    ],
+  },
+  hsa04621: {
+    chain: ['MDP', 'NOD2', 'RIPK2', 'IKBKG', 'CHUK', 'NFKBIA', 'NFKB1', 'IL1B'],
+    titles: [
+      '危险信号 · 胞壁酰二肽',
+      'NOD2 · 胞质肽聚糖哨兵',
+      'RIPK2 · 信号支架激酶',
+      'NEMO · IKK 复合体核心',
+      'IKKα · 磷酸化引擎',
+      'IκBα · 降解释放',
+      'NF-κB · 炎症总开关',
+      'IL-1β · 炎症输出终点',
+    ],
+  },
 };
 
 /** 手工策划链的补充文案（引导语，教育性 framing） */
@@ -377,6 +442,16 @@ const CURATED_INTROS: Record<string, string> = {
     '生命的复制时钟：10 站走完细胞周期引擎——从 Cyclin D 起步、Rb 闸门失守、E2F 释放，到 MPF 驱动有丝分裂与 APC/C 触发后期退出。',
   hsa04012:
     '受体二聚体的组合密码：EGF 如何在 9 站内激活 EGFR-GRB2-RAS-ERK 级联——HER2/HER3 异二聚体为何是最强增殖单元的分子基础。',
+  hsa04340:
+    '发育生物学的经典通路：SMO 激动剂 SAG 如何在 7 站内点亮 GLI1 转录程序——从抑制解除到纤毛运输，末两站展示通路自带的双重负反馈（PTCH1/HHIP）。',
+  hsa04014:
+    '癌症最常见驱动基因的完整图解：M-CSF 如何在 10 站内装载 RAS 的 GTP 开关——从 RTK 到 SOS 交换因子再到 ERK 转录输出（KRAS 突变为何让刹车永久失灵）。',
+  hsa04623:
+    '先天免疫的核酸哨兵：胞质双链DNA如何在 7 站内触发干扰素应答——从 cGAS 合成 cGAMP 第二信使到 STING-TBK1-IRF3 级联（2019 年诺奖主题通路）。',
+  hsa04071:
+    '脂质第二信使的稳衡天平：TNF 如何在 8 站内经神经酰胺驱动凋亡——另一极 S1P 及其五亚型受体如何反向促存活（芬戈莫德的药理靶点）。',
+  hsa04621:
+    '炎症小体的上游识别：细菌胞壁酰二肽如何在 8 站内点亮 NF-κB——从 NOD2 胞质哨兵到 IL-1β 炎症输出（克罗恩病突变的信号学解释）。',
 };
 
 const EDGE_BIDIRECTIONAL = new Set(['binding', 'association']);

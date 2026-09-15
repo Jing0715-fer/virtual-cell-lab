@@ -901,3 +901,32 @@ Stage Summary:
 - 沉淀 scripts/audit-pathways.ts 常态化审计工具（引擎语义镜像），算法 v10 含 6 层信号连通性保障（受体/中段/底物/配体/副本边/裁剪豁免）
 - 产出：subgraph.ts(v10 算法)/pathway-catalog.ts(4 处修正+TLR LPS)/kegg-client.ts(CACHE_VERSION v12)/scripts/audit-pathways.ts(新)
 - 第三项需求（KEGG 未收录通路扩充 5 条）移交 Task 26-b 子代理执行
+
+---
+Task ID: 26-b
+Agent: 主协调 Agent (Z.ai Code)（子代理超时后由主代理完成全部内容）
+Task: KEGG 未收录通路扩充 5 条（Hedgehog / Ras / cGAS-STING / Sphingolipid / NOD-like）—— 全套策划内容 + 演示闭环
+
+Work Log:
+- [KEGG 普查] 对比 rest.kegg.jp/list/pathway/hsa 全量 372 条与策划 20 条，信号转导类未收录 14 条中选定教学价值最高的 5 条；先证实现有 20 条 ID 全部正确（hsa04024=cAMP、hsa04020=Calcium 为现行 KEGG 命名）
+- [KGML 实证] 逐条拉取 5 个 KGML（子代理缓存的 .tmp-26b/ 文件）解析全部 entry/relation，教学主链每条边核实（含 Hedgehog 匿名组 #173={ARRB1,KIF3A}→GLI1 的 group 重定向、cGAS 的 C00039/C20640 化合物节点、NOD 的 190 entry 大图）
+- [catalog 5 条目] pathway-catalog.ts +5：双语专业描述（~200 字含机制/疾病/药物靶点）+ 级联摘要 + 实证 seeds（31-72 个）+ 合成配体设计：
+  · Hedgehog: SAG→SMO（SMO 激动剂绕过"配体 ⊣ 受体 ⊣ 效应器"双负语义，药理学正统）
+  · Ras: CSF1→CSF1R + 5-HT→HTR7（RTK 与 GPCR 两条输入支路）
+  · cGAS-STING: dsDNA→CGAS（与图中 C00039 化合物节点并行）
+  · Sphingolipid: S1P→S1PR1（与图中 S1P 化合物节点合并为可注入配体）
+  · NOD-like: MDP→NOD2（胞壁酰二肽，KGML 图内无此节点）
+- [化合物名映射] kgml-parser COMPOUND_NAMES +3：C00039→dsDNA、C20640→cGAMP、C00195→Ceramide（人类可读标签）
+- [配套文件] kegg-full-catalog 5×curated:true / pathway-library CURATED_TOUR_PATHWAYS +5 / guided-tour 5 条教学链（7-10 站）+5 条双语引导语 / molecular-notes NODE_NOTES +84（349→433）+ CURATED_EVENTS +51（265→316）/ cell-types 5 处推荐通路（肝+鞘脂/CD4T+cGAS/肠上皮+NOD/成纤维+Hh/癌细胞+Ras）
+- [scaffold 修复] ①鞘脂通路补 SMPD1/SMPD2→Ceramide 生产边（KGML 将 Ceramide 绘为无生产边的源节点）②化合物节点 id 去重后缀匹配修复（cpd:C00195#40 类 id 此前 pick 永不命中——顺带修复 hsa04020 Ca²⁺→CALM1 历史静默失效边，ACh 可达 6→16 节点）
+- [审计] 5 条新通路全部演示闭环：SAG(18)/CSF1(34)/5-HT(35)/dsDNA(35)/S1P(31)/MDP(34)，配体级联全数触达转录层或效应器输出；IL18/IL33 为输出型（⊣拓扑判定）；TNF 神经酰胺凋亡臂修复后可达 12 节点（BAX 终点）
+- [QA · agent-browser 端到端] ①通路库 5 条新通路全部可见（中文名检索 DOM ✓）②MAPK TGFB1 注入→播放→T+18s 阶段 4/4、13 事件、TGFB1→TGFBR1→DAXX→MAP3K5→MAPK14 全链点亮（用户主诉场景回归验证 ✓）③cGAS-STING dsDNA 注入→阶段 4/4、28 事件、级联摘要渲染 ④console 0 错误 ⑤1280px 无横向溢出 ⑥dev.log API 全 200（hsa04623 245ms db-cache）
+- [最终全量审计 25 条] 配体闭环 49/59 (83%)；死端 9 处全部为侧支（PI3K RAF1/TGF-β RHOA/mTOR GRB2/TLR IFNAR1+FADD/ErbB NCK1/Ras CHUK+RAPGEF5+EXOC2 —— 各通路主级联均完整）；孤儿 224 个多为复合体组件/负调控因子（结构性存在，非断链）
+- [过程记录] 子代理 full-stack-developer 上下文超时（仅完成 KGML 缓存与分析脚本，未改源码），主代理接手完成全部内容；molecular-notes 插入经历两轮修复（对象闭合位置 + Python 转义吃掉 TS 撇号 → r-string + 按行拼接解决）；Ras 补种子被度数截断挤出（60+ 匹配种子洪泛，NFKB1 侧支保持死端——与 PI3K RAF1 同类可接受残留）
+
+Stage Summary:
+- 策划通路 20→25 条（+5 条高教学价值：发育生物学经典 Hedgehog、癌基因总纲 Ras、2019 诺奖 cGAS-STING、脂质第二信使 Sphingolipid、炎症小体 NOD-like），全部带双语科学描述/教学级联/分子注释/残基级事件
+- 全套合成配体设计让 5 条新通路即时可演示（无需等待自然配体）
+- 附带修复：scaffold 化合物 id 匹配（含 Ca 通路历史静默失效边）、化合物中文名映射 3 条
+- 产出：pathway-catalog(+5 条目) / kegg-full-catalog(5×curated) / pathway-library(+5) / guided-tour(+5 链+5 引导语) / molecular-notes(+84 注释/+51 事件) / cell-types(5 处推荐) / kgml-parser(+3 化合物名) / scaffold(鞘脂生产边+id 匹配修复)
+- 遗留：Ras 3 处侧支死端（种子洪泛挤出的 NFKB1/RAP1A/TBK1 末梢——主级联 ERK/AKT 双臂完整）；孤儿节点 224 个（复合体组件/负调控因子为主，视觉存在但永不激活——下阶段可做"孤儿源头拯救"）

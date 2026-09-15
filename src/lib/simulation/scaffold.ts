@@ -41,7 +41,8 @@ export const SCAFFOLD_EDGES: Record<string, ScaffoldSpec[]> = {
   hsa04020: [
     // Ca²⁺ 协同结合钙调蛋白 4 个 EF-hand（KGML 将 CaM 绘制为指向 Ca²⁺ 的间接效应，
     // 方向与生化因果相反 —— 钙是 CaM 的输入而非输出）→ 解码 Ca²⁺ 信号至 CaMKII/Calcineurin
-    { source: 'C00076', target: 'CALM1', kind: 'binding' },
+    // 注：化合物节点 id 带 cpd: 前缀，裸 cpd id 匹配不到节点（历史静默失效，v6 修正）
+    { source: 'cpd:C00076', target: 'CALM1', kind: 'binding' },
   ],
   hsa04210: [
     // tBid（BH3-only）直接变构激活 BAX/BAK：α6 螺旋插入线粒体外膜 + 寡聚成孔
@@ -56,6 +57,13 @@ export const SCAFFOLD_EDGES: Record<string, ScaffoldSpec[]> = {
     // TGF-β 家族经典激活：II 型受体（组成性激酶）磷酸化 I 型受体 GS 域（KEGG 绘制丢失）
     { source: 'TGFBR2', target: 'TGFBR1', kind: 'phosphorylation' },
     { source: 'ACVR2A', target: 'ACVR1', kind: 'phosphorylation' },
+  ],
+  hsa04071: [
+    // 鞘磷脂酶水解释放神经酰胺：SMPD1（酸性 SMase，TNF/Fas 通路）与 SMPD2（中性
+    // SMase，NSMAF 激活）催化鞘磷脂 → 神经酰胺（KEGG 将 Ceramide 绘制为无生产
+    // 边的源节点，方向与生化因果相反）
+    { source: 'SMPD1', target: 'cpd:C00195', kind: 'activation' },
+    { source: 'SMPD2', target: 'cpd:C00195', kind: 'activation' },
   ],
 };
 
@@ -73,8 +81,11 @@ export function applyScaffoldEdges(
     edges.some((e) => e.source === t && e.target === s && (e.kind === 'binding' || e.kind === kind));
 
   const labelOf = new Map(nodes.map((n) => [n.id, n.label]));
+  /** 节点匹配：label / id 精确 / id 去重后缀（同 label 多副本合并产生的 #entryId 尾缀） */
+  const matchNode = (n: CoreNode, label: string): boolean =>
+    n.label === label || n.id === label || n.id.split('#')[0] === label;
   const pick = (label: string, from?: string[]): CoreNode | undefined => {
-    const candidates = nodes.filter((n) => n.label === label || n.id === label);
+    const candidates = nodes.filter((n) => matchNode(n, label));
     if (candidates.length <= 1) return candidates[0];
     if (from?.length) {
       const preferred = candidates.find((c) =>

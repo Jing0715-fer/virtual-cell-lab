@@ -425,6 +425,135 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
       'CRK', 'CRKL', 'RAPGEF1', 'RAP1A', 'NCK1', 'EPS8', 'EPS15', 'GAB1',
     ],
   },
+  {
+    id: 'hsa04340',
+    name: 'Hedgehog signaling pathway',
+    nameZh: 'Hedgehog 信号通路',
+    category: '环境信息处理 · 信号转导',
+    description:
+      'Hedgehog（Hh）家族分泌信号（SHH/IHH/DHH）在发育期控制组织图式形成与干细胞干性。静息态 PTCH1（12 次跨膜受体）抑制 SMO（FZD 样 7 次跨膜蛋白）；配体结合诱导 PTCH1 经 SMURF1 泛素化内吞，解除对 SMO 的抑制。在初级纤毛中，活化 SMO 募集 ARRB1/KIF3A 运输机器并抑制 GPR161-cAMP-PKA 轴，GLI 转录因子免于 PKA/GSK3β/CK1 磷酸化加工为截短抑制子（GLI-R），全长 GLI 活化型入核驱动 PTCH1、HHIP（双重负反馈）、CCND1、BCL2 等靶基因。SMO 激动剂 SAG 与拮抗剂环巴胺（vismodegib/sonidegib）分别是基底细胞癌靶向治疗的临床药物。',
+    descriptionEn:
+      'The Hedgehog (Hh) family of secreted signals (SHH/IHH/DHH) governs tissue patterning and stem-cell self-renewal during development. At rest the 12-transmembrane receptor PTCH1 inhibits SMO, an FZD-like 7-transmembrane protein; ligand binding triggers SMURF1-mediated ubiquitination and endocytosis of PTCH1, releasing SMO. In the primary cilium, activated SMO recruits the ARRB1/KIF3A trafficking machinery and represses the GPR161–cAMP–PKA axis, sparing GLI transcription factors from PKA/GSK3β/CK1-mediated processing into truncated repressors (GLI-R). Full-length GLI activators enter the nucleus to drive PTCH1, HHIP (dual negative feedback), CCND1 and BCL2. The SMO agonist SAG and antagonists cyclopamine/vismodegib/sonidegib are laboratory tools and clinical agents against basal-cell carcinoma.',
+    cascade: 'Hh → PTCH1 内吞 ⊣ SMO 释放 → ARRB1/KIF3A → GLI-A 入核 → PTCH1/HHIP/CCND1',
+    cascadeEn: 'Hh → PTCH1 endocytosis ⊣ SMO release → ARRB1/KIF3A → GLI-A nuclear entry → PTCH1/HHIP/CCND1',
+    seeds: [
+      'IHH', 'PTCH1', 'SMO', 'GAS1', 'GRK2', 'ARRB1', 'KIF3A', 'EVC2', 'EFCAB7',
+      'GPR161', 'PRKACA', 'GSK3B', 'GLI1', 'SUFU', 'KIF7', 'CUL1', 'FBXW11',
+      'CUL3', 'SPOPL', 'SMURF1', 'HHIP', 'CCND1', 'BCL2', 'MOSMO', 'MEGF8',
+      'MGRN1', 'DISP1', 'HHAT', 'HHATL', 'SCUBE2', 'IQCE',
+    ],
+    syntheticLigands: [
+      // SAG：SMO 直接激动剂（实验室经典工具药）—— Hh 配体结合 PTCH1 的"解除抑制"
+      // 属双负语义（配体 ⊣ 受体 ⊣ 效应器），引擎以 SAG 直接激动 SMO 演示完整级联
+      { symbol: 'SAG', fullName: 'SMO 激动剂 (Smoothened agonist)', receptor: 'SMO' },
+    ],
+  },
+  {
+    id: 'hsa04014',
+    name: 'Ras signaling pathway',
+    nameZh: 'Ras 信号通路',
+    category: '环境信息处理 · 信号转导',
+    description:
+      'Ras 超家族小 GTP 酶（HRAS/KRAS/NRAS）是生长因子受体下游的核心分子开关：RTK 磷酸化后经 SHC/GRB2 接头招募 SOS1 鸟苷交换因子，将 Ras·GDP 置换为 Ras·GTP；GTP 酶激活蛋白 NF1/RASA 具反向刹车功能（1 型神经纤维瘤病即 NF1 失活所致）。Ras·GTP 并行启动五大效应支路：RAF→MEK→ERK（增殖）、PI3K→PIP₃→Akt（存活）、RALGDS→RALA（囊泡运输与 TBK1 干扰素交叉）、TIAM1→RAC1/RHOA（迁移与骨架）、RASSF→MST1（凋亡阻滞）。KRAS G12D/G12V 突变使 GTP 酶永失刹车——胰腺癌、肺癌与肠癌最常见的驱动突变；GTP/GDP 结合态经蛋白结构域变色展示开关循环。',
+    descriptionEn:
+      'Ras-superfamily small GTPases (HRAS/KRAS/NRAS) are the central molecular switches downstream of growth-factor receptors: RTK phosphorylation recruits the SOS1 guanine-exchange factor via SHC/GRB2 adaptors, swapping Ras·GDP for Ras·GTP, while GAPs NF1/RASA provide the opposing brake (NF1 loss causes neurofibromatosis type 1). Ras·GTP launches five parallel effector arms: RAF→MEK→ERK (proliferation), PI3K→PIP₃→Akt (survival), RALGDS→RALA (vesicle trafficking with TBK1 interferon crosstalk), TIAM1→RAC1/RHOA (migration and cytoskeleton), and RASSF→MST1 (apoptotic blockade). KRAS G12D/G12V mutations abolish the intrinsic GTPase brake — the most common driver of pancreatic, lung and colorectal cancers. GTP/GDP-bound states illustrate the switch cycle.',
+    cascade: 'CSF-1/5-HT → CSF1R/HTR7 → GRB2-SOS ⊣ Ras·GTP → RAF/PI3K/RALGDS/TIAM1 五支路',
+    cascadeEn: 'CSF-1/5-HT → CSF1R/HTR7 → GRB2-SOS ⊣ Ras·GTP → RAF/PI3K/RALGDS/TIAM1 five arms',
+    seeds: [
+      'CSF1R', 'SHC2', 'GRB2', 'GAB1', 'PTPN11', 'SOS1', 'HRAS', 'KRAS', 'NRAS',
+      'RRAS2', 'NF1', 'RASA4B', 'GDP', 'GTP', 'ZAP70', 'LAT', 'PLCG1', 'DAG',
+      'RASGRP1', 'HTR7', 'GNB5', 'RASGRF1', 'cAMP', 'Ca²⁺', 'PRKACA', 'CALML6',
+      'RASSF1', 'RASSF5', 'STK4', 'TIAM1', 'P3R3URF-PIK3R3', 'PIP₃', 'AKT3',
+      'CHUK', 'NFKB1', 'BAD', 'BCL2L1', 'FOXO4', 'FASLG', 'RAF1', 'MAP2K1',
+      'MAPK1', 'PLA2G4B', 'ELK1', 'ETS1', 'BRAP', 'KSR2', 'RAPGEF5', 'RAP1A',
+      'RALGDS', 'RGL1', 'RGL2', 'RALA', 'MAPK8', 'EXOC2', 'TBK1', 'REL', 'PLD1',
+      // v6 补：四条侧支的终端（CHUK→NFKB1 / RAPGEF5→RAP1A / EXOC2→TBK1→REL / BRAP→KSR2）
+      'NFKB1', 'FASLG',
+      'RALBP1', 'CDC42', 'RAC1', 'PAK4', 'RHOA', 'AFDN', 'RIN1',
+    ],
+    syntheticLigands: [
+      // M-CSF：CSF1R 的经典配体（图中 RTK 以 CSF1R 为代表符号）
+      { symbol: 'CSF1', fullName: '巨噬细胞集落刺激因子 (M-CSF)', receptor: 'CSF1R' },
+      // 5-HT：5-HT7 受体→GNB5→RASGRF1 的 GPCR→Ras 输入支路
+      { symbol: '5-HT', fullName: '血清素 (Serotonin)', receptor: 'HTR7' },
+    ],
+  },
+  {
+    id: 'hsa04623',
+    name: 'Cytosolic DNA-sensing pathway',
+    nameZh: '胞质 DNA 感知通路',
+    category: '免疫系统 · 固有免疫识别',
+    description:
+      '胞质中出现双链 DNA（病原体、肿瘤或自身泄漏）是危险信号。cGAS（MB21D1）识别 dsDNA 后催化 ATP 与 GTP 合成非经典环二核苷酸 2\'3\'-cGAMP——哺乳动物第一个被鉴定的第二信使环二核苷酸；cGAMP 作为内体信使直接结合 STING（TMEM173），诱导其从 ER 高尔基体转位并招募 TBK1/IKKε。TBK1 磷酸化 IRF3（Ser386）驱动 I 型干扰素（IFN-α/β）转录，IKK 复合体释放 NF-κB 产生 IL-6 与趋化因子。负调控层：TREX1/DNASE2 栞酸外切酶清除胞质 DNA（AGS 自身免疫病相关），ADAR/SAMHD1 抑制感应过度激活。炎症小体支路（AIM2→CASP1→GSDMD 焦亡）与 ZBP1-RIPK3 坏死性凋亡在此汇合。',
+    descriptionEn:
+      'Double-stranded DNA appearing in the cytosol — from pathogens, tumours or self-leakage — is a danger signal. Upon sensing dsDNA, cGAS (MB21D1) catalyses ATP and GTP into the non-canonical cyclic dinucleotide 2\'3\'-cGAMP, the first mammalian second messenger of its class; cGAMP acts as an endogenous messenger that binds STING (TMEM173), triggering its translocation from the ER-Golgi and recruitment of TBK1/IKKε. TBK1 phosphorylates IRF3 (Ser386) to drive type-I interferon (IFN-α/β) transcription while the IKK complex releases NF-κB for IL-6 and chemokines. Negative control: TREX1/DNASE2 exonucleases clear cytosolic DNA (Aicardi-Goutières syndrome), and ADAR/SAMHD1 dampen overactivation. The inflammasome arm (AIM2→CASP1→GSDMD pyroptosis) and ZBP1-RIPK3 necroptosis converge here.',
+    cascade: 'dsDNA → cGAS → cGAMP → STING → TBK1 → IRF3 → IFN-β ∥ NF-κB → IL-6',
+    cascadeEn: 'dsDNA → cGAS → cGAMP → STING → TBK1 → IRF3 → IFN-β ∥ NF-κB → IL-6',
+    seeds: [
+      'CGAS', 'C00039', 'C20640', 'STING1', 'TMEM173', 'TBK1', 'IKBKE', 'IRF3',
+      'IRF7', 'IFNB1', 'IFNA1', 'NFKB1', 'NFKBIA', 'CHUK', 'RIPK1', 'ZBP1',
+      'RIPK3', 'MLKL', 'RIGI', 'MAVS', 'DDX41', 'IFI16', 'AIM2', 'NLRP3',
+      'CASP1', 'CASP3', 'CASP8', 'GSDMD', 'GSDME', 'IL1B', 'IL18', 'IL33',
+      'IL6', 'CCL5', 'CXCL10', 'DNASE2', 'TREX1', 'SAMHD1', 'ADAR', 'MEFV',
+    ],
+    syntheticLigands: [
+      // dsDNA 胞质泄漏模拟（病原/肿瘤来源）—— 与图中 C00039 化合物节点合并为可注入配体
+      { symbol: 'dsDNA', fullName: '双链DNA (dsDNA)', receptor: 'CGAS' },
+    ],
+  },
+  {
+    id: 'hsa04071',
+    name: 'Sphingolipid signaling pathway',
+    nameZh: '鞘脂信号通路',
+    category: '环境信息处理 · 信号转导',
+    description:
+      '鞘脂代谢物构成"稳衡天平"：促凋亡的神经酰胺（Ceramide，TNF/Fas 经 NSMAF/SMPD 神经鞘磷脂酶水解释放）与促存活的鞘氨醇-1-磷酸（S1P，SPHK 磷酸化生成且可分泌至胞外）。Ceramide 激活 CTSD（组织蛋白酶 D）、ASK1→JNK/p38 应激轴与非典型 PKCζ，驱动 BID/BAX 线粒体凋亡；S1P 出胞后经五亚型 GPCR（S1PR1-5）反向信号——S1PR1-Gi 促内皮迁移与血管屏障（移植抗排药芬戈莫德即 S1PR1 拮抗剂）、S1PR2/3-Gq/G13 激活 Rho-ROCK 与 PLC。两极互相制衡：MAPK 促 SPHK、Ceramide 抑制 AKT。膜的"鞘脂-胆固醇微结构域"也由此调控受体组装，是脂质第二信使的教学范例。',
+    descriptionEn:
+      'Sphingolipid metabolites form a rheostat: pro-apoptotic ceramide (released by TNF/Fas via NSMAF/SMPD sphingomyelinases) versus pro-survival sphingosine-1-phosphate (S1P, generated by SPHK phosphorylation and secreted extracellularly). Ceramide activates cathepsin D (CTSD), the ASK1→JNK/p38 stress axis and atypical PKCζ, driving BID/BAX mitochondrial apoptosis; once outside the cell, S1P signals back through five GPCR subtypes (S1PR1-5) — S1PR1-Gi promotes endothelial migration and vascular barrier (the transplant-rejection drug fingolimod is an S1PR1 antagonist) while S1PR2/3-Gq/G13 engage Rho-ROCK and PLC. The two poles cross-antagonize: MAPK promotes SPHK, whereas ceramide inhibits AKT. Sphingolipid-cholesterol membrane microdomains also regulate receptor assembly — a textbook case of lipid second messengers.',
+    cascade: 'TNF → SMPD → Ceramide → ASK1-JNK/BAX 凋亡 ∥ SPHK → S1P → S1PR1-5 → RAS/RHOA 存活迁移',
+    cascadeEn: 'TNF → SMPD → Ceramide → ASK1-JNK/BAX apoptosis ∥ SPHK → S1P → S1PR1-5 → RAS/RHOA survival/migration',
+    seeds: [
+      'TNF', 'TNFRSF1A', 'NSMAF', 'SMPD2', 'C00195', 'CTSD', 'BID', 'BAX',
+      'MAP3K5', 'MAPK8', 'MAPK14', 'PRKCZ', 'PPP2R3B', 'AKT3', 'BCL2', 'TP53',
+      'S1P', 'S1PR1', 'S1PR2', 'S1PR3', 'S1PR4', 'S1PR5', 'GNAI1', 'GNAQ',
+      'GNA13', 'HRAS', 'RAF1', 'MAP2K1', 'MAPK1', 'SPHK2', 'PLD1', 'PRKCE',
+      'PLCB1', 'IP₃', 'DAG', 'PRKCA', 'RHOA', 'ROCK1', 'PTEN', 'NFKB1', 'PDPK1',
+      'PIP₃', 'P3R3URF-PIK3R3', 'RAC1', 'FYN', 'GAB2', 'FCER1A', 'ADORA1', 'KNG1',
+      'SMPD1', 'ORMDL2', 'SPTLC1', 'NOS3', 'NO',
+    ],
+    syntheticLigands: [
+      // S1P：分泌型生物活性脂质配体 —— 与图中 S1P 化合物节点合并为可注入配体
+      { symbol: 'S1P', fullName: '鞘氨醇-1-磷酸 (Sphingosine-1-phosphate)', receptor: 'S1PR1' },
+    ],
+  },
+  {
+    id: 'hsa04621',
+    name: 'NOD-like receptor signaling pathway',
+    nameZh: 'NOD 样受体信号通路',
+    category: '免疫系统 · 固有免疫识别',
+    description:
+      'NOD 样受体（NLR）是胞质模式识别受体大家族。识肽支路：NOD2 识别细菌胞壁酰二肽（MDP）→ RIPK2 支架招募 TAB/TAK1 与 IKK 复合体 → NF-κB/AP-1 双线驱动 IL-1β/IL-6/TNF/趋化因子，并交叉激活自噬（ATG16L1 复合体）；克罗恩病关联的 NOD2 错义突变即此支路缺陷。炎症小体支路：NLRP3 整合多种危险信号（ATP-P2RX7 钾外流、溶酶体 CTSB 泄漏、ROS-TXNIP、NEK7 伴侣），寡聚化招募 PYCARD 拼接体 → CASP1 自剪切 → 成熟 IL-1β/IL-18 分泌 + GSDMD 打孔焦亡（familial cold autoinflammatory 综合征即 NLRP3 功能获得突变）。NLRC4/NAIP 识别鞭毛蛋白/PrgJ，AIM2 感知胞质 dsDNA——与 cGAS-STING 通路在感染免疫中交汇。',
+    descriptionEn:
+      'NOD-like receptors (NLRs) are a large family of cytosolic pattern-recognition receptors. The peptidoglycan arm: NOD2 senses bacterial muramyl dipeptide (MDP) → the RIPK2 scaffold recruits TAB/TAK1 and the IKK complex → NF-κB and AP-1 jointly drive IL-1β, IL-6, TNF and chemokines, with crosstalk to autophagy (the ATG16L1 complex); Crohn-associated NOD2 missense mutations cripple this arm. The inflammasome arm: NLRP3 integrates diverse danger signals (ATP-P2RX7 potassium efflux, lysosomal CTSB leakage, ROS-TXNIP, NEK7 co-factor), oligomerizes and recruits the PYCARD speck → CASP1 autocleavage → mature IL-1β/IL-18 secretion plus GSDMD pore-mediated pyroptosis (gain-of-function NLRP3 mutations cause familial cold autoinflammatory syndrome). NLRC4/NAIP sense flagellin/PrgJ while AIM2 recognizes cytosolic dsDNA — converging with cGAS-STING in infection immunity.',
+    cascade: 'MDP → NOD2 → RIPK2 → TAK1/IKK → NF-κB → IL-1β/IL-6 ∥ ATP → P2RX7 → NLRP3 炎症小体 → CASP1 → 焦亡',
+    cascadeEn: 'MDP → NOD2 → RIPK2 → TAK1/IKK → NF-κB → IL-1β/IL-6 ∥ ATP → P2RX7 → NLRP3 inflammasome → CASP1 → pyroptosis',
+    seeds: [
+      'NOD2', 'NOD1', 'RIPK2', 'IKBKG', 'CHUK', 'NFKBIA', 'NFKB1', 'MAP3K7',
+      'TAB1', 'TAB2', 'TAB3', 'MAPK1', 'MAPK8', 'MAPK14', 'JUN', 'IL1B', 'IL18',
+      'IL6', 'TNF', 'CXCL8', 'CCL2', 'CCL5', 'NLRP3', 'PYCARD', 'CASP1', 'CASP4',
+      'CASP5', 'GSDMD', 'NLRC4', 'NAIP', 'NLRP1', 'NLRP6', 'NLRP7', 'NLRP12',
+      'AIM2', 'IFI16', 'MEFV', 'PSTPIP1', 'CARD8', 'SUGT1', 'HSP90AA1', 'ATP',
+      'P2RX7', 'Ca²⁺', 'CTSB', 'TXNIP', 'TXN2', 'NEK7', 'GPRC6A', 'PLCB1',
+      'IP₃', 'ITPR1', 'ATG16L1', 'ATG5', 'ATG12', 'GABARAP', 'MAVS', 'TRAF3',
+      'IKBKE', 'TBK1', 'IRF3', 'IFNA1', 'XIAP', 'BIRC2', 'ERBIN', 'NLRX1',
+      'CYBB', 'CYBA', 'RIPK3', 'DNM1L', 'CASP8', 'FADD', 'PRKCD', 'CARD9',
+      'TRAF2', 'TNFAIP3', 'IRAK4', 'TRAF6',
+    ],
+    syntheticLigands: [
+      // MDP（胞壁酰二肽）：NOD2 的经典配体 —— 细菌肽聚糖胞内片段，KGML 图中无此节点
+      { symbol: 'MDP', fullName: '胞壁酰二肽 (Muramyl dipeptide)', receptor: 'NOD2' },
+    ],
+  },
 ];
 
 /** 按 id 索引 */
