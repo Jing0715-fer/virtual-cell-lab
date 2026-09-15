@@ -808,3 +808,31 @@ Stage Summary:
 - 产出文件：pathway-catalog.ts(+7 条目) / kegg-full-catalog.ts(7×curated) / guided-tour.ts(+7 级联) / molecular-notes.ts(+~220 行) / subgraph.ts(扩容+化合物补全) / kgml-parser.ts(化合物标签) / kegg-client.ts(缓存升级+符号表落盘) / layout.ts(密集布局重构) / cell-types.ts(推荐扩充) / types/kegg.ts(+字段) / scripts/seed-kegg.ts(节流)
 - 风险/遗留: ①2D 密集布局仍有 2 处阈值级边缘重叠（HIF-1 50 节点，标签仍可读，画布可缩放）②非策划 372 全量通路缓存行为不变（按需在线抓取）③SimEvent 事件文案/PDF 报告中文（Task 22 遗留）④VLM 视觉复验因配额未做（以 DOM 几何量化替代）⑤旧缓存行（非策划通路 hsa00010 等 3 行 coreVersion=null）将在下次访问时自动升级
 - 下阶段建议: ①SimEvent 事件流文案双语化 ②PDF 报告 EN 版 ③贴面模式下分子沿切面自动散点防重叠（Task 24 遗留）④hero 图换项目自身 3D 视图截图 ⑤通路对比模式补充新通路预设
+
+---
+Task ID: 24
+Agent: 主协调 Agent (Z.ai Code)
+Task: 3D 交互四项修复 —— 悬停标签错位根因修复 / 中键拖拽平移 / 移动端 HUD 适配 / 全屏弹窗
+
+Work Log:
+- 读 worklog + git 对比（本地与远程同步于 c313228, 无回滚残留）
+- 【错位根因诊断】molecules.tsx: 分子 group 事件处理器使 R3F 递归拾取整组 mesh → 光晕球（半径=分子×2.05）截获邻位悬停; 贴面投影下分子密集 → 光晕大量重叠 → 命中偏离光标的分子
+- 【错位根因 2（更深层的真根因）】agent-browser 实测发现: R3F v9 将指针监听挂在画布父容器（源码注释 "Events trigger outside of canvas when moved"）, 默认 compute 用 event.offsetX（相对事件目标元素）—— 鼠标位于 HUD 按钮/面板上时 offsetX 以 HUD 元素为基准 → 射线 NDC 方向错位 → 命中远离光标的分子（幽灵提示卡）。复现: 在 HUD 按钮上派发 pointermove 即触发错位射线
+- 【修复 1】molecules.tsx: 光晕/磷酸化环/药物抑制环/选中环全部 raycast={() => null}（纯装饰不参与拾取）; 新增隐形拾取代理球（1.5×半径 hit-slop, 下限 0.5; 配体 1.7×）—— 悬停命中与可见分子严格对齐
+- 【修复 2】virtual-cell-3d.tsx: canvasRelativePointerEvents 工厂覆写 R3F events.compute —— 以 clientX - 画布 rect.left 换算 NDC（与事件冒泡来源无关, 坐标恒准）, Canvas events prop 接入
+- 【修复 3】OrbitControls mouseButtons={{ LEFT: ROTATE, MIDDLE: PAN, RIGHT: PAN }}（模块级常量 MOUSE_MAP）; 配套 MiddleClickGuard 组件—— three-stdlib 在 pointerdown 不 preventDefault, Chromium 中键会触发原生 autoscroll（页面滚动与 3D 平移撕裂）, 在画布上拦截中键默认行为
+- 【修复 4 移动端 HUD】<768px: 显示开关组折叠进「显示」齿轮按钮（2 列网格按需展开, w-172px）; 图例默认收起、展开时 max-h-38vh lab-scrollbar 滚动 + sm:grid-cols-3; 相机预设按钮 label <sm 隐藏（icon-only + title）; hudOpen/legendOpen 以 window.innerWidth 初始化（ssr:false 安全）
+- 【修复 5 全屏弹窗】原生 Fullscreen API（requestFullscreen）优先 + 降级 fixed 覆盖层（iOS Safari 等不支持时）; fullscreenchange 监听同步系统级退出; 全屏时顶部玻璃信息条（细胞·通路·操作提示·T+时间·退出按钮, 移动端全宽/桌面居中 58vw）替代左上信息卡; 右上开关栈移动端下移 top-68px 避让; 原生全屏时无画框、降级时保留 sm:inset-2 圆角画框
+- i18n: hud.fsTip/hud.fsHint/hud.gear/hud.tip.free 更新（中键平移提示、全屏弹窗文案）
+- QA（agent-browser 端到端）:
+  · 桌面 1280×800: HUD 布局不变（图例展开 259px、9 开关、齿轮隐藏）、中键拖拽=统一平移（scrollDelta=0 页面零滚动 + 相对画布统一位移, 区别于旧 DOLLY 径向缩放; 期间发现并修复 autoscroll 干扰）
+  · 悬停精度: 分子本体点命中 NFKB1 精确一致（tooltip+cursor）、±25px 未命中（拾取区与可见分子严格对齐）、HUD 按钮上悬停无幽灵提示卡（旧代码此处必现错位）
+  · 全屏弹窗: 覆盖层 fixed inset-0 1264×784、画布 1262×782（面积×4.6）、信息条就位、ESC 退出、body 滚动锁恢复、画布尺寸 RO 异步回落 556×550
+  · 移动端 390×844: 齿轮/图例默认收起（HUD 覆盖率 ~4%, 此前近全遮挡）、全屏弹窗 390×844 全覆盖、信息条 366×46、开关栈 top-68 避让、退出正常
+  · lint 零错误、tsc 项目代码零错误; dev.log 无新增异常
+- 测试方法学沉淀: agent-browser mouse move 拖拽落点须避开 pointer-events-auto HUD（事件按 hit-test 目标路由）; R3F 合成事件须 bubbles:true（监听在父容器）; CDP 后台页 setTimeout 节流 ~2.4s/步
+
+Stage Summary:
+- 用户四项问题全部修复并端到端验证: ①悬停错位（双层根因: 光晕拾取 + offsetX 目标相对坐标）②中键平移（含 autoscroll 防护）③移动端图例/HUD 遮挡（折叠交互 + 限高滚动）④全屏弹窗（原生 API + 降级 + 信息条）
+- R3F 事件坐标修正为通用基础设施（canvasRelativePointerEvents）, 后续任何 HUD 覆盖层交互不再产生射线错位
+- 遗留: 画布全屏切换尺寸回落有 ~1-2s RO 异步延迟（可接受）; agent-browser errors 有 3 条空消息条目（环境噪声）; console 有先于本轮的 Next params Promise 警告（未定位, 非阻断）

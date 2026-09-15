@@ -11,12 +11,13 @@
 import { Component, useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType, ReactNode, RefObject } from 'react';
 import * as THREE from 'three';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Canvas, useFrame, useThree, events as createPointerEvents } from '@react-three/fiber';
+import type { RootState } from '@react-three/fiber';
 import { setSceneSnapshot } from '@/lib/simulation/scene-capture';
 import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, Noise, Vignette } from '@react-three/postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet } from 'lucide-react';
+import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
 import { layout3D, projectLayoutToPlane, type CellBodySpec, type Vec3 } from '@/lib/simulation/layout3d';
@@ -31,6 +32,10 @@ import { SectionClipController, SECTION_ORIENTS, type SectionAxis } from './sect
 import { useLang } from '@/lib/i18n';
 
 type CamMode = 'free' | 'overview' | 'membrane' | 'nucleus' | 'follow' | 'tour';
+
+/** OrbitControls 鼠标交互映射（模块级常量, 避免组件逐 tick 重渲染时重复应用）:
+ *  左键旋转 · 中键拖拽平移（用户需求, 原默认缩放） · 右键平移 */
+const MOUSE_MAP = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
 
 /** 剖面控制器回退 spec（graph 尚未装配时） */
 const FALLBACK_SPEC: CellBodySpec = {
@@ -260,6 +265,47 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, sim, snapPlane }:
   );
 }
 
+/** R3F 事件坐标修正工厂（用户报告「标签与悬停位置错位」的根因修复）:
+ *  R3F v9 将指针监听挂在画布父容器, 默认 compute 用 event.offsetX（相对事件目标元素）。
+ *  鼠标位于 HUD 按钮/面板等覆盖层时, offsetX 以覆盖层为基准 → 射线方向错位,
+ *  命中远离光标的分子 → 标签/提示卡与光标错位。
+ *  改为 clientX - 画布 rect.left 换算 NDC —— 与事件冒泡来源无关, 坐标恒准。 */
+function canvasRelativePointerEvents(store: Parameters<typeof createPointerEvents>[0]) {
+  const manager = createPointerEvents(store);
+  manager.compute = (event: PointerEvent | MouseEvent, state: RootState) => {
+    const rect = state.gl.domElement.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      state.pointer.set(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -(((event.clientY - rect.top) / rect.height) * 2 - 1),
+      );
+      state.raycaster.setFromCamera(state.pointer, state.camera);
+    }
+  };
+  return manager;
+}
+
+/** 中键 autoscroll 保护: three-stdlib OrbitControls 在 pointerdown 不调用 preventDefault,
+ *  Chromium 会在中键按下时启动原生自动滚动（页面滚动与 3D 平移叠加撕裂）。
+ *  在画布上拦截中键按下默认行为 —— 平移交由 OrbitControls 全权接管。 */
+function MiddleClickGuard() {
+  const { gl } = useThree();
+  useEffect(() => {
+    const el = gl.domElement;
+    const onDown = (e: MouseEvent | PointerEvent) => {
+      if (e.button === 1) e.preventDefault();
+    };
+    el.addEventListener('pointerdown', onDown);
+    // 兜底: 部分浏览器由 compat mousedown 触发 autoscroll
+    el.addEventListener('mousedown', onDown);
+    return () => {
+      el.removeEventListener('pointerdown', onDown);
+      el.removeEventListener('mousedown', onDown);
+    };
+  }, [gl]);
+  return null;
+}
+
 /** 场景快照采集器（报告导出嵌入用，4s 节流 JPEG） */
 function SceneCapture() {
   const lastRef = useRef(0);
@@ -294,7 +340,10 @@ export function VirtualCell3D() {
   // 自动旋转默认关闭（用户需求: 打开页面即保持稳定视角, 便于观察剖面与细胞器细节; 可经 HUD 手动开启）
   const [autoRotate, setAutoRotate] = useState(false);
   const [camMode, setCamMode] = useState<CamMode>('overview');
-  const [legendOpen, setLegendOpen] = useState(true);
+  // 移动端 HUD 折叠: 开关组/图例默认收起, 避免纵向长列遮挡 3D 画布
+  // （ssr:false 动态导入 → 首渲染即可安全读取 window; 桌面 ≥768px 维持原展开布局）
+  const [hudOpen, setHudOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 768 : true));
+  const [legendOpen, setLegendOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 768 : true));
   const [glow, setGlow] = useState(true);
   const [tourOpen, setTourOpen] = useState(false);
   const [tourIdx, setTourIdx] = useState(0);
@@ -309,8 +358,33 @@ export function VirtualCell3D() {
   const [clipAxis, setClipAxis] = useState<SectionAxis>('front');
   // 信号贴面: 信号转导演示投影到剖切面上进行（用户需求 —— 切面演示; 默认 50% 过心切面最佳）
   const [sectionSnap, setSectionSnap] = useState(true);
-  // 接近全屏检视（画布铺满视口, 细节更清晰; ESC 退出）
+  // 全屏弹窗: 优先原生 Fullscreen API（真全屏, 无浏览器 chrome）,
+  // 不支持时（如 iOS Safari 不支持元素全屏）降级为 fixed 视口覆盖层; ESC / 退出按钮均可关闭
   const [fullscreen, setFullscreen] = useState(false);
+  // 原生全屏激活标记（未激活时覆盖层保留圆角画框样式, 已激活时铺满物理屏幕）
+  const [nativeFs, setNativeFs] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  const enterFullscreen = () => {
+    setFullscreen(true);
+    rootRef.current?.requestFullscreen?.().catch(() => {
+      /* 被浏览器拒绝 → 保持 fixed 覆盖层降级 */
+    });
+  };
+  const exitFullscreen = () => {
+    setFullscreen(false);
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  };
+  // 原生全屏被系统退出（ESC/F11/手势）→ 同步关闭弹窗状态
+  useEffect(() => {
+    const onFsChange = () => {
+      const active = !!document.fullscreenElement;
+      setNativeFs(active);
+      if (!active) setFullscreen(false);
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
   // WebGL 上下文丢失提示（自动恢复尝试中）
   const [ctxLost, setCtxLost] = useState(false);
 
@@ -456,9 +530,12 @@ export function VirtualCell3D() {
 
   return (
     <div
+      ref={rootRef}
       className={
         fullscreen
-          ? 'fixed inset-0 z-[200] overflow-hidden bg-[#030812] sm:inset-2 sm:rounded-3xl sm:border sm:border-emerald-500/15 sm:shadow-[0_0_90px_rgba(0,0,0,0.75)]'
+          ? nativeFs
+            ? 'fixed inset-0 z-[200] overflow-hidden bg-[#030812]'
+            : 'fixed inset-0 z-[200] overflow-hidden bg-[#030812] sm:inset-2 sm:rounded-3xl sm:border sm:border-emerald-500/15 sm:shadow-[0_0_90px_rgba(0,0,0,0.75)]'
           : 'relative h-full w-full overflow-hidden'
       }
       aria-label={fullscreen ? t('hud.fs') : undefined}
@@ -501,6 +578,7 @@ export function VirtualCell3D() {
           camera={{ fov: 42, near: 0.1, far: 300, position: [0, 9, 28] }}
           dpr={perfMode ? [0.7, 1] : [1, 1.75]}
           gl={{ antialias: !perfMode, alpha: true, preserveDrawingBuffer: !perfMode }}
+          events={canvasRelativePointerEvents}
           onCreated={({ gl }) => {
             // WebGL 上下文丢失防护（低端 GPU 内存回收时常见）: 提示 + 浏览器自动恢复
             gl.domElement.addEventListener('webglcontextlost', (e) => {
@@ -548,6 +626,9 @@ export function VirtualCell3D() {
             }}
           />
           <CameraRig mode={camMode} layout={effLayout} spec={layoutSpec} controlsRef={controlsRef} tourTarget={tourTarget} />
+          {/* 中键平移配套: 拦截浏览器原生 autoscroll, 保证拖拽平移纯净 */}
+          <MiddleClickGuard />
+          {/* 交互映射（用户需求）: 左键旋转 · 中键拖拽 = 平移（原默认缩放已改） · 右键平移 */}
           <OrbitControls
             ref={controlsRef}
             enableDamping
@@ -556,6 +637,7 @@ export function VirtualCell3D() {
             maxDistance={80}
             autoRotate={autoRotate}
             autoRotateSpeed={0.5}
+            mouseButtons={MOUSE_MAP}
             makeDefault
           />
           {/* 生物荧光辉光: Bloom 提亮发光体 + 微粒胶片噪声 + 暗角聚焦视线（流畅模式降采样） */}
@@ -579,9 +661,36 @@ export function VirtualCell3D() {
         </div>
       )}
 
+      {/* 全屏弹窗 · 顶部信息条（细胞/通路/操作提示/退出 —— 替代常规左上信息卡, 客户大画幅检视） */}
+      {fullscreen && (
+        <div className="pointer-events-none absolute left-3 right-3 top-3 z-20 md:left-1/2 md:right-auto md:w-[min(58vw,640px)] md:-translate-x-1/2">
+          <div className="pointer-events-auto flex items-center gap-2.5 rounded-xl border border-emerald-500/25 bg-slate-950/85 px-3 py-2 shadow-[0_8px_32px_rgba(0,0,0,0.5)] backdrop-blur-lg">
+            <Shell className="h-4 w-4 shrink-0 text-emerald-400" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[12px] font-semibold text-emerald-200">
+                {(lang === 'zh' ? cell?.name : cell?.nameEn ?? cell?.name) ?? t('loading.cell')}
+                <span className="mx-1.5 text-slate-600">·</span>
+                <span className="font-normal text-slate-300">{lang === 'zh' ? graph.meta.nameZh : graph.meta.name}</span>
+              </div>
+              <div className="hidden truncate text-[9px] text-slate-500 sm:block">{t('hud.fsHint')}</div>
+            </div>
+            <span className="hidden shrink-0 font-mono text-[9px] text-slate-500 md:block">
+              T+{(tick * 0.5).toFixed(1)}s · {t('hud.phase')} {phase}/4
+            </span>
+            <button
+              onClick={exitFullscreen}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1.5 text-[11px] text-rose-300 transition hover:bg-rose-500/20"
+            >
+              <X className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">{t('hud.exitFs')}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ============ HUD ============ */}
-      {/* 左上: 实验信息 */}
-      <div className="pointer-events-none absolute left-3 top-3 z-10 space-y-1.5">
+      {/* 左上: 实验信息（全屏时并入顶部信息条, 不重复显示） */}
+      <div className={`pointer-events-none absolute left-3 top-3 z-10 space-y-1.5 ${fullscreen ? 'hidden' : ''}`}>
         <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-slate-950/70 px-2.5 py-1.5 backdrop-blur-md">
           <Shell className="h-3.5 w-3.5 text-emerald-400" />
           <div>
@@ -606,28 +715,51 @@ export function VirtualCell3D() {
         </div>
       </div>
 
-      {/* 右上: 显示开关 */}
-      <div className="absolute right-3 top-3 z-10 flex flex-col gap-1.5">
-        {/* 接近全屏检视（细节观察; ESC 退出） */}
+      {/* 右上: 显示开关（移动端折叠进「显示」齿轮面板, 避免整列遮挡画布; 全屏时下移避开顶部信息条） */}
+      <div
+        className={`absolute right-3 z-10 flex flex-col items-end gap-1.5 ${
+          fullscreen ? 'top-[68px] md:top-3' : 'top-3'
+        }`}
+      >
+        {/* 全屏弹窗（始终可见 —— 移动端尤佳: 画布铺满视口放大观察） */}
         <HudToggle
           active={fullscreen}
-          onClick={() => setFullscreen(!fullscreen)}
+          onClick={() => (fullscreen ? exitFullscreen() : enterFullscreen())}
           icon={fullscreen ? Shrink : Expand}
           label={fullscreen ? t('hud.exitFs') : t('hud.fs')}
           highlight
           title={t('hud.fsTip')}
         />
-        <HudToggle active={tourOpen} onClick={() => openTour(!tourOpen)} icon={BookOpen} label={t('hud.tour')} highlight
-          disabled={tour.length === 0} />
-        <HudToggle active={glow} onClick={() => setGlow(!glow)} icon={Sparkles} label={t('hud.glow')} />
-        <HudToggle active={perfMode} onClick={() => setPerfMode(!perfMode)} icon={Gauge} label={perfMode ? t('hud.perf') : t('hud.hd')} />
-        <HudToggle active={showAnatomy} onClick={() => setShowAnatomy(!showAnatomy)} icon={Tags} label={t('hud.anatomy')} />
-        <HudToggle active={showLabels} onClick={() => setShowLabels(!showLabels)} icon={Eye} label={t('hud.labels')} />
-        <HudToggle active={focus} onClick={() => setFocus(!focus)} icon={Focus} label={t('hud.focus')} />
-        <HudToggle active={clipView} onClick={() => setClipView(!clipView)} icon={Layers} label={t('hud.section')} highlight={false} />
-        <HudToggle active={autoRotate} onClick={() => setAutoRotate(!autoRotate)} icon={RotateCw} label={t('hud.rotate')} />
+        {/* 移动端齿轮: 展开/收起其余显示开关（桌面恒显） */}
+        <button
+          onClick={() => setHudOpen((v) => !v)}
+          aria-label={t('hud.gear')}
+          aria-expanded={hudOpen}
+          className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] backdrop-blur-md transition md:hidden ${
+            hudOpen
+              ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+              : 'border-white/10 bg-slate-950/70 text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <SlidersHorizontal className="h-3 w-3" />
+          {t('hud.gear')}
+        </button>
+        {/* 其余开关: 桌面纵向恒显; 移动端 2 列网格按需展开 */}
+        <div className={`${hudOpen ? 'grid' : 'hidden md:grid'} w-[172px] grid-cols-2 gap-1.5 md:flex md:w-auto md:flex-col`}>
+          <HudToggle active={tourOpen} onClick={() => openTour(!tourOpen)} icon={BookOpen} label={t('hud.tour')} highlight
+            disabled={tour.length === 0} />
+          <HudToggle active={glow} onClick={() => setGlow(!glow)} icon={Sparkles} label={t('hud.glow')} />
+          <HudToggle active={perfMode} onClick={() => setPerfMode(!perfMode)} icon={Gauge} label={perfMode ? t('hud.perf') : t('hud.hd')} />
+          <HudToggle active={showAnatomy} onClick={() => setShowAnatomy(!showAnatomy)} icon={Tags} label={t('hud.anatomy')} />
+          <HudToggle active={showLabels} onClick={() => setShowLabels(!showLabels)} icon={Eye} label={t('hud.labels')} />
+          <HudToggle active={focus} onClick={() => setFocus(!focus)} icon={Focus} label={t('hud.focus')} />
+          <HudToggle active={clipView} onClick={() => setClipView(!clipView)} icon={Layers} label={t('hud.section')} highlight={false} />
+          <HudToggle active={autoRotate} onClick={() => setAutoRotate(!autoRotate)} icon={RotateCw} label={t('hud.rotate')} />
+        </div>
         {clipView && (
-          <div className="pointer-events-auto w-44 space-y-2 rounded-lg border border-teal-500/25 bg-slate-950/80 p-2.5 backdrop-blur-md">
+          <div className={`pointer-events-auto w-44 space-y-2 rounded-lg border border-teal-500/25 bg-slate-950/80 p-2.5 backdrop-blur-md ${
+            hudOpen ? '' : 'hidden md:block'
+          }`}>
             <div className="flex items-center gap-1.5">
               <Scissors className="h-3 w-3 shrink-0 text-teal-400" />
               <span className="text-[9px] font-medium text-slate-300">{t('hud.axis')}</span>
@@ -692,29 +824,31 @@ export function VirtualCell3D() {
         <CamBtn active={camMode === 'follow'} onClick={() => setCamMode(camMode === 'follow' ? 'free' : 'follow')} icon={Focus} label={camMode === 'follow' ? t('cam.following') : t('cam.follow')} />
       </div>
 
-      {/* 左下: 图例 */}
-      <div className="absolute bottom-3 left-3 z-10">
+      {/* 左下: 图例（移动端默认收起; 展开时限高滚动, 不再遮挡画布主体） */}
+      <div className="absolute bottom-3 left-3 z-10 max-w-[min(72vw,340px)] md:max-w-none">
         {legendOpen ? (
           <div className="rounded-lg border border-white/10 bg-slate-950/75 p-2.5 backdrop-blur-md">
             <div className="mb-1.5 flex items-center justify-between gap-3">
               <span className="text-[9px] font-medium text-slate-300">{t('legend.title')}</span>
               <button className="text-[9px] text-slate-500 hover:text-slate-300" onClick={() => setLegendOpen(false)}>{t('legend.collapse')}</button>
             </div>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-              {Object.entries(KIND_COLORS).map(([k, v]) => (
-                <div key={k} className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full" style={{ background: v.color, boxShadow: `0 0 6px ${v.color}` }} />
-                  <span className="text-[9px] text-slate-400">{t(`kind.${k}`)}</span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-2 space-y-1 border-t border-white/8 pt-1.5">
-              <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-emerald-400" /><span className="text-[9px] text-slate-400">{t('legend.activation')}</span></div>
-              <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-dashed border-rose-400" /><span className="text-[9px] text-slate-400">{t('legend.inhibition')}</span></div>
-              <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-amber-400" /><span className="text-[9px] text-slate-400">{t('legend.expression')}</span></div>
-              <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full border border-amber-400" /><span className="text-[9px] text-slate-400">{t('legend.phospho')}</span></div>
-              <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-400/80 shadow-[0_0_6px_rgba(251,191,36,0.8)]" /><span className="text-[9px] text-slate-400">{t('legend.mrna')}</span></div>
-              <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.9)]" /><span className="text-[9px] text-slate-400">{t('legend.pulse')}</span></div>
+            <div className="lab-scrollbar max-h-[38vh] overflow-y-auto pr-0.5 md:max-h-none md:overflow-visible md:pr-0">
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-3 md:grid-cols-2">
+                {Object.entries(KIND_COLORS).map(([k, v]) => (
+                  <div key={k} className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: v.color, boxShadow: `0 0 6px ${v.color}` }} />
+                    <span className="text-[9px] text-slate-400">{t(`kind.${k}`)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 space-y-1 border-t border-white/8 pt-1.5">
+                <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-emerald-400" /><span className="text-[9px] text-slate-400">{t('legend.activation')}</span></div>
+                <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-dashed border-rose-400" /><span className="text-[9px] text-slate-400">{t('legend.inhibition')}</span></div>
+                <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-amber-400" /><span className="text-[9px] text-slate-400">{t('legend.expression')}</span></div>
+                <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full border border-amber-400" /><span className="text-[9px] text-slate-400">{t('legend.phospho')}</span></div>
+                <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-400/80 shadow-[0_0_6px_rgba(251,191,36,0.8)]" /><span className="text-[9px] text-slate-400">{t('legend.mrna')}</span></div>
+                <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.9)]" /><span className="text-[9px] text-slate-400">{t('legend.pulse')}</span></div>
+              </div>
             </div>
           </div>
         ) : (
@@ -885,6 +1019,7 @@ function CamBtn({ active, onClick, icon: Icon, label }: {
   return (
     <button
       onClick={onClick}
+      title={label}
       className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] backdrop-blur-md transition ${
         active
           ? 'border-amber-500/40 bg-amber-500/15 text-amber-300'
@@ -892,7 +1027,7 @@ function CamBtn({ active, onClick, icon: Icon, label }: {
       }`}
     >
       <Icon className="h-3 w-3" />
-      {label}
+      <span className="hidden sm:inline">{label}</span>
     </button>
   );
 }

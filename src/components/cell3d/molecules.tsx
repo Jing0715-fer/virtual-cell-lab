@@ -134,14 +134,20 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
       }),
     [],
   );
+  // 拾取代理材质（完全透明, 仅作命中区域 —— 悬停命中与可见分子严格对齐）
+  const hitMat = useMemo(
+    () => new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+    [],
+  );
   useEffect(
     () => () => {
       coreMat.dispose();
       haloMat.dispose();
       phosphoMat.dispose();
       inhibMat.dispose();
+      hitMat.dispose();
     },
-    [coreMat, haloMat, phosphoMat, inhibMat],
+    [coreMat, haloMat, phosphoMat, inhibMat, hitMat],
   );
 
   useFrame((state) => {
@@ -281,26 +287,34 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
         </mesh>
       )}
 
-      {/* 光晕 */}
-      <mesh ref={haloRef} material={haloMat} renderOrder={90}>
+      {/* 光晕（纯视觉装饰 —— 禁用 raycast, 否则共半径 2× 于分子本体的透明球会截获邻位分子的悬停, 造成标签与光标错位） */}
+      <mesh ref={haloRef} material={haloMat} renderOrder={90} raycast={() => null}>
         <sphereGeometry args={[isReceptor ? 0.95 : node.r * 2.05, 16, 12]} />
       </mesh>
 
-      {/* 磷酸化环（琥珀色） */}
-      <mesh ref={phosphoRef} material={phosphoMat} scale={0.001} renderOrder={91}>
+      {/* 磷酸化环（琥珀色, 装饰 —— 不参与拾取） */}
+      <mesh ref={phosphoRef} material={phosphoMat} scale={0.001} renderOrder={91} raycast={() => null}>
         <torusGeometry args={[node.r * 1.5 + 0.12, 0.05, 8, 32]} />
       </mesh>
 
-      {/* 药物抑制环（紫色 = 催化输出钳制） */}
-      <mesh ref={inhibRingRef} material={inhibMat} scale={0.001} renderOrder={92}>
+      {/* 药物抑制环（紫色 = 催化输出钳制, 装饰 —— 不参与拾取） */}
+      <mesh ref={inhibRingRef} material={inhibMat} scale={0.001} renderOrder={92} raycast={() => null}>
         <torusGeometry args={[node.r * 1.85 + 0.16, 0.055, 8, 36]} />
       </mesh>
 
-      {/* 选中环 */}
+      {/* 选中环（装饰 —— 不参与拾取） */}
       {selected && (
-        <mesh rotation={[Math.PI / 2.4, 0, 0]}>
+        <mesh rotation={[Math.PI / 2.4, 0, 0]} raycast={() => null}>
           <torusGeometry args={[isReceptor ? 1.3 : node.r + 0.42, 0.03, 8, 40]} />
           <meshBasicMaterial color="#fef3c7" transparent opacity={0.95} depthWrite={false} />
+        </mesh>
+      )}
+
+      {/* 拾取代理（非受体分子）: 适度 hit-slop（1.5×半径, 下限 0.5）提升小分子可命中性,
+          又不至重叠邻位 —— 悬停高亮与光标位置严格对齐; 受体的跨膜螺旋/ECD/ICD 本身即合理目标 */}
+      {!isReceptor && (
+        <mesh material={hitMat}>
+          <sphereGeometry args={[Math.max(node.r * (node.kind === 'ligand' ? 1.7 : 1.5), 0.5), 12, 8]} />
         </mesh>
       )}
 

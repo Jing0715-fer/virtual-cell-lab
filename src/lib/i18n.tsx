@@ -87,9 +87,14 @@ export const T: Record<string, Entry> = {
   'hud.fs': { zh: '全屏检视', en: 'Fullscreen' },
   'hud.exitFs': { zh: '退出全屏', en: 'Exit fullscreen' },
   'hud.fsTip': {
-    zh: '接近全屏检视 · 更大画幅观察细节 · ESC 或再次点击退出',
-    en: 'Near-fullscreen inspection for finer detail · ESC or click again to exit',
+    zh: '全屏弹窗 · 更大画幅观察细节 · 滚轮/双指缩放 · ESC 退出',
+    en: 'Fullscreen popup · much larger view · scroll / pinch to zoom · ESC to exit',
   },
+  'hud.fsHint': {
+    zh: '拖拽旋转 · 滚轮缩放 · 中键/右键平移 · 点击分子查看档案',
+    en: 'Drag to rotate · scroll to zoom · middle/right-drag to pan · click a molecule for profile',
+  },
+  'hud.gear': { zh: '显示', en: 'View' },
   'hud.snap': { zh: '信号贴面', en: 'Section snap' },
   'hud.snapTip': {
     zh: '信号级联正交投影到剖切面上演示 —— 全部分子落于切面, 无一被剖切裁掉（50% 过心切面视野最佳）',
@@ -111,8 +116,8 @@ export const T: Record<string, Entry> = {
   'legend.mrna': { zh: 'mRNA 出核', en: 'mRNA export' },
   'legend.pulse': { zh: '信号事件脉冲', en: 'Signal event pulse' },
   'hud.tip.free': {
-    zh: '拖拽旋转 · 滚轮缩放 · 点击分子查看档案 · 悬停显示分子卡',
-    en: 'Drag to rotate · scroll to zoom · click a molecule for its profile · hover for molecule card',
+    zh: '拖拽旋转 · 滚轮缩放 · 中键/右键平移 · 点击分子查看档案 · 悬停显示分子卡',
+    en: 'Drag to rotate · scroll to zoom · middle/right-drag to pan · click for profile · hover for molecule card',
   },
   'hud.tip.section': {
     zh: '剖面模式 · 旋转视角观察细胞器内部结构与核内分子',
