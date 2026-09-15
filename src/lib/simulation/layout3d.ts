@@ -69,6 +69,18 @@ export interface CellBodySpec {
   intercalated?: boolean;
   /** T 细胞表面微褶皱（全表面短刺） */
   surfaceFolds?: boolean;
+  /** 心肌 T 小管 + 肌浆网（Z 线位周期内陷 + 终端池 + 纵行网管） */
+  ttubules?: boolean;
+  /** 神经元突触扣结（轴突末端 + 结旁 en-passant, 含囊泡簇） */
+  synapticBoutons?: boolean;
+  /** 癌细胞微核（CIN 表型, 含破裂被膜 + 胞质 DNA 溢出） */
+  micronuclei?: boolean;
+  /** T 细胞 TCR/CD3 膜面微簇 */
+  tcrClusters?: boolean;
+  /** 上皮终末网（微绒毛根部横行微丝网） */
+  terminalWeb?: boolean;
+  /** 上皮侧膜桥粒斑块（中间丝锚定） */
+  desmosomes?: boolean;
   /** 溶酶体数量（酸性水解酶细胞器） */
   lysosomeCount: number;
   /** 过氧化物酶体数量（过氧化氢酶晶体核心） */
@@ -88,38 +100,38 @@ export const CELL_BODY_SPECS: Record<CellMorphKey, CellBodySpec> = {
   neuron: {
     membraneR: 10, nucleusR: 3.9, shape: 'pyramidal', viewDist: 33,
     mitoCount: 6, erSheets: 2, vesicleCount: 10, microtubules: 14,
-    nucleolus: { count: 1, r: 0.9 }, neurites: true, apicalTuft: true,
+    nucleolus: { count: 1, r: 0.9 }, neurites: true, apicalTuft: true, synapticBoutons: true,
     lysosomeCount: 4, peroxisomeCount: 3,
   },
   tcell: {
     membraneR: 8.6, nucleusR: 5.2, shape: 'sphere', viewDist: 27,
     mitoCount: 4, erSheets: 1, vesicleCount: 6, microtubules: 8,
-    nucleolus: { count: 1, r: 0.85 }, surfaceFolds: true,
+    nucleolus: { count: 1, r: 0.85 }, surfaceFolds: true, tcrClusters: true,
     lysosomeCount: 3, peroxisomeCount: 2,
   },
   epithelial: {
     membraneR: 11, nucleusR: 4.0, shape: 'columnar', viewDist: 30,
     mitoCount: 6, erSheets: 3, vesicleCount: 12, microtubules: 10,
     nucleolus: { count: 1, r: 0.85 }, microvilli: true, apicalPolarity: true,
-    tightJunction: true, basalLamina: true,
+    tightJunction: true, basalLamina: true, terminalWeb: true, desmosomes: true,
     lysosomeCount: 4, peroxisomeCount: 3,
   },
   cardiomyocyte: {
     membraneR: 9, nucleusR: 3.6, shape: 'rod', viewDist: 37,
     mitoCount: 16, erSheets: 2, vesicleCount: 8, microtubules: 8,
-    nucleolus: { count: 2, r: 0.7 }, striated: true, intercalated: true,
+    nucleolus: { count: 2, r: 0.7 }, striated: true, intercalated: true, ttubules: true,
     lysosomeCount: 4, peroxisomeCount: 5, lipidDroplets: true,
   },
   fibroblast: {
     membraneR: 10.5, nucleusR: 3.9, shape: 'spindle', viewDist: 35,
-    mitoCount: 5, erSheets: 2, vesicleCount: 8, microtubules: 10,
+    mitoCount: 5, erSheets: 4, vesicleCount: 8, microtubules: 10,
     nucleolus: { count: 1, r: 0.85 }, collagen: true, stressFibers: true,
     lysosomeCount: 3, peroxisomeCount: 2,
   },
   cancer: {
     membraneR: 10.2, nucleusR: 4.5, shape: 'amoeboid', viewDist: 32,
     mitoCount: 7, erSheets: 2, vesicleCount: 16, microtubules: 12,
-    nucleolus: { count: 3, r: 0.75 }, blebs: true, nucleusBumpy: true,
+    nucleolus: { count: 3, r: 0.75 }, blebs: true, nucleusBumpy: true, micronuclei: true,
     lysosomeCount: 7, peroxisomeCount: 3, lipidDroplets: true,
   },
 };

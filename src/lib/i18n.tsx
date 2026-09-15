@@ -195,6 +195,30 @@ export const T: Record<string, Entry> = {
   'pw.molecules': { zh: '分子', en: 'molecules' },
   'pw.seeds': { zh: '种子', en: 'seeds' },
 
+  /* ============ 通路 × 细胞类型表达分类 ============ */
+  'pw.cellFilter': { zh: '按本细胞表达筛选', en: 'Filter by this cell' },
+  'pw.cellFilterTip': {
+    zh: '仅显示该细胞类型实际表达的通路（组织/细胞特异性分类）',
+    en: 'Show only pathways actually expressed in this cell type (tissue/cell specificity)',
+  },
+  'pw.signatureSection': { zh: '特征通路', en: 'Signature pathways' },
+  'pw.activeSection': { zh: '本细胞表达通路', en: 'Expressed in this cell' },
+  'pw.inactiveSection': { zh: '未检出 · 低活性', en: 'Not detected · low activity' },
+  'pw.signatureBadge': { zh: '特征', en: 'Signature' },
+  'pw.inactiveBadge': { zh: '未检出', en: 'Absent' },
+  'pw.inactiveTeach': { zh: '仍可教学演示', en: 'Demo anyway' },
+  'pw.inactiveTeachTip': {
+    zh: '该通路在本细胞类型通常不活跃，仅作跨细胞分子机制教学对照',
+    en: 'This pathway is normally inactive in this cell type — shown for cross-cell teaching only',
+  },
+  'pw.showAll': { zh: '显示全部', en: 'Show all' },
+  'pw.autoSwitched': { zh: '已切换至该细胞的特征通路', en: 'Switched to a signature pathway of this cell' },
+  'pw.warnTitle': { zh: '通路-细胞不匹配', en: 'Pathway–cell mismatch' },
+  'pw.warnBody': {
+    zh: '该通路在当前细胞类型中通常不活跃。演示仅作分子机制教学对照，不代表真实生理响应。',
+    en: 'This pathway is normally inactive in the current cell type. The demo is a teaching reference of molecular mechanics, not a real physiological response.',
+  },
+
   /* ============ 模拟控制台 playback ============ */
   'pb.pause': { zh: '暂停', en: 'Pause' },
   'pb.play': { zh: '播放（自动注射配体）', en: 'Play (auto ligand injection)' },

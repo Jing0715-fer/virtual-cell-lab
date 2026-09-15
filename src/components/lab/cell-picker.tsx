@@ -5,8 +5,10 @@
  */
 import { Check, Dna, Microscope, Zap } from 'lucide-react';
 import { CELL_TYPES, type MorphologyKey } from '@/data/cell-types';
+import { pathwayActivity } from '@/data/pathway-cell-matrix';
 import { useLabStore } from '@/store/lab-store';
 import { useLang } from '@/lib/i18n';
+import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
 /** 微型细胞形态示意（卡片图标） */
@@ -91,6 +93,20 @@ export function CellPicker() {
   const { t, lang } = useLang();
   const cellId = useLabStore((s) => s.cellId);
   const setCell = useLabStore((s) => s.setCell);
+  const { toast } = useToast();
+
+  const pickCell = (id: string) => {
+    // 通路 × 细胞类型表达约束: 当前通路在新细胞未检出 → store 将自动切换特征通路，这里给出提示
+    const pid = useLabStore.getState().pathwayId;
+    if (pid && pathwayActivity(pid, id) === 'inactive') {
+      toast({
+        title: t('pw.autoSwitched'),
+        description: t('pw.warnBody'),
+        duration: 4200,
+      });
+    }
+    setCell(id);
+  };
 
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
@@ -99,7 +115,7 @@ export function CellPicker() {
         return (
           <button
             key={c.id}
-            onClick={() => setCell(c.id)}
+            onClick={() => pickCell(c.id)}
             className={cn(
               'group relative overflow-hidden rounded-2xl border p-3.5 text-left transition-all duration-300',
               active

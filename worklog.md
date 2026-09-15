@@ -1018,3 +1018,47 @@ Stage Summary:
 - 产出: cell-shape.ts(新 165 行) / layout3d.ts(spec 重构+shapeF) / organelles.tsx(+~250 行特化结构+cellSurf) / section-view.tsx(椭圆盘+Rn 扫描) / virtual-cell-3d.tsx(scale 退役+viewDist+snapPlane 适配)
 - 遗留/风险: ①贴面模式核区标签互叠（Task 25 遗留未变）②SimEvent 双语化/PDF EN（Task 22 遗留）③SwiftShader 无法测真实 GPU 帧率（新增结构均 InstancedMesh/merged, 边际成本低）④390px 真机断点未复测（环境无 viewport 命令）⑤上皮微绒毛极性采样的 hash key 用 fibSphere 坐标量化（997/991 质数缩放防碰撞）
 - 下阶段建议: ①贴面核区标签 force-simulate 防重叠 ②溶酶体自噬演示（mTOR 抑制 → 自噬体融合事件）③hero 图换项目 3D 截图 ④剖切面细胞器截面（真实标本切面感）
+
+---
+Task ID: 29
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户需求——①继续优化不同类型细胞的 3D 模型 ②通路按实际发现的细胞类型科学分类（不再所有细胞显示全部通路）
+
+Work Log:
+- 【通路 × 细胞类型科学分类】新建 src/data/pathway-cell-matrix.ts：
+  · 三层活性模型 signature（特征, 派生自 cell-types.ts pathways 单一真源）/ active（表达）/ inactive（未检出·低活性, 附双语科学注释）
+  · 19 组 inactive 登记（科学依据 Alberts MBoC / UniPTissue specificity）：VEGF×4（旁分泌分泌源角色——内皮为中心的通路）、TLR×3（髓系/屏障特征）、Cell cycle×2（神经元/心肌终末分化 G0 锁定——教学高价值差异点）、ErbB×1（T 细胞不表达）、Hedgehog×2、NOD-like×3（炎症小体髓系特征）、cGAS-STING×2（神经元低需求 + PDAC STING 表观沉默免疫冷肿瘤）、Wnt/Notch×心肌各 1（成体静默）
+  · 管家级通路（MAPK/PI3K/TGF-β/JAK-STAT/cAMP/Ca/mTOR/NF-κB/Apoptosis/p53/AMPK/Hippo/HIF-1/FoxO/Sphingolipid/Ras）默认 active 不逐一登记——符合真实生物学
+  · helper: pathwayActivity / inactiveNote / pathwayExpression
+- 【通路库三层筛选 UI】pathway-library.tsx：
+  · 新增"按本细胞表达筛选"开关（默认开, role=switch + 计数摘要 "N 特征 · N 表达 · N 未检出"）
+  · 开启时: 特征通路组（amber ★ 徽标）→ 本细胞表达组（按 KEGG 分类分组）→ 未检出·低活性组（默认折叠, EyeOff 图标, 仍可点选作教学对照, 每条显示双语科学注释 line-clamp-2）
+  · 关闭时回归原 25 条全列表（适配徽标保留）; 搜索时未检出组自动展开保证可检索
+- 【细胞切换联动】lab-store.ts setCell: 当前通路在新细胞 inactive → 自动切换至该细胞第一条特征通路（graph 置空触发重新获取）; cell-picker.tsx 切换前检测不匹配 → toast 提示"已切换至该细胞的特征通路"
+- 【不匹配警告横幅】workspace.tsx 主画布顶部 amber 警告条（通路-细胞不匹配 + 该组合的科学注释 + 教学对照声明, 可关闭, dismiss 按 pathwayId+cellId key 记忆, 切换后重新出现）; 三个视图（3D/2D/图谱）共享
+- 【i18n】pw.cellFilter/cellFilterTip/signatureSection/activeSection/inactiveSection/signatureBadge/inactiveBadge/autoSwitched/warnTitle/warnBody 等全套双语
+- 【3D 特化结构 v5（6 类新结构 + 2 处增强）】organelles.tsx + layout3d.ts CellBodySpec +6 flag:
+  · 心肌 ttubules: T 小管（Z 线位 SARCO=0.62 周期对齐·每站 6 放射内陷胶囊 merged）+ 连接肌浆网终端池（钙释放单元扁囊）+ 纵行 SR 网管（10 根环绕肌原纤维）—— 二联体/三联体位形
+  · 神经元 synapticBoutons: 轴突末端扣结 + 2 个结旁 en-passant 扣结（各含 16 清亮突触囊泡 InstancedMesh + 2 致密芯囊泡 + 扣结内线粒体）—— 郎飞氏结位科学位形
+  · 癌细胞 micronuclei: 2 个微核（CIN 表型）—— 1 个被膜破裂（球壳 phi 扇区豁口 + 发光破裂边缘环 torus + 5 颗胞质 DNA 溢出颗粒 = cGAS-STING 感知起点叙事）+ 1 个完整微核
+  · T 细胞 tcrClusters: 12 膜面 TCR/CD3 微簇（中心 + 5 卫星, 免疫突触前体剪影）
+  · 上皮 terminalWeb + desmosomes: 终末网（顶面下 0.45 处 56 根水平微丝随机取向 InstancedMesh）+ 7 个侧膜桥粒斑块（中间丝锚定铆钉）
+  · 肝细胞增强: 糖原玫瑰体 3→6 丛 + 滑面内质网 8→12 管 + 5 个三通 junction 节点（CYP450 管网读感）
+  · 成纤维增强: erSheets 2→4（渲染囊池 4→6 层——胶原工厂分泌机器读感）
+- QA（agent-browser 端到端, 1280×800 + 网页内全屏 + EN 双语）:
+  · 分类矩阵: 肝 6 特征/18 表达/1 未检出 ✓; T 细胞 6/14/5 ✓; 计数与矩阵推导完全一致
+  · 筛选开关双向切换 ✓; EN 模式 Signature pathways/Expressed in this cell/Not detected 全渲染 + htmlLang=en ✓
+  · VEGF（肝·未检出）选中 → amber 不匹配横幅出现（含旁分泌科学注释）✓; 切换 T 细胞 → toast 自动切换提示 + 通路自动跳转 JAK-STAT + 横幅消失 ✓
+  · 3D 全 7 类细胞新结构标签逐一验证: 肝 18（滑面内质网/糖原/胆小管/过氧化物酶体✓）/T 51+TCR 微簇✓/心肌 19（T 小管+肌浆网+肌原纤维+闰盘✓）/神经元 18（突触扣结+顶端树突+髓鞘✓）/癌 17（微核+出芽+溶酶体✓）/上皮 19（终末网+桥粒+微绒毛+紧密连接✓）/成纤维 16（粗面内质网+应力纤维+胶原✓）
+  · 模拟引擎回归: 播放→阶段推进→事件流→EGF 自动注射 ✓
+  · 无横向溢出; 刷新后 console 零错误（编辑中途的瞬态 HMR 报错已自愈）; lint 零错误; tsc 本次文件零错误（subgraph/molecular-notes 历史遗留不计）
+  · dev server 中途 OOM 挂掉一次 → 重启后全流程复验通过
+- 环境备注: dev server 需后台常驻（本机 3.9GB 内存, 大编辑批量 HMR 时有 OOM 风险）
+
+Stage Summary:
+- 用户两项需求全部落地并端到端验证: ①通路 × 细胞类型科学分类（19 组 inactive 科学注释 + 三层筛选 UI + 细胞切换自动跳转 + 不匹配警告横幅——"所有细胞显示全部通路"的问题彻底解决）②3D 细胞模型 v5（T 小管+肌浆网/突触扣结/微核/TCR 微簇/终末网+桥粒 6 类全新特化结构 + 肝 SER/糖原与成纤维 rER 2 处增强）
+- 科学亮点: 神经元与心肌的"细胞周期 G0 锁定"（终末分化不可增殖）成为最有教学价值的分类差异; 癌细胞微核→胞质 DNA 溢出与 cGAS-STING 通路形成叙事闭环; PDAC 的 STING 表观沉默（免疫冷肿瘤）也体现在矩阵中
+- 架构沉淀: pathway-cell-matrix.ts 成为通路-细胞分类唯一真源（signature 派生自 cell-types.ts 不重复登记）; inactive 默认折叠+可教学对照的软约束设计（既满足"有要求"又保留跨细胞教学能力）
+- 产出: pathway-cell-matrix.ts(新 159 行) / pathway-library.tsx(三层筛选 UI) / lab-store.ts(setCell 联动) / cell-picker.tsx(toast) / workspace.tsx(警告横幅) / i18n.tsx(+11 键) / organelles.tsx(+~310 行) / layout3d.ts(spec+6 flag)
+- 遗留/风险: ①贴面模式核区标签互叠（Task 25 遗留）②SimEvent 双语化/PDF EN（Task 22 遗留）③癌细胞 3 个核仁与微核的碰撞检测未做（视觉重叠概率低）④390px 真机断点未复测（环境无 viewport 命令）
+- 下阶段建议: ①配体级受体表达 gating（配体面板标记"受体未表达"——比通路级更细一层）②贴面核区标签 force-simulate 防重叠 ③溶酶体自噬演示（mTOR 抑制→自噬体融合事件）④hero 图换 3D 视图截图

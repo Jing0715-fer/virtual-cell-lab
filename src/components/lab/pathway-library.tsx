@@ -6,12 +6,13 @@
  *   b) KEGG 全量目录（372 条人类通路按顶级分类分组，默认折叠，紧凑单行）
  *   - 顶部搜索：跨策划+全量按 名称/中文名/ID 即时过滤（大小写不敏感）
  */
-import { FlaskConical, ChevronRight, ChevronDown, Database, GitBranch, Search, X } from 'lucide-react';
+import { FlaskConical, ChevronRight, ChevronDown, Database, GitBranch, Search, X, Microscope, Sparkles, EyeOff } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { PATHWAY_CATALOG } from '@/data/pathway-catalog';
 import { KEGG_FULL_LIST, KEGG_FULL_MAP, KEGG_CATEGORY_ORDER, type FullPathwayEntry } from '@/data/kegg-full-catalog';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
+import { pathwayActivity, inactiveNote } from '@/data/pathway-cell-matrix';
 import { useLabStore } from '@/store/lab-store';
 import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -60,6 +61,10 @@ export function PathwayLibrary() {
 
   const [query, setQuery] = useState('');
   const [openFullGroups, setOpenFullGroups] = useState<Set<string>>(new Set());
+  /** 按当前细胞表达谱筛选策划级通路（默认开启） */
+  const [cellFilter, setCellFilter] = useState(true);
+  /** 未检出分组展开态 */
+  const [showInactive, setShowInactive] = useState(false);
   /** 当前搜索词是否命中（渲染层空态判断用） */
   const searching = query.trim().length > 0;
   const q = query.trim().toLowerCase();
@@ -79,22 +84,39 @@ export function PathwayLibrary() {
   // 当前细胞适配通路优先
   const recommended = cell?.pathways ?? [];
 
-  // 策划级分组（搜索时仅保留命中条目；分组标题按语言取 zh category / 全量目录 categoryEn）
-  const curatedGroups = useMemo(() => {
+  // 策划级分组 —— 按当前细胞表达谱分为 特征(signature) / 表达(active) / 未检出(inactive) 三层
+  const curated = useMemo(() => {
     const hit = (name: string, nameZh: string, id: string) =>
       !q || name.toLowerCase().includes(q) || nameZh.toLowerCase().includes(q) || id.toLowerCase().includes(q);
-    const groups = new Map<string, typeof PATHWAY_CATALOG>();
+    const push = (m: Map<string, typeof PATHWAY_CATALOG>, cat: string, p: (typeof PATHWAY_CATALOG)[number]) => {
+      if (!m.has(cat)) m.set(cat, []);
+      m.get(cat)!.push(p);
+    };
+    const all = new Map<string, typeof PATHWAY_CATALOG>();
+    const signature = new Map<string, typeof PATHWAY_CATALOG>();
+    const active = new Map<string, typeof PATHWAY_CATALOG>();
+    const inactive: typeof PATHWAY_CATALOG = [];
     for (const p of PATHWAY_CATALOG) {
       if (!hit(p.name, p.nameZh, p.id)) continue;
       const cat =
         lang === 'en'
           ? KEGG_FULL_MAP.get(p.id)?.categoryEn.split('; ').join(' · ') ?? p.category
           : p.category;
-      if (!groups.has(cat)) groups.set(cat, []);
-      groups.get(cat)!.push(p);
+      push(all, cat, p);
+      if (!cellFilter) continue;
+      const a = pathwayActivity(p.id, cellId);
+      if (a === 'inactive') inactive.push(p);
+      else if (a === 'signature') push(signature, cat, p);
+      else push(active, cat, p);
     }
-    return groups;
-  }, [q, lang]);
+    return { all, signature, active, inactive };
+  }, [q, lang, cellFilter, cellId]);
+
+  const sum = (m: Map<string, unknown[]>) => [...m.values()].reduce((n, list) => n + list.length, 0);
+  const sigCount = sum(curated.signature);
+  const actCount = sum(curated.active);
+  const inactCount = curated.inactive.length;
+  const curatedMatched = sum(curated.all);
 
   // 全量目录分组：顶级分类 → 子类 → 条目（zh 用 categoryZh · EN 用 categoryEn）
   const fullGroups = useMemo(() => {
@@ -140,8 +162,6 @@ export function PathwayLibrary() {
     return { groups, matched };
   }, [q, lang]);
 
-  const curatedMatched = [...curatedGroups.values()].reduce((n, list) => n + list.length, 0);
-
   const toggleFullGroup = (top: string) => {
     setOpenFullGroups((prev) => {
       const next = new Set(prev);
@@ -150,6 +170,84 @@ export function PathwayLibrary() {
       return next;
     });
   };
+
+  /** 策划级通路行（tier: all=不筛选模式 / signature=特征 / active=表达 / inactive=未检出） */
+  const renderRows = (list: (typeof PATHWAY_CATALOG)[number][], tier: 'all' | 'signature' | 'active' | 'inactive') =>
+    list.map((p) => {
+      const active = pathwayId === p.id;
+      const st = statsMap.get(p.id);
+      const note = tier === 'inactive' ? inactiveNote(p.id, cellId) : null;
+      return (
+        <button
+          key={p.id}
+          onClick={() => selectPathway(p.id)}
+          className={cn(
+            'group relative w-full rounded-lg border px-2.5 py-2 text-left transition-all',
+            active
+              ? 'border-emerald-500/50 bg-emerald-500/10 shadow-[0_0_16px_rgba(52,211,153,0.15)]'
+              : tier === 'inactive'
+                ? 'border-white/5 bg-white/[0.01] opacity-60 hover:opacity-100 hover:border-rose-500/30 hover:bg-white/[0.04]'
+                : 'border-white/5 bg-white/[0.02] hover:border-emerald-500/30 hover:bg-white/[0.05]',
+          )}
+        >
+          {tier === 'all' && recommended.includes(p.id) && !active && (
+            <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400/70" />
+          )}
+          <div className="flex items-center gap-1.5">
+            <span
+              className={cn(
+                'text-[12.5px] font-medium',
+                active ? 'text-emerald-200' : tier === 'inactive' ? 'text-slate-400' : 'text-slate-200',
+              )}
+            >
+              {lang === 'zh' ? p.nameZh : p.name}
+            </span>
+            {tier === 'signature' && (
+              <span className="flex items-center gap-0.5 rounded bg-amber-500/15 px-1 py-px text-[8.5px] text-amber-300/90">
+                <Sparkles className="h-2 w-2" />
+                {t('pw.signatureBadge')}
+              </span>
+            )}
+            {tier === 'all' && recommended.includes(p.id) && (
+              <span className="rounded bg-emerald-500/15 px-1 py-px text-[8.5px] text-emerald-300/90">{t('pw.adapted')}</span>
+            )}
+            {tier === 'inactive' && (
+              <span className="rounded bg-rose-500/10 px-1 py-px text-[8.5px] text-rose-300/80">{t('pw.inactiveBadge')}</span>
+            )}
+            {CURATED_TOUR_PATHWAYS.has(p.id) && (
+              <span
+                title={t('pw.tourTitle')}
+                className="rounded bg-teal-500/15 px-1 py-px text-[8.5px] text-teal-300/90"
+              >
+                {t('pw.tourBadge')}
+              </span>
+            )}
+            <ChevronRight
+              className={cn(
+                'ml-auto h-3 w-3 shrink-0 transition-transform',
+                active ? 'text-emerald-400' : 'text-slate-600 group-hover:translate-x-0.5',
+              )}
+            />
+          </div>
+          <div className="mt-0.5 font-mono text-[9.5px] text-slate-500">
+            {p.id} · {st?.geneCount ? `${st.geneCount} ${t('pw.molecules')}` : `${p.seeds.length} ${t('pw.seeds')}`}
+          </div>
+          {note && (
+            <div
+              className="mt-1 line-clamp-2 text-[9.5px] leading-3.5 text-rose-300/60"
+              title={lang === 'zh' ? note.zh : note.en}
+            >
+              {lang === 'zh' ? note.zh : note.en}
+            </div>
+          )}
+          {active && (
+            <div className="mt-1.5 border-t border-emerald-500/20 pt-1.5 text-[10px] leading-4 text-slate-400">
+              {lang === 'en' && p.cascadeEn ? p.cascadeEn : p.cascade}
+            </div>
+          )}
+        </button>
+      );
+    });
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -230,66 +328,111 @@ export function PathwayLibrary() {
         )}
       </div>
 
+      {/* 细胞表达谱筛选开关（通路 × 细胞类型分类） */}
+      <div className="flex items-center gap-2 border-b border-white/5 px-3 py-1.5">
+        <button
+          role="switch"
+          aria-checked={cellFilter}
+          aria-label={t('pw.cellFilter')}
+          onClick={() => setCellFilter((v) => !v)}
+          title={t('pw.cellFilterTip')}
+          className="flex items-center gap-1.5 text-[10.5px] text-slate-300 transition hover:text-slate-100"
+        >
+          <span
+            className={cn(
+              'relative inline-flex h-3.5 w-6 shrink-0 rounded-full transition-colors',
+              cellFilter ? 'bg-emerald-500/60' : 'bg-white/10',
+            )}
+          >
+            <span
+              className={cn(
+                'absolute top-[3px] h-2 w-2 rounded-full bg-white transition-all',
+                cellFilter ? 'left-[13px]' : 'left-[3px]',
+              )}
+            />
+          </span>
+          <Microscope className="h-3 w-3 text-emerald-400/80" />
+          {t('pw.cellFilter')}
+        </button>
+        {cellFilter && (
+          <span className="ml-auto shrink-0 text-[9.5px] text-slate-500">
+            {lang === 'zh'
+              ? `${sigCount} 特征 · ${actCount} 表达 · ${inactCount} 未检出`
+              : `${sigCount} sig · ${actCount} on · ${inactCount} off`}
+          </span>
+        )}
+      </div>
+
       {/* 通路列表（策划级 + 全量目录） */}
       <div className="min-h-0 flex-1 overflow-y-auto p-2 lab-scrollbar">
-        {curatedMatched > 0 && (
+        {/* 策划级（按本细胞表达谱分层） */}
+        {curatedMatched > 0 && !cellFilter && (
           <>
             <div className="flex items-center gap-1.5 px-2 pb-1.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-emerald-400/80">
               {lang === 'zh'
                 ? `${t('pw.curatedSection')} · ${curatedMatched} 条`
                 : `${t('pw.curatedSection')} · ${curatedMatched}`}
             </div>
-            {[...curatedGroups.entries()].map(([cat, list]) => (
+            {[...curated.all.entries()].map(([cat, list]) => (
               <div key={cat} className="mb-3">
                 <div className="px-2 pb-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">{cat}</div>
-                <div className="space-y-1">
-                  {list.map((p) => {
-                    const active = pathwayId === p.id;
-                    const rec = recommended.includes(p.id);
-                    const st = statsMap.get(p.id);
-                    return (
-                      <button
-                        key={p.id}
-                        onClick={() => selectPathway(p.id)}
-                        className={cn(
-                          'group relative w-full rounded-lg border px-2.5 py-2 text-left transition-all',
-                          active
-                            ? 'border-emerald-500/50 bg-emerald-500/10 shadow-[0_0_16px_rgba(52,211,153,0.15)]'
-                            : 'border-white/5 bg-white/[0.02] hover:border-emerald-500/30 hover:bg-white/[0.05]',
-                        )}
-                      >
-                        {rec && !active && (
-                          <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400/70" />
-                        )}
-                        <div className="flex items-center gap-1.5">
-                          <span className={cn('text-[12.5px] font-medium', active ? 'text-emerald-200' : 'text-slate-200')}>{lang === 'zh' ? p.nameZh : p.name}</span>
-                          {rec && (
-                            <span className="rounded bg-emerald-500/15 px-1 py-px text-[8.5px] text-emerald-300/90">{t('pw.adapted')}</span>
-                          )}
-                          {CURATED_TOUR_PATHWAYS.has(p.id) && (
-                            <span
-                              title={t('pw.tourTitle')}
-                              className="rounded bg-teal-500/15 px-1 py-px text-[8.5px] text-teal-300/90"
-                            >
-                              {t('pw.tourBadge')}
-                            </span>
-                          )}
-                          <ChevronRight className={cn('ml-auto h-3 w-3 transition-transform', active ? 'text-emerald-400' : 'text-slate-600 group-hover:translate-x-0.5')} />
-                        </div>
-                        <div className="mt-0.5 font-mono text-[9.5px] text-slate-500">
-                          {p.id} · {st?.geneCount ? `${st.geneCount} ${t('pw.molecules')}` : `${p.seeds.length} ${t('pw.seeds')}`}
-                        </div>
-                        {active && (
-                          <div className="mt-1.5 border-t border-emerald-500/20 pt-1.5 text-[10px] leading-4 text-slate-400">
-                            {lang === 'en' && p.cascadeEn ? p.cascadeEn : p.cascade}
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+                <div className="space-y-1">{renderRows(list, 'all')}</div>
               </div>
             ))}
+          </>
+        )}
+        {curatedMatched > 0 && cellFilter && (
+          <>
+            <div className="flex items-center gap-1.5 px-2 pb-1.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-emerald-400/80">
+              {lang === 'zh'
+                ? `${t('pw.curatedSection')} · ${sigCount + actCount + inactCount} 条`
+                : `${t('pw.curatedSection')} · ${sigCount + actCount + inactCount}`}
+            </div>
+            {/* 特征通路（该细胞的标志性通路） */}
+            {sigCount > 0 && (
+              <div className="mb-3">
+                <div className="flex items-center gap-1 px-2 pb-1.5 text-[10px] font-medium uppercase tracking-wider text-amber-300/90">
+                  <Sparkles className="h-3 w-3" />
+                  {t('pw.signatureSection')} · {sigCount}
+                </div>
+                <div className="space-y-1">{renderRows([...curated.signature.values()].flat(), 'signature')}</div>
+              </div>
+            )}
+            {/* 本细胞表达通路 */}
+            {actCount > 0 && (
+              <div className="mb-3">
+                <div className="px-2 pb-1.5 text-[10px] font-medium uppercase tracking-wider text-emerald-400/70">
+                  {t('pw.activeSection')} · {actCount}
+                </div>
+                <div className="space-y-1">
+                  {[...curated.active.entries()].map(([cat, list]) => (
+                    <div key={cat} className="mb-2">
+                      <div className="px-2 pb-1 text-[9.5px] text-slate-600">{cat}</div>
+                      {renderRows(list, 'active')}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {/* 未检出 · 低活性（折叠，教学对照用） */}
+            {inactCount > 0 && (
+              <div className="mb-2">
+                <button
+                  onClick={() => setShowInactive((v) => !v)}
+                  aria-expanded={showInactive || searching}
+                  className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition hover:bg-white/[0.04]"
+                >
+                  <ChevronDown className={cn('h-3 w-3 shrink-0 text-slate-500 transition-transform', showInactive || searching ? '' : '-rotate-90')} />
+                  <EyeOff className="h-3 w-3 shrink-0 text-rose-400/60" />
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                    {t('pw.inactiveSection')} · {inactCount}
+                  </span>
+                </button>
+                {(showInactive || searching) && (
+                  <div className="mt-0.5 space-y-1">{renderRows(curated.inactive, 'inactive')}</div>
+                )}
+              </div>
+            )}
           </>
         )}
 

@@ -787,10 +787,11 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     group.add(inst);
   }
 
-  // 滑面内质网（肝细胞解毒管系）
+  // 滑面内质网（肝细胞解毒管系 —— CYP450 管网）
   if (spec.glycogen) {
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
-    for (let i = 0; i < 8; i++) {
+    const serN = perf ? 7 : 12;
+    for (let i = 0; i < serN; i++) {
       const pts: THREE.Vector3[] = [];
       for (let k = 0; k <= 5; k++) {
         const t = k / 5;
@@ -798,6 +799,12 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         pts.push(new THREE.Vector3(p.x, p.y, p.z));
       }
       parts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 20, 0.085, 7)) });
+    }
+    // 管系 junction 节点（三通小室）
+    const jGeo = track(new THREE.SphereGeometry(0.11, 8, 6));
+    for (let j = 0; j < 5; j++) {
+      const jp = sph(R * (0.62 + hash01(`sj${j}`) * 0.24), (hash01(`sj${j}`, 3) - 0.5) * 2.0, hash01(`sj${j}`, 5) * Math.PI * 2);
+      parts.push({ geo: jGeo, matrix: new THREE.Matrix4().setPosition(jp.x, jp.y, jp.z) });
     }
     const ser = new THREE.Mesh(track(mergeGeoms(parts)), mat({
       color: '#5eead4',
@@ -1233,14 +1240,14 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     // 肝糖原玫瑰体（β 颗粒聚集成玫瑰体）
     const geo = track(new THREE.SphereGeometry(0.05, 6, 5));
     const m3 = track(new THREE.MeshStandardMaterial({ color: '#fde047', emissive: '#a16207', emissiveIntensity: 0.45 * dim, transparent: true, opacity: 0.62 * dim, depthWrite: false }));
-    const rosettes = 3;
+    const rosettes = 6;
     const perRosette = 15;
     const inst = new THREE.InstancedMesh(geo, m3, rosettes * perRosette);
     const mm = new THREE.Matrix4();
     for (let i = 0; i < rosettes * perRosette; i++) {
       const rosette = Math.floor(i / perRosette);
-      const cp = sph(R * (0.55 + rosette * 0.13), 0.3 + rosette * 0.5, 1.2 + rosette * 2.3);
-      const off = sph(0.08 + hash01(`g${i}`) * 0.24, (hash01(`g${i}`, 5) - 0.5) * 3, hash01(`g${i}`, 7) * Math.PI * 2);
+      const cp = sph(R * (0.55 + (rosette % 3) * 0.14), 0.3 + rosette * 0.62, 1.2 + rosette * 1.7);
+      const off = sph(0.08 + hash01(`g${i}`) * 0.26, (hash01(`g${i}`, 5) - 0.5) * 3, hash01(`g${i}`, 7) * Math.PI * 2);
       const s = 0.7 + hash01(`gs${i}`) * 0.6;
       mm.makeScale(s, s, s);
       mm.setPosition(cp.x + off.x, cp.y + off.y, cp.z + off.z);
@@ -1425,6 +1432,76 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     }
     group.add(spines);
     labels.push({ pos: sph(R * 1.32, -0.9, 2.4), zh: '基底树突（棘突）', latin: 'Basal dendrite' });
+
+    if (spec.synapticBoutons) {
+      // 突触扣结: 轴突末端扣结 + 结旁 en-passant 扣结（突触囊泡簇 + 致密芯囊泡 + 扣结内线粒体）
+      const bouMat = mat({ color: '#2dd4bf', transmission: transOn ? 0.35 : 0, thickness: 0.35, emissive: '#0d9488', emissiveIntensity: 0.22, opacity: transOn ? 1 : 0.55, roughness: 0.4 });
+      const svGeo = track(new THREE.SphereGeometry(0.042, 6, 5));
+      const svMat = track(new THREE.MeshStandardMaterial({ color: '#ccfbf1', emissive: '#5eead4', emissiveIntensity: 0.55 * dim, transparent: true, opacity: 0.78 * dim, depthWrite: false }));
+      const dcGeo = track(new THREE.SphereGeometry(0.06, 6, 5));
+      const dcMat = track(new THREE.MeshStandardMaterial({ color: '#fde68a', emissive: '#f59e0b', emissiveIntensity: 0.7 * dim, transparent: true, opacity: 0.88 * dim }));
+      const mitoGeo = track(new THREE.CapsuleGeometry(0.085, 0.22, 4, 8));
+      const mitoMat = track(new THREE.MeshStandardMaterial({ color: '#f43f5e', emissive: '#be123c', emissiveIntensity: 0.4 * dim, transparent: true, opacity: 0.8 * dim }));
+      const mkBouton = (p: THREE.Vector3, dir: THREE.Vector3, scale: number, seed: string) => {
+        const bou = new THREE.Mesh(track(new THREE.SphereGeometry(0.3 * scale, 14, 12)), bouMat);
+        bou.position.copy(p);
+        bou.renderOrder = 62;
+        group.add(bou);
+        // 囊泡簇（清亮突触囊泡, 活性区偏向远端）
+        const ves: THREE.Matrix4[] = [];
+        const vm = new THREE.Matrix4();
+        for (let v = 0; v < 16; v++) {
+          const rnd = new THREE.Vector3(
+            hash01(`sv${seed}${v}`) - 0.5,
+            hash01(`sv${seed}${v}`, 3) - 0.5,
+            hash01(`sv${seed}${v}`, 5) - 0.5,
+          ).multiplyScalar(0.44 * scale);
+          const vp = p.clone().add(rnd).addScaledVector(dir, 0.08 * scale);
+          const s = (0.75 + hash01(`svs${seed}${v}`) * 0.6) * scale;
+          vm.makeScale(s, s, s);
+          vm.setPosition(vp.x, vp.y, vp.z);
+          ves.push(vm.clone());
+        }
+        const svInst = new THREE.InstancedMesh(svGeo, svMat, ves.length);
+        ves.forEach((m, i) => svInst.setMatrixAt(i, m));
+        svInst.instanceMatrix.needsUpdate = true;
+        svInst.renderOrder = 63;
+        group.add(svInst);
+        // 致密芯囊泡（神经肽, 少量琥珀色）
+        for (let d = 0; d < 2; d++) {
+          const dc = new THREE.Mesh(dcGeo, dcMat);
+          dc.position.copy(p).add(new THREE.Vector3(
+            (hash01(`dc${seed}${d}`) - 0.5) * 0.5,
+            (hash01(`dc${seed}${d}`, 3) - 0.5) * 0.5,
+            (hash01(`dc${seed}${d}`, 5) - 0.5) * 0.5,
+          ).multiplyScalar(scale));
+          dc.renderOrder = 63;
+          group.add(dc);
+        }
+        // 扣结内小线粒体（突触能量站）
+        const bm = new THREE.Mesh(mitoGeo, mitoMat);
+        bm.position.copy(p).addScaledVector(dir, -0.16 * scale);
+        bm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(
+          hash01(`bmx${seed}`) - 0.5,
+          hash01(`bmy${seed}`, 3) - 0.5,
+          hash01(`bmz${seed}`, 5) - 0.5,
+        ).normalize());
+        bm.renderOrder = 63;
+        group.add(bm);
+      };
+      // 轴突末端扣结（terminal bouton）+ 结旁 en-passant ×2（郎飞氏结位）
+      const endP = curve.getPoint(1);
+      const endT = curve.getTangent(1);
+      mkBouton(endP.clone().addScaledVector(endT, 0.14), endT, 1.15, 'end');
+      for (const t of [0.38, 0.65]) {
+        const bp = curve.getPoint(t);
+        const bt = curve.getTangent(t);
+        const side = new THREE.Vector3().crossVectors(bt, new THREE.Vector3(0, 1, 0)).normalize();
+        if (side.lengthSq() < 0.01) side.set(1, 0, 0);
+        mkBouton(bp.clone().addScaledVector(side, 0.52), bt, 0.85, `ep${t}`);
+      }
+      labels.push({ pos: endP.clone().addScaledVector(endT, 1.0), zh: '突触扣结（囊泡释放）', latin: 'Synaptic bouton' });
+    }
   }
 
   if (spec.apicalTuft) {
@@ -1666,6 +1743,232 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       }
     }
     labels.push({ pos: cDir.clone().multiplyScalar(cR + 1.5).addScaledVector(t1, 1.2), zh: '胆小管（胆汁）', latin: 'Bile canaliculus' });
+  }
+
+  if (spec.ttubules) {
+    // T 小管（横小管）: 肌膜在 Z 线位周期性内陷（与肌节周期对齐）+ 连接肌浆网终端池 = 二联体/三联体位形
+    const SARCO = 0.62; // 与肌原纤维肌节周期一致
+    const ax = 2.02, ay = 0.7, az = 0.66; // rod 主轴（与 cell-shape.ts 一致）
+    const stationStep = perf ? SARCO * 3 : SARCO * 2;
+    const xMax = 1.52 * R;
+    /** 两点间胶囊（默认 Y 轴向 → 定向） */
+    const capsuleBetween = (a: THREE.Vector3, b: THREE.Vector3, r: number) => {
+      const dir = b.clone().sub(a);
+      const len = Math.max(0.06, dir.length() - r * 1.2);
+      const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+      const matrix = new THREE.Matrix4().compose(
+        a.clone().add(b).multiplyScalar(0.5),
+        quat,
+        new THREE.Vector3(1, 1, 1),
+      );
+      return { geo: track(new THREE.CapsuleGeometry(r, len, 4, 8)), matrix };
+    };
+    const ttParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
+    const jsrParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
+    for (let x0 = -xMax; x0 <= xMax; x0 += stationStep) {
+      // 该站位处椭球横截面收缩因子
+      const sh = Math.sqrt(Math.max(0.12, 1 - (x0 / (ax * R * 0.98)) ** 2));
+      const perStation = 6;
+      const stationSeed = Math.round(x0 * 10);
+      for (let k = 0; k < perStation; k++) {
+        const th = (k / perStation) * Math.PI * 2 + hash01(`tt${stationSeed}`) * 0.8;
+        const sy = Math.cos(th) * ay * R * sh;
+        const sz = Math.sin(th) * az * R * sh;
+        // 横管: 肌膜内陷 → 向心深入（0.62 深度比）
+        ttParts.push(capsuleBetween(
+          new THREE.Vector3(x0, sy * 0.98, sz * 0.98),
+          new THREE.Vector3(x0, sy * 0.34, sz * 0.34),
+          0.085,
+        ));
+        // 连接肌浆网终端池（terminal cisterna 扁囊, 贴横管内端 —— 钙释放单元）
+        jsrParts.push({
+          geo: track(new THREE.SphereGeometry(0.17, 10, 8)),
+          matrix: new THREE.Matrix4().compose(
+            new THREE.Vector3(x0, sy * 0.44, sz * 0.44),
+            new THREE.Quaternion(),
+            new THREE.Vector3(1, 0.52, 0.78),
+          ),
+        });
+      }
+    }
+    // 纵行肌浆网（longitudinal SR 网管, 环绕肌原纤维束走行）
+    const lsrParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
+    const nL = perf ? 6 : 10;
+    for (let i = 0; i < nL; i++) {
+      const th = (i / nL) * Math.PI * 2 + 0.3;
+      const ring = 0.74 + hash01(`lsr${i}`) * 0.18;
+      const fy = Math.cos(th) * ay * R * ring;
+      const fz = Math.sin(th) * az * R * ring;
+      const xr = 1.5 * R;
+      const bow = (hash01(`lsrb${i}`) - 0.5) * 0.5;
+      const fpts = [
+        new THREE.Vector3(-xr, fy, fz),
+        new THREE.Vector3(0, fy + bow, fz + bow * 0.4),
+        new THREE.Vector3(xr, fy, fz),
+      ];
+      lsrParts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(fpts), 24, 0.034, 6)) });
+    }
+    const tt = new THREE.Mesh(track(mergeGeoms(ttParts)), mat({
+      color: '#14b8a6', emissive: '#0d9488', emissiveIntensity: 0.3,
+      opacity: transOn ? 0.9 : 0.5, transmission: transOn ? 0.25 : 0, thickness: 0.3, roughness: 0.4,
+    }));
+    tt.renderOrder = 61;
+    group.add(tt);
+    const jsr = new THREE.Mesh(track(mergeGeoms(jsrParts)), mat({
+      color: '#34d399', emissive: '#059669', emissiveIntensity: 0.5,
+      opacity: 0.85, roughness: 0.35, clearcoat: 0.3,
+    }));
+    jsr.renderOrder = 62;
+    group.add(jsr);
+    const lsr = new THREE.Mesh(track(mergeGeoms(lsrParts)), mat({
+      color: '#2dd4bf', emissive: '#0d9488', emissiveIntensity: 0.35,
+      opacity: 0.55, roughness: 0.4,
+    }));
+    lsr.renderOrder = 60;
+    group.add(lsr);
+    labels.push({ pos: { x: R * 1.05, y: -ay * R * 0.82, z: az * R * 0.55 }, zh: 'T 小管（Z 线位内陷）', latin: 'T-tubule' });
+    labels.push({ pos: { x: -R * 1.25, y: ay * R * 0.85, z: 0 }, zh: '肌浆网（Ca²⁺ 库）', latin: 'Sarcoplasmic reticulum' });
+  }
+
+  if (spec.micronuclei) {
+    // 微核: 染色体不稳定（CIN）标志 —— 有丝分裂滞后染色体形成的小核; 破裂微核暴露胞质 DNA（cGAS-STING 感知起点）
+    const chromMat = mat({ color: '#be3f68', emissive: '#9d174d', emissiveIntensity: 0.55, roughness: 0.6, opacity: 0.82, clearcoat: 0.2 });
+    const envMat = mat({ color: '#e879f9', transmission: transOn ? 0.25 : 0, thickness: 0.3, emissive: '#a21caf', emissiveIntensity: 0.16, opacity: transOn ? 1 : 0.42, roughness: 0.4 });
+    const rimMat = track(new THREE.MeshStandardMaterial({ color: '#f5d0fe', emissive: '#c026d3', emissiveIntensity: 0.85 * dim, transparent: true, opacity: 0.95 * dim }));
+    const spillMat = track(new THREE.MeshStandardMaterial({ color: '#f9a8d4', emissive: '#be185d', emissiveIntensity: 0.8 * dim, transparent: true, opacity: 0.85 * dim }));
+    const spillGeo = track(new THREE.SphereGeometry(0.055, 6, 5));
+    const sites: { dir: THREE.Vector3; r: number; ruptured: boolean }[] = [
+      { dir: new THREE.Vector3(0.82, 0.35, 0.45).normalize(), r: 0.74, ruptured: true },
+      { dir: new THREE.Vector3(-0.55, 0.62, -0.56).normalize(), r: 0.58, ruptured: false },
+    ];
+    sites.forEach((s, si) => {
+      const c = s.dir.clone().multiplyScalar(N * 1.42);
+      const body = new THREE.Mesh(track(displacedSphere(s.r, 2, 3.2, s.r * 0.16, 47 + si * 13)), chromMat);
+      body.position.copy(c);
+      body.renderOrder = 47;
+      group.add(body);
+      if (s.ruptured) {
+        // 破裂被膜: 球壳留豁口（phi 扇区缺失）+ 豁口发光边缘环 + 胞质 DNA 溢出颗粒
+        const gap = 1.15;
+        const env = new THREE.Mesh(track(new THREE.SphereGeometry(s.r * 1.18, 24, 18, gap / 2, Math.PI * 2 - gap)), envMat);
+        env.renderOrder = 48;
+        const rim = new THREE.Mesh(track(new THREE.TorusGeometry(s.r * 1.18, 0.03, 8, 32, Math.PI * 2 - gap)), rimMat);
+        rim.rotation.z = gap / 2;
+        rim.renderOrder = 49;
+        const wrap = new THREE.Group();
+        wrap.position.copy(c);
+        wrap.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), s.dir);
+        wrap.add(env, rim);
+        group.add(wrap);
+        for (let d = 0; d < 5; d++) {
+          const spill = new THREE.Mesh(spillGeo, spillMat);
+          const along = s.r * 1.25 + d * 0.19;
+          const jitter = new THREE.Vector3(
+            (hash01(`mn${si}${d}`) - 0.5) * 0.22,
+            (hash01(`mn${si}${d}`, 3) - 0.5) * 0.22,
+            (hash01(`mn${si}${d}`, 5) - 0.5) * 0.22,
+          );
+          spill.position.copy(c).addScaledVector(s.dir, along).add(jitter);
+          spill.renderOrder = 49;
+          group.add(spill);
+        }
+      } else {
+        const env = new THREE.Mesh(track(new THREE.SphereGeometry(s.r * 1.18, 24, 18)), envMat);
+        env.position.copy(c);
+        env.renderOrder = 48;
+        group.add(env);
+      }
+    });
+    labels.push({ pos: sites[0].dir.clone().multiplyScalar(N * 1.42 + 1.35), zh: '微核（基因组不稳定）', latin: 'Micronucleus' });
+  }
+
+  if (spec.tcrClusters) {
+    // TCR/CD3 微簇: 膜面小簇（中心 + 卫星, TCR-CD3 复合体聚集剪影 —— 免疫突触前体）
+    const geo = track(new THREE.SphereGeometry(0.048, 6, 5));
+    const m9 = track(new THREE.MeshStandardMaterial({ color: '#fda4af', emissive: '#fb7185', emissiveIntensity: 0.65 * dim, transparent: true, opacity: 0.82 * dim, depthWrite: false }));
+    const clusters = Math.round(9 * q) + 3;
+    const perC = 6;
+    const inst = new THREE.InstancedMesh(geo, m9, clusters * perC);
+    const mm = new THREE.Matrix4();
+    let idx = 0;
+    fibSphere(clusters, 1).forEach((base, c) => {
+      const dir = new THREE.Vector3(base.x, base.y, base.z).normalize();
+      const rr = cellSurf(dir, R, SHAPE, 0.08);
+      const center = new THREE.Vector3(dir.x * rr, dir.y * rr, dir.z * rr);
+      mm.makeScale(1.3, 1.3, 1.3);
+      mm.setPosition(center.x, center.y, center.z);
+      inst.setMatrixAt(idx++, mm);
+      for (let s = 0; s < perC - 1; s++) {
+        const off = new THREE.Vector3(
+          hash01(`tc${c}${s}`) - 0.5,
+          hash01(`tc${c}${s}`, 3) - 0.5,
+          hash01(`tc${c}${s}`, 7) - 0.5,
+        ).normalize().multiplyScalar(0.15 + hash01(`tcr${c}${s}`) * 0.07);
+        const p = center.clone().add(off);
+        const sc = 0.75 + hash01(`tcs${c}${s}`) * 0.4;
+        mm.makeScale(sc, sc, sc);
+        mm.setPosition(p.x, p.y, p.z);
+        inst.setMatrixAt(idx++, mm);
+      }
+    });
+    inst.instanceMatrix.needsUpdate = true;
+    inst.renderOrder = 62;
+    group.add(inst);
+    const lp = sph(R * 1.28, 0.9, 2.0);
+    labels.push({ pos: lp, zh: 'TCR/CD3 微簇', latin: 'TCR microcluster' });
+  }
+
+  if (spec.terminalWeb) {
+    // 终末网: 顶面微绒毛根部的横行微丝网（rootlet 交织层 —— 刷状缘机械整联）
+    const apexY = cellSurf(new THREE.Vector3(0, 1, 0), R, SHAPE);
+    const webY = apexY - 0.45;
+    const webR = 0.58 * R;
+    const geo = track(new THREE.CapsuleGeometry(0.017, 0.5, 3, 6));
+    const m10 = track(new THREE.MeshStandardMaterial({ color: '#5eead4', emissive: '#0d9488', emissiveIntensity: 0.4 * dim, transparent: true, opacity: 0.42 * dim, depthWrite: false }));
+    const count = Math.round(44 * q) + 12;
+    const inst = new THREE.InstancedMesh(geo, m10, count);
+    const mm = new THREE.Matrix4();
+    const qq = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    for (let i = 0; i < count; i++) {
+      const a = hash01(`tw${i}`) * Math.PI * 2;
+      const rr = Math.sqrt(hash01(`twr${i}`)) * webR;
+      const px = Math.cos(a) * rr;
+      const pz = Math.sin(a) * rr * 0.85;
+      const yaw = hash01(`twy${i}`) * Math.PI * 2;
+      const dir = new THREE.Vector3(Math.cos(yaw), 0, Math.sin(yaw));
+      qq.setFromUnitVectors(up, dir);
+      const s = 0.6 + hash01(`tws${i}`) * 0.8;
+      mm.compose(
+        new THREE.Vector3(px, webY + (hash01(`twz${i}`) - 0.5) * 0.18, pz),
+        qq,
+        new THREE.Vector3(s, s * (0.8 + hash01(`twl${i}`) * 0.6), s),
+      );
+      inst.setMatrixAt(i, mm);
+    }
+    inst.instanceMatrix.needsUpdate = true;
+    inst.renderOrder = 61;
+    group.add(inst);
+    labels.push({ pos: { x: webR * 0.95, y: webY + 0.35, z: 0 }, zh: '终末网（微绒毛根微丝）', latin: 'Terminal web' });
+  }
+
+  if (spec.desmosomes) {
+    // 桥粒: 侧膜斑块（角蛋白中间丝锚定点 —— 上皮机械强度铆钉）
+    const plaqueGeo = track(new THREE.SphereGeometry(0.09, 8, 6));
+    const plaqueMat = track(new THREE.MeshStandardMaterial({ color: '#fde68a', emissive: '#f59e0b', emissiveIntensity: 0.75 * dim, transparent: true, opacity: 0.92 * dim }));
+    const n = 7;
+    for (let i = 0; i < n; i++) {
+      const lon = (i / n) * Math.PI * 2 + 0.4;
+      const lat = (hash01(`ds${i}`) - 0.5) * 0.85;
+      const d = new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon));
+      const rr = cellSurf(d, R, SHAPE, -0.03);
+      const p = new THREE.Mesh(plaqueGeo, plaqueMat);
+      p.position.set(d.x * rr, d.y * rr, d.z * rr);
+      p.scale.set(1.5, 0.7, 1.05);
+      p.renderOrder = 62;
+      group.add(p);
+    }
+    labels.push({ pos: sph(R * 1.3, 0.15, 3.8), zh: '桥粒（中间丝锚定）', latin: 'Desmosome' });
   }
 
   /* ================= 胞外悬浮微粒（浸没感） ================= */

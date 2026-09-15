@@ -10,6 +10,7 @@ import {
 } from '@/lib/simulation/engine';
 import { applyScaffoldEdges } from '@/lib/simulation/scaffold';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
+import { pathwayActivity } from '@/data/pathway-cell-matrix';
 import { INHIBITORS } from '@/data/inhibitors';
 import { resolveMutations } from '@/lib/simulation/mutation-equiv';
 
@@ -89,10 +90,19 @@ export const useLabStore = create<LabStore>((set, get) => ({
   inhibition: {},
 
   setCell: (id) => {
+    // 通路 × 细胞类型表达约束: 当前通路在新细胞中未检出时，自动切换至该细胞的特征通路
+    const { pathwayId, resetSim, selectPathway } = get();
+    const mismatch = !!pathwayId && pathwayActivity(pathwayId, id) === 'inactive';
     set({ cellId: id });
+    if (mismatch) {
+      const sig = CELL_TYPE_MAP.get(id)?.pathways[0];
+      if (sig && sig !== pathwayId) {
+        selectPathway(sig); // graph 置空 → 触发重新获取
+        return;
+      }
+    }
     // 细胞系切换后重置模拟（保持通路选择）
-    const { graph, resetSim } = get();
-    if (graph) resetSim();
+    if (get().graph) resetSim();
   },
 
   selectPathway: (id) => {

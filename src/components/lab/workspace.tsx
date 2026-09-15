@@ -4,13 +4,14 @@
  * 模拟实验台 —— 三栏工作区：通路库 | 细胞/通路视图 + 控制台 | 检测器/事件流
  * 负责：通路图数据获取（→ store）、模拟 tick 循环驱动
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useQuery } from '@tanstack/react-query';
-import { Microscope, Map as MapIcon, FlaskConical, Boxes, Orbit, Pill, Activity, GitCompare } from 'lucide-react';
+import { Microscope, Map as MapIcon, FlaskConical, Boxes, Orbit, Pill, Activity, GitCompare, AlertTriangle, X } from 'lucide-react';
 import type { PathwayGraph } from '@/types/kegg';
 import { useLabStore } from '@/store/lab-store';
 import { useCompareStore } from '@/store/compare-store';
+import { inactiveNote } from '@/data/pathway-cell-matrix';
 import { VirtualCellView } from './virtual-cell';
 import { PathwayMapView } from './pathway-map-view';
 import { CompareView } from './compare-view';
@@ -52,6 +53,7 @@ function EngineLoading() {
 export function LabWorkspace() {
   const { t, lang } = useLang();
   const pathwayId = useLabStore((s) => s.pathwayId);
+  const cellId = useLabStore((s) => s.cellId);
   const view = useLabStore((s) => s.view);
   const setView = useLabStore((s) => s.setView);
   const loadGraph = useLabStore((s) => s.loadGraph);
@@ -93,6 +95,15 @@ export function LabWorkspace() {
       loadGraph(data);
     }
   }, [data, pathwayId, graph, setGraphState, loadGraph]);
+
+  // 通路 × 细胞类型不匹配（教学对照模式）→ 顶部警告条（dismiss 按 key 记忆, 切换通路/细胞后重新出现）
+  const mismatchKey = `${pathwayId ?? ''}:${cellId}`;
+  const mismatchNote = useMemo(() => {
+    if (!pathwayId) return null;
+    const note = inactiveNote(pathwayId, cellId);
+    return note ? (lang === 'zh' ? note.zh : note.en) : null;
+  }, [pathwayId, cellId, lang]);
+  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
 
   // 模拟循环
   useEffect(() => {
@@ -195,6 +206,31 @@ export function LabWorkspace() {
             if (view !== 'cell3d') selectNode(null);
           }}
         >
+          {/* 通路-细胞类型不匹配警告（教学对照模式，可关闭） */}
+          {mismatchNote && dismissedKey !== mismatchKey && (
+            <div className="absolute left-1/2 top-2 z-30 w-[min(94%,580px)] -translate-x-1/2">
+              <div className="rounded-lg border border-amber-500/40 bg-amber-950/85 px-3 py-2 shadow-lg backdrop-blur-sm">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] font-semibold text-amber-300">{t('pw.warnTitle')}</div>
+                    <div className="mt-0.5 text-[10px] leading-4 text-amber-200/75">{mismatchNote}</div>
+                    <div className="mt-1 text-[9.5px] leading-3.5 text-amber-200/50">{t('pw.warnBody')}</div>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDismissedKey(mismatchKey);
+                    }}
+                    aria-label="dismiss"
+                    className="shrink-0 rounded p-0.5 text-amber-400/60 transition hover:text-amber-200"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {showLoading ? (
             <div className="flex h-full items-center justify-center">
               <div className="w-64 space-y-3 text-center">
