@@ -1113,3 +1113,44 @@ Stage Summary:
 - 产出: cell-shape.ts(+100 行核体系) / organelles.tsx(~24 处成形改造) / layout3d.ts(核感知布局) / section-view.tsx(核盘椭圆+镜像修复) / virtual-cell-3d.tsx(核机位) / mrna-flow.tsx(出核轨迹) / page.tsx(hero 空隙) / scripts/verify-nucleus-shape.ts(新, 数值验证工具)
 - 遗留/风险: ①贴面模式核区标签互叠（Task 25 遗留未变）②SimEvent 双语化/PDF EN（Task 22 遗留）③挤压方向细胞器轻擦核面（硬钳策略, 视觉可接受）④390px 真机断点未复测（环境无 viewport 命令）
 - 下阶段建议: ①肝细胞双核（真实肝板常见）②核仁在杆状核内串珠排列增强③贴面核区标签 force-simulate 防重叠④hero 图换 3D 视图截图
+
+---
+Task ID: 31
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户需求——"虽然现在不都是圆球了，但是还是和目前的细胞轮廓不匹配，不能完全根据细胞轮廓的剖面来匹配吗？"——剖面填充与细胞轮廓精确贴合 + 形状声明与实现不一致的根因修复
+
+Work Log:
+- 【根因分析】两层"轮廓不匹配"根因:
+  ①剖面填充盘仍是椭圆近似（SHAPE_EXTENT 轴向缩放圆盘）——梭形尖端/锥体斜边/柱状平底处填充溢出或缩进真实切缘
+  ②【重大发现】形状函数声明与实现严重背离: spindle ellip(1.82)×0.58 方向锥化互相抵消 → 实测仅 1.15:1（几乎球形!）; rod 实测 2.01:1（声明 3:1）; SHAPE_EXTENT spindle 声明 1.84 实测 0.83 → 扫描范围虚宽/机位偏远
+  ③连带 bug: 肌原纤维(xr≤1.74R)/闰盘(xEnd=1.72R)/应力纤维(xr≤1.45R)/T小管(xMax=1.52R)/纵行SR(1.5R) 全部硬编码旧椭球主轴 → 穿膜或悬浮膜外
+- 【剖面 v3——精确相交轮廓】section-view.tsx 重写填充几何:
+  · sampleSectionContour: 切平面内 168 方位角逐方向射线求交（30 步粗扫取最后 inside→outside 段 + 22 步二分）, 径向函数与 cellSurf/shapedNucleusGeometry 完全同源（shapeFactor×R + FBM 同参数同种子）—— 零漂移
+  · 细胞质填充盘: CircleGeometry+椭圆缩放 → 动态扇形几何（中心+168 rim, UV 径向归一 → 纹理质膜线严格落在真实轮廓上）
+  · 发光缘带: RingGeometry → 轮廓三角条带（内外双顶点, 未命中方向退化不渲染）
+  · 核盘: 椭圆缩放 → 真实核相交轮廓（核椭球×分叶×FBM×中心偏移; 杆状核纵切长椭圆/横切小圆自动正确）; 渐入渐出按 maxRhoN
+  · 剖面标注锚定真实轮廓: 膜标注钉轮廓缘带外侧/胞质标注轮廓内左上/核标注随核轮廓上缘; 盘隐藏时标签同步隐藏
+  · 帧内零计算: 轮廓顶点在 effect 内原地改写预分配 BufferAttribute（深度/方位/细胞变化才重算, 无 GC churn）
+- 【形状 v7——真实比例重设计】cell-shape.ts:
+  · spindle: 旋转超椭球 p=2.6, L=1.6R/w=0.55R → 实测 2.77:1 真梭形（两端渐尖）
+  · rod: 旋转超椭球 p=5, L=1.62R/w=0.6R → 实测 2.57:1 真杆形（近柱身+钝端=闰盘位）+ 侧支芽鼓包保留
+  · columnar: 高宽 1.64→2.08:1（ellip 0.6/1.4 + 基底平坦收窄 0.26）
+  · pyramidal: 顶端收窄 0.46→0.52（金字塔感强化）
+  · SHAPE_EXTENT 全表按实测重标（含噪声采样最大值+余量）—— 修复扫描范围虚宽
+  · 新增形状查询工具: insideShape / shapeXExtent(y,z 处体内最大|x|, 30 步二分) / shapeCrossRadius(x 处横截面半径) —— 特化结构贴膜布局的精确基准
+- 【特化结构贴膜 v7】organelles.tsx: 肌原纤维/闰盘/T 小管站点/纵行 SR/应力纤维全部改用求解器（止于膜内×0.9-0.94 + 噪声裕量）; 闰盘 xEnd=真实杆端−0.1（旧 1.72R 悬浮膜外已修）; 相关标签位置同步收紧到新轮廓内
+- 【数值验证】scripts/verify-section-contour.ts（新）: 7 形状×3 方位×5 深度全组合——表面残差 ≤1e-3 / rim±0.05 外内侧性 / 掠射薄月牙(<1.4 单位)感知豁免 / 过心 maxRho 与 720 细扫解析锚吻合（21/21 全对, 如 fibroblast/front 22.47 / side 8.16——梭形纵横切面比例正确）/ columnar 基底核垂足方向正确
+  scripts/verify-cell-shape.ts（新）: 实现比例参照带断言（spindle 2.77∈[2.5,3.1] / rod 2.57∈[2.3,2.9] / columnar 高宽 2.08∈[1.75,2.3] / 其余不变）/ extent 表偏差 ≤0.28 / 求解器锥形收缩+体内边界断言
+- QA（agent-browser 端到端, 1280×577, 网页内全屏 1260×568 画布, gl.readPixels 纯场景像素分析——rAF 内读取规避 preserveDrawingBuffer 限制）:
+  · 剪影长宽比: 成纤维 2.88:1（修复前≈1.15 球形!）/ 心肌 2.68:1 / 肝 1.03 / 上皮 0.66（高>宽柱状）/ 神经元 0.6（顶树突+轴突纵向延伸）——全部符合形态学预期
+  · 剖面行为: 核盘中心切 19.7-26.3k 紫像素, 浅切(20%)→18px 渐隐正确; 剖深 100%→细胞整体裁空仅剩贴面分子; 三方位判别: 冠状 19.7k vs 矢状 2.3k 紫像素（杆状核纵切长椭圆/横切小圆自动正确）
+  · 回归: 分子点击→EGFR 档案（Y992/1045/1068/1148/1173 残基注释）✓ / 播放 T+10.5s 阶段推进 ✓ / hero 间距 104px 无回归 ✓ / 无横向溢出 ✓ / 刷新后 console 零新错误 ✓
+  · lint 零错误; tsc 项目文件零错误（examples/audit/skills 历史遗留不计）
+
+Stage Summary:
+- 用户需求彻底落地: "完全根据细胞轮廓的剖面来匹配" —— 剖面填充/缘带/核盘三件套 = 切平面与细胞表面的精确相交轮廓（与 3D 几何同源零漂移）; 并顺藤摸瓜修复了更深的根因——形状声明与实现背离（梭形实测球形）+ 特化结构硬编码穿膜
+- 科学性: 成纤维梭形 2.9:1（Ross Histology）/ 心肌杆状 2.6:1 分支圆柱（Alberts ~100×25μm）/ 肠上皮柱状 2:1 —— 全部有教材参照且数值验证断言锁定
+- 架构沉淀: shapeXExtent/shapeCrossRadius 成为长轴结构的贴膜布局标准范式（形状再重设计结构自动跟随）; 剖面轮廓采样器与 cellSurf 同源公式保证剖面/3D 永不漂移
+- 产出: section-view.tsx(v3 重写 ~850 行) / cell-shape.ts(形状 v7 + 3 求解器 + extent 重标) / organelles.tsx(5 处特化结构贴膜化) / scripts/verify-section-contour.ts + verify-cell-shape.ts + qa-silhouette.ts(新 QA 工具)
+- 遗留/风险: ①贴面模式核区标签互叠（Task 25 遗留）②SimEvent 双语化/PDF EN（Task 22 遗留）③掠射薄月牙(<1.4 单位)轮廓豁免——亚像素级不可感知 ④SwiftShader 环境 GPU 帧率无法实测（新增几何均为一次性构建, 帧内零成本）
+- 下阶段建议: ①肝细胞双核 ②贴面核区标签 force-simulate 防重叠 ③溶酶体自噬演示（mTOR 抑制→自噬体融合）④hero 图换 3D 视图截图

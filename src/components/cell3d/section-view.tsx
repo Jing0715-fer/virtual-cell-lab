@@ -1,36 +1,44 @@
 'use client';
 
 /**
- * 细胞剖面展示模块（v2 —— 剖切几何精确化）
+ * 细胞剖面展示模块（v3 —— 剖面轮廓与细胞形态精确贴合）
  * ============ 科学定位 ============
  * 基于 Three.js 全局裁剪平面（clippingPlanes）剖切细胞前半部：
- *   1. 剖切深度 0-1 线性扫掠: 切平面从质膜前缘 (constant=+R) 推进到后缘 (-R)，
- *      途中经过球心 (depth=0.5) —— 与显微切片"逐层切片"语义一致
- *   2. 剖面填充双层盘（几何精确）:
- *      - 细胞质盘半径 = √(R²-h²)（h = 切面到球心距离）—— 严格贴合剖切相交圆
- *      - 核盘半径 = √(N²-h²)（h < N 时才显示）—— 切面触核后渐入、掠过核心最大
- *      两盘同心（膜与核球同心, 切面垂足即公共圆心）
- *   3. 剖面填充纹理（程序化 Canvas 双纹理, 电镜切片风格）:
- *      - 细胞质纹理: 质膜双层线/糖被/颗粒基质/线粒体剖面(长椭圆+波浪嵴线, 对应 3D 豆状形态)/高尔基平行弧堆/ER 波浪线/囊泡
- *      - 核纹理: 核被膜双线+核孔短杆/常染色质纤维/异染色质边集/核仁(纤维中心+颗粒组分)
+ *   1. 剖切深度 0-1 线性扫掠: 切平面从质膜前缘 (constant=+R·extent) 推进到后缘，
+ *      途中经过形状轴心 (depth=0.5) —— 与显微切片"逐层切片"语义一致
+ *   2. 【v3 核心】剖面填充轮廓 = 切平面与细胞表面的【精确相交轮廓】:
+ *      - 旧版用椭圆缩放圆盘近似（SHAPE_EXTENT 轴向倍率）—— 梭形尖端/锥体斜边/
+ *        多边形棱面/柱状平底处填充盘溢出或缩进真实切缘, 与细胞轮廓不匹配
+ *      - 新版逐方向射线求交: 切面内 168 个方位角, 每方向自轮廓极点外推,
+ *        与"类型形状函数 × FBM 有机噪声"（与质膜几何 cellSurf 完全同源）求交,
+ *        得到真实相交多边形 —— 填充盘/发光缘带/核盘三件套全部贴合该轮廓
+ *      - 核盘同理: 与"核椭球 × 分叶 × FBM"（与 shapedNucleusGeometry 同源）精确求交,
+ *        核中心偏移（上皮基底核等）随动
+ *   3. 剖面填充纹理（程序化 Canvas 双纹理, 电镜切片风格; UV 径向归一 →
+ *      纹理膜线/核被膜线严格落在真实轮廓上）:
+ *      - 细胞质纹理: 质膜双层线/糖被/颗粒基质/线粒体剖面/高尔基平行弧堆/ER 波浪线/囊泡
+ *      - 核纹理: 核被膜双线+核孔/常染色质纤维/异染色质边集/核仁
  *   4. 剖切方位三预设: 正剖 Coronal / 俯剖 Horizontal / 侧剖 Sagittal（解剖学标准切面）
  *   5. 被剖掉的前半分子 DOM 标签同步隐藏（SimSnapshot.clipPlane 快照广播）
+ *   6. 剖面结构标注锚定真实轮廓: 膜标注钉在轮廓缘带外侧, 胞质标注落在轮廓内,
+ *      核标注跟随核轮廓上缘 —— 标注与轮廓零漂移
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import type { CellBodySpec } from '@/lib/simulation/layout3d';
-import { NUCLEUS_EXTENT, NUCLEUS_FORM, SHAPE_EXTENT } from '@/lib/simulation/cell-shape';
+import {
+  SHAPE_EXTENT,
+  SHAPE_NOISE,
+  nucleusCenter,
+  nucleusRadius,
+  shapeRadius,
+} from '@/lib/simulation/cell-shape';
+import { fbm3 } from './procedural';
 
-/** 剖切轴向 → 形状延伸轴索引（法向主轴; front≈z / top≈y / side≈x）—— 与盘缩放/扫描范围/贴附平面三处共用 */
+/** 剖切轴向 → 形状延伸轴索引（法向主轴; front≈z / top≈y / side≈x）—— 扫描范围/贴附平面共用 */
 export const AXIS_N: Record<SectionAxis, number> = { front: 2, top: 1, side: 0 };
-/** 剖切轴向 → 相交盘平面内两主轴（盘 local x/y → 近似 world 轴; 用于椭圆缩放） */
-const DISC_AXES: Record<SectionAxis, [number, number]> = {
-  front: [0, 1],
-  top: [0, 2],
-  side: [2, 1],
-};
 
 /* ============ 剖面方位预设（解剖学标准切面） ============ */
 
@@ -84,7 +92,7 @@ function mulberry32(seed: number): () => number {
 
 /* ============ 程序化剖面纹理（双层） ============ */
 
-/** 细胞质剖面纹理（核区挖空透明; 基准半径 = R, 盘缩放后 UV 随动） */
+/** 细胞质剖面纹理（基准半径 = R; UV 径向归一 → 外缘膜线严格落在真实轮廓上） */
 function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null {
   if (typeof document === 'undefined') return null;
   const SIZE = 640;
@@ -264,7 +272,7 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
   return tex;
 }
 
-/** 核剖面纹理（基准半径 = N; 盘缩放后核孔/核仁等随动） */
+/** 核剖面纹理（基准半径 = N; UV 径向归一 → 核被膜双线严格落在真实核轮廓上） */
 function makeNucleusTexture(N: number, seed = 7): THREE.CanvasTexture | null {
   if (typeof document === 'undefined') return null;
   const SIZE = 320;
@@ -364,7 +372,154 @@ function makeNucleusTexture(N: number, seed = 7): THREE.CanvasTexture | null {
   return tex;
 }
 
-/* ============ 剖面控制器（几何精确版） ============ */
+/* ============ v3 精确相交轮廓（切平面 × 径向形状体） ============ */
+
+/**
+ * 逐方位角射线求交：切平面内自"实体中心在平面上的垂足"出发, 沿面内方向 d̂(θ) 外推,
+ * 与径向表面 r(u)（含 FBM 噪声, 与质膜/核几何完全同源）求最远交点。
+ * 几何事实（保证求交正确性）:
+ *   - 垂足 f ⊥ 一切面内方向 → |p(ρ) − center| = √(δ² + ρ²) 随 ρ 严格单调增
+ *   - 表面为以 center 为星的径向体 → 每方向至多一个"最外"交点（扫描取最后一段 inside→outside）
+ *   - 未命中方向 ρ = 0（盘收敛到垂足, 退化三角形不渲染）
+ */
+/** 导出仅供 scripts/verify-section-contour.ts 数值验证使用（运行时为内部工具） */
+export function sampleSectionContour(
+  n: THREE.Vector3,
+  constant: number,
+  center: THREE.Vector3,
+  radial: (ux: number, uy: number, uz: number) => number,
+  rhoMax: number,
+  S: number,
+  e1: THREE.Vector3,
+  e2: THREE.Vector3,
+  out: Float64Array,
+): number {
+  const delta = center.x * n.x + center.y * n.y + center.z * n.z + constant; // 中心→平面有向距离
+  const SCAN = 30; // 粗扫分辨率（步距 ≈ rhoMax/30 —— 细于视觉可感知缺口感, 兼顾重算耗时）
+  const BISECT = 22;
+  let maxRho = 0;
+  for (let i = 0; i < S; i++) {
+    const a = (i / S) * Math.PI * 2;
+    const ca = Math.cos(a);
+    const sa = Math.sin(a);
+    // 面内方向 d̂ = e1·ca + e2·sa（分量展开）
+    const dx = e1.x * ca + e2.x * sa;
+    const dy = e1.y * ca + e2.y * sa;
+    const dz = e1.z * ca + e2.z * sa;
+    // inside(ρ): |p−center| ≤ r(u), u = (−δ·n + ρ·d̂)/|…|
+    const inside = (rho: number): boolean => {
+      const len = Math.sqrt(delta * delta + rho * rho);
+      if (len < 1e-9) return true;
+      const ux = (-delta * n.x + rho * dx) / len;
+      const uy = (-delta * n.y + rho * dy) / len;
+      const uz = (-delta * n.z + rho * dz) / len;
+      return len <= radial(ux, uy, uz);
+    };
+    // 粗扫: 记录最后一段 inside→outside 穿越区间 [lo, hi]
+    let lo = -1;
+    let hi = -1;
+    let prev = 0;
+    let prevIn = inside(0);
+    if (prevIn) {
+      lo = 0;
+      hi = rhoMax;
+    }
+    for (let k = 1; k <= SCAN; k++) {
+      const rk = (rhoMax * k) / SCAN;
+      const isIn = inside(rk);
+      if (prevIn && !isIn) {
+        lo = prev;
+        hi = rk;
+      }
+      prev = rk;
+      prevIn = isIn;
+    }
+    if (prevIn) {
+      lo = prev;
+      hi = rhoMax * 1.001;
+    }
+    let rho = 0;
+    if (lo >= 0) {
+      // 二分求交（区间内边界唯一）
+      for (let b = 0; b < BISECT; b++) {
+        const mid = (lo + hi) * 0.5;
+        if (inside(mid)) lo = mid;
+        else hi = mid;
+      }
+      rho = (lo + hi) * 0.5;
+    }
+    out[i] = rho;
+    if (rho > maxRho) maxRho = rho;
+  }
+  return maxRho;
+}
+
+/** 扇形填充盘几何（中心 + S 边缘顶点; UV 径向归一: 边缘映到画布单位圆 → 纹理外缘线严格贴合轮廓） */
+function makeFanGeometry(S: number, z: number): THREE.BufferGeometry {
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array((S + 1) * 3);
+  const uv = new Float32Array((S + 1) * 2);
+  const idx = new Uint16Array(S * 3);
+  uv[0] = 0.5;
+  uv[1] = 0.5;
+  for (let i = 0; i < S; i++) {
+    const a = (i / S) * Math.PI * 2;
+    uv[(i + 1) * 2] = 0.5 + 0.5 * Math.cos(a);
+    uv[(i + 1) * 2 + 1] = 0.5 + 0.5 * Math.sin(a);
+    pos[(i + 1) * 3 + 2] = z;
+  }
+  pos[2] = z;
+  for (let i = 0; i < S; i++) {
+    idx[i * 3] = 0;
+    idx[i * 3 + 1] = i + 1;
+    idx[i * 3 + 2] = i + 2 > S ? 1 : i + 2;
+  }
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  return geo;
+}
+
+/** 轮廓发光缘带几何（每方位角内外双顶点三角带; 未命中方向退化不渲染） */
+function makeRibbonGeometry(S: number, z: number): THREE.BufferGeometry {
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(S * 2 * 3);
+  const uv = new Float32Array(S * 2 * 2);
+  const idx = new Uint16Array(S * 6);
+  for (let i = 0; i < S * 2; i++) pos[i * 3 + 2] = z;
+  for (let i = 0; i < S; i++) {
+    const j = (i + 1) % S;
+    const o = i * 6;
+    idx[o] = i * 2;
+    idx[o + 1] = i * 2 + 1;
+    idx[o + 2] = j * 2;
+    idx[o + 3] = i * 2 + 1;
+    idx[o + 4] = j * 2 + 1;
+    idx[o + 5] = j * 2;
+  }
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  return geo;
+}
+
+/** 轮廓半径插值（任意角度 → 相邻采样线性插值） */
+function rhoAt(rhos: Float64Array, S: number, ang: number): number {
+  const TAU = Math.PI * 2;
+  let t = ang % TAU;
+  if (t < 0) t += TAU;
+  const fi = (t / TAU) * S;
+  const i0 = Math.floor(fi) % S;
+  const i1 = (i0 + 1) % S;
+  const f = fi - Math.floor(fi);
+  return rhos[i0] * (1 - f) + rhos[i1] * f;
+}
+
+/** 轮廓采样分辨率（细胞质盘 / 缘带 / 核盘） */
+const CYTO_S = 168;
+const NUC_S = 116;
+
+/* ============ 剖面控制器（v3 精确轮廓版） ============ */
 
 /* eslint-disable react-hooks/immutability -- renderer.clippingPlanes 为 three.js 全局渲染器命令式 API（R3F 标准用法） */
 export function SectionClipController({
@@ -377,7 +532,7 @@ export function SectionClipController({
   labels,
 }: {
   enabled: boolean;
-  /** 剖切深度 0-1（切平面从前缘 +R 线性扫到后缘 -R; 0.5 过球心） */
+  /** 剖切深度 0-1（切平面从前缘 +R·extent 线性扫到后缘; 0.5 过形状轴心） */
   depth: number;
   axis: SectionAxis;
   spec: CellBodySpec;
@@ -393,38 +548,32 @@ export function SectionClipController({
 
   const R = spec.membraneR;
   const N = spec.nucleusR;
-  // 类型化形状轴向延伸（v4）: 剖切扫描范围（法向轴有效半径 Rn）+ 相交盘椭圆缩放
-  const extent = SHAPE_EXTENT[spec.shape] ?? SHAPE_EXTENT.sphere;
+  const shape = spec.shape;
+  const nucBumpy = spec.nucleusBumpy;
+  // 类型化形状轴向延伸（法向轴有效半径 Rn = 剖切扫描范围）
+  const extent = SHAPE_EXTENT[shape] ?? SHAPE_EXTENT.sphere;
   const Rn = R * extent[AXIS_N[axis]];
-  const [discA1, discA2] = DISC_AXES[axis];
-  const ex1 = extent[discA1];
-  const ex2 = extent[discA2];
-  // v6 核形状体系: 椭球核轴向延伸 + 核中心偏移（核盘椭圆截面 + 核偏移贴合）
-  const nucEx = NUCLEUS_EXTENT[spec.shape] ?? NUCLEUS_EXTENT.sphere;
-  const nucForm = NUCLEUS_FORM[spec.shape] ?? NUCLEUS_FORM.sphere;
-  const nucC = [nucForm.offset[0] * R, nucForm.offset[1] * R, nucForm.offset[2] * R] as const;
-  const ni = AXIS_N[axis];
-  const aN = N * nucEx[ni]; // 核在剖切法向轴的半轴
+  // 核中心偏移（稳定元组 —— 避免 effect 依赖每渲染变身份引发重算循环）
+  const nucC = useMemo(() => {
+    const c = nucleusCenter(shape, R);
+    return [c.x, c.y, c.z] as const;
+  }, [shape, R]);
 
   const plane = useMemo(() => new THREE.Plane(SECTION_ORIENTS.front.normal.clone(), R * 0.35), []);
   const targetNormal = useRef(plane.normal.clone());
   const targetConstant = useRef(R * 0.35);
-  // v6: 核中心在切平面内的投影 → disc local 坐标（四元数逆变换, 精确对齐无镜像歧义）
-  // （front 轴 disc local y ≈ world −y, 直接拿 nucC[discA2] 会镜像翻转 —— 上皮基底核盘会跑到核上方）
-  const nucDiscLocal = useMemo(() => {
-    const n = SECTION_ORIENTS[axis].normal;
-    const nWorld = new THREE.Vector3(nucC[0], nucC[1], nucC[2]);
-    const proj = nWorld.clone().addScaledVector(n, -nWorld.dot(n));
-    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), n).invert();
-    const local = proj.applyQuaternion(q);
-    return { x: local.x, y: local.y };
-  }, [axis, nucC]);
   const origSides = useRef<Map<THREE.Material, THREE.Side>>(new Map());
   const discGroupRef = useRef<THREE.Group | null>(null);
   const cytoDiscRef = useRef<THREE.Mesh | null>(null);
   const cytoRingRef = useRef<THREE.Mesh | null>(null);
   const nucDiscRef = useRef<THREE.Mesh | null>(null);
   const [ready, setReady] = useState(false);
+  /** 剖面结构标注锚点（真实轮廓驱动; null = 未计算/盘隐藏） */
+  const [annoState, setAnnoState] = useState<{
+    mem: [number, number];
+    cyto: [number, number];
+    nuc: [number, number] | null;
+  } | null>(null);
 
   const cytoTex = useMemo(() => makeCytoplasmTexture(R), [R]);
   const nucTex = useMemo(() => makeNucleusTexture(N), [N]);
@@ -437,6 +586,19 @@ export function SectionClipController({
     };
   }, [cytoTex, nucTex]);
 
+  /* v3 动态轮廓几何（预分配, 顶点原地改写 —— 深度/方位/细胞变化时重算, 无 GC churn） */
+  const cytoFan = useMemo(() => makeFanGeometry(CYTO_S, 0), []);
+  const cytoRibbon = useMemo(() => makeRibbonGeometry(CYTO_S, 0.001), []);
+  const nucFan = useMemo(() => makeFanGeometry(NUC_S, 0.008), []);
+  useEffect(
+    () => () => {
+      cytoFan.dispose();
+      cytoRibbon.dispose();
+      nucFan.dispose();
+    },
+    [cytoFan, cytoRibbon, nucFan],
+  );
+
   /* 方位变化 → 目标法向（平滑过渡在 useFrame 中完成） */
   useEffect(() => {
     targetNormal.current.copy(SECTION_ORIENTS[axis].normal);
@@ -446,6 +608,110 @@ export function SectionClipController({
   useEffect(() => {
     targetConstant.current = Rn - depth * 2 * Rn;
   }, [depth, Rn]);
+
+  /* ============ v3 核心: 精确相交轮廓重算 ============
+   * 触发: 剖切开/关 · 深度 · 方位 · 细胞类型/规格变化
+   * 产出: 细胞质填充扇盘 + 发光缘带 + 核扇盘的顶点位置 + 可见性 + 标注锚点
+   * 半径函数与 3D 几何完全同源（cellSurf / shapedNucleusGeometry 同一公式）—— 零漂移 */
+  useEffect(() => {
+    if (!enabled || !ready) return;
+    // 平面参数（与 useFrame 同步逻辑一致, 纯函数可重入）
+    const n = SECTION_ORIENTS[axis].normal;
+    const constant = Rn - depth * 2 * Rn;
+    // 面内正交基（与盘组四元数同源: setFromUnitVectors(ẑ, n) 的 x/y 象）
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+    const e1 = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+    const e2 = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+
+    // ---- 细胞质轮廓（膜径向 = shapeFactor × R + FBM, 与 cellSurf 同源） ----
+    const { freq, amp } = SHAPE_NOISE[shape] ?? SHAPE_NOISE.sphere;
+    const memRadial = (ux: number, uy: number, uz: number): number =>
+      shapeRadius({ x: ux, y: uy, z: uz }, shape, R) +
+      (fbm3(ux * freq, uy * freq, uz * freq, 3, 3) - 0.5) * 2 * amp;
+    const rhos = new Float64Array(CYTO_S);
+    const maxRho = sampleSectionContour(
+      n, constant, new THREE.Vector3(0, 0, 0), memRadial, R * 2.6, CYTO_S, e1, e2, rhos,
+    );
+
+    // ---- 写入细胞质扇盘 + 缘带 ----
+    const cpos = cytoFan.attributes.position as THREE.BufferAttribute;
+    cpos.setXYZ(0, 0, 0, 0);
+    for (let i = 0; i < CYTO_S; i++) {
+      const a = (i / CYTO_S) * Math.PI * 2;
+      const r = rhos[i];
+      cpos.setXYZ(i + 1, r * Math.cos(a), r * Math.sin(a), 0);
+    }
+    cpos.needsUpdate = true;
+    cytoFan.computeBoundingSphere();
+    const rpos = cytoRibbon.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < CYTO_S; i++) {
+      const a = (i / CYTO_S) * Math.PI * 2;
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      const r = rhos[i];
+      const inner = Math.max(0, r - 0.09);
+      const outer = r > 0 ? r + 0.04 : 0;
+      rpos.setXYZ(i * 2, inner * ca, inner * sa, 0.001);
+      rpos.setXYZ(i * 2 + 1, outer * ca, outer * sa, 0.001);
+    }
+    rpos.needsUpdate = true;
+    cytoRibbon.computeBoundingSphere();
+
+    const discVisible = maxRho > R * 0.1;
+    if (cytoDiscRef.current) cytoDiscRef.current.visible = discVisible;
+    if (cytoRingRef.current) cytoRingRef.current.visible = discVisible;
+
+    // ---- 核轮廓（核径向 = nucleusFactor × N + 分叶 + FBM, 与 shapedNucleusGeometry 同源; 中心含偏移） ----
+    const nucAmp = nucBumpy ? 0.24 : 0.07;
+    const nucCenter = new THREE.Vector3(nucC[0], nucC[1], nucC[2]);
+    const nucRadial = (ux: number, uy: number, uz: number): number =>
+      nucleusRadius({ x: ux, y: uy, z: uz }, shape, N) +
+      (fbm3(ux * 1.5, uy * 1.5, uz * 1.5, 3, 7) - 0.5) * 2 * nucAmp;
+    const rhosN = new Float64Array(NUC_S);
+    const maxRhoN = sampleSectionContour(
+      n, constant, nucCenter, nucRadial, N * 2.4, NUC_S, e1, e2, rhosN,
+    );
+    // 核中心在切平面内的投影 → 盘 local 坐标（e1/e2 分量; 与盘组四元数一致无镜像歧义）
+    const nFoot = nucCenter.clone().addScaledVector(
+      n, -(nucCenter.dot(n) + constant),
+    );
+    const nx = nFoot.x * e1.x + nFoot.y * e1.y + nFoot.z * e1.z;
+    const ny = nFoot.x * e2.x + nFoot.y * e2.y + nFoot.z * e2.z;
+    const npos = nucFan.attributes.position as THREE.BufferAttribute;
+    npos.setXYZ(0, nx, ny, 0.008);
+    for (let i = 0; i < NUC_S; i++) {
+      const a = (i / NUC_S) * Math.PI * 2;
+      const r = rhosN[i];
+      npos.setXYZ(i + 1, nx + r * Math.cos(a), ny + r * Math.sin(a), 0.008);
+    }
+    npos.needsUpdate = true;
+    nucFan.computeBoundingSphere();
+
+    const nucVisible = maxRhoN > N * 0.1;
+    if (nucDiscRef.current) {
+      nucDiscRef.current.visible = nucVisible;
+      const m = nucDiscRef.current.material as THREE.MeshBasicMaterial;
+      m.opacity = Math.min(0.97, (maxRhoN / (N * 0.34)) * 0.97); // 切面掠核渐入
+    }
+
+    // ---- 标注锚点（真实轮廓驱动） ----
+    if (discVisible) {
+      const thM = -0.38; // 膜标注: 轮廓缘带外侧（右下缘）
+      const rM = rhoAt(rhos, CYTO_S, thM);
+      const useM = rM > 0.2;
+      const mBase = (useM ? rM : maxRho) + 0.3;
+      const mAng = useM ? thM : 0;
+      const thC = 2.35; // 胞质标注: 轮廓内左上象限
+      const rc = Math.max(rhoAt(rhos, CYTO_S, thC), maxRho * 0.5);
+      setAnnoState({
+        mem: [mBase * Math.cos(mAng), mBase * Math.sin(mAng)],
+        cyto: [rc * 0.55 * Math.cos(thC), rc * 0.55 * Math.sin(thC)],
+        nuc: nucVisible ? [nx, ny + maxRhoN * 0.55 + 0.1] : null,
+      });
+    } else {
+      setAnnoState(null);
+    }
+  }, [enabled, ready, depth, axis, Rn, R, N, shape, nucBumpy, nucC, cytoFan, cytoRibbon, nucFan]);
 
   /* 开/关剖切: 全局裁剪平面挂载 + 结构材质临时双面化（记忆原 side 以还原） */
   useEffect(() => {
@@ -507,20 +773,12 @@ export function SectionClipController({
     return () => cancelAnimationFrame(raf);
   }, [enabled, scene]);
 
-  /* 帧驱动: 方位/深度与目标同步（即时贴合, 不阻尼）+ 双层盘几何同步 + clipPlane 广播
-   * 几何: h = |constant|（切面到球心距离）
-   *   细胞质盘 scale = √(R²-h²)/R   （剖切相交圆, 严格贴合）
-   *   核盘     scale = √(N²-h²)/N   （h < N 才可见, 切面触核渐入）
-   *   盘组位置 = -constant·normal + normal·0.035（切面中心 + 保留侧微偏移）
-   * 同步性: 信号贴面投影(layout)使用同一目标平面 → 平面/剖面盘/分子三者零漂移,
-   *   拖动剖深滑杆时分子即时贴附新切面, 不出现"分子先跳、切面慢追"的裁切空窗 */
+  /* 帧驱动: 方位/深度与目标同步（即时贴合, 不阻尼）+ 盘组位姿 + clipPlane 广播
+   * v3: 轮廓顶点由上面的重算 effect 原地写入（纯函数可重入, 帧内零计算）;
+   *     分子贴面投影(layout)使用同一目标平面 → 平面/剖面盘/分子三者零漂移 */
   useFrame(() => {
     plane.normal.copy(targetNormal.current).normalize();
     plane.constant = targetConstant.current;
-
-    const h = Math.abs(plane.constant);
-
-    // 剖面双层盘位姿: 切面中心 + 保留侧偏移
     if (discGroupRef.current) {
       discGroupRef.current.position
         .copy(plane.normal)
@@ -529,56 +787,18 @@ export function SectionClipController({
         new THREE.Vector3(0, 0, 1),
         plane.normal,
       );
-
-      // 细胞质盘: 相交圆半径 √(Rn²-h²)（Rn = 形状法向轴有效半径; 盘椭圆缩放贴合类型化截面）
-      const rc = h < Rn ? Math.sqrt(Rn * Rn - h * h) : 0;
-      const cytoScale = Math.max(0.001, rc / Rn);
-      if (cytoDiscRef.current) cytoDiscRef.current.scale.set(cytoScale * ex1, cytoScale * ex2, 1);
-      if (cytoRingRef.current) cytoRingRef.current.scale.set(cytoScale * ex1, cytoScale * ex2, 1);
-      const discVisible = rc > Rn * 0.08;
-      if (cytoDiscRef.current) cytoDiscRef.current.visible = discVisible;
-      if (cytoRingRef.current) cytoRingRef.current.visible = discVisible;
-
-      // 核盘 v6: 椭球核相交椭圆 —— 半轴随核形状（杆状核在纵切面呈长椭圆, 横切面近圆）;
-      // 有向距离相对核中心沿真实法向投影（含偏移）, 切面掠过核时渐入渐出
-      const dN = -plane.constant - (nucC[0] * plane.normal.x + nucC[1] * plane.normal.y + nucC[2] * plane.normal.z);
-      const sN = Math.abs(dN) < aN ? Math.sqrt(1 - (dN / aN) ** 2) : 0;
-      if (nucDiscRef.current) {
-        nucDiscRef.current.scale.set(
-          Math.max(0.001, sN * nucEx[discA1]),
-          Math.max(0.001, sN * nucEx[discA2]),
-          1,
-        );
-        // 核盘位置 = 核中心在切平面内的投影（group 四元数逆变换 → disc local, 各轴向精确无镜像）
-        const proj = new THREE.Vector3(nucC[0], nucC[1], nucC[2]);
-        proj.addScaledVector(plane.normal, -(proj.dot(plane.normal) + plane.constant));
-        const local = proj.applyQuaternion(discGroupRef.current.quaternion.clone().invert());
-        nucDiscRef.current.position.set(local.x, local.y, 0.008);
-        nucDiscRef.current.visible = sN > 0.12;
-      }
     }
     // 广播裁剪平面（分子标签层读取; 关闭时置 null）
     sim.current.clipPlane = enabled ? plane : null;
   });
 
-  const annos = useMemo(
-    () => [
-      // 核标注跟随核中心投影（nucDiscLocal 已含轴向精确变换）
-      { local: [nucDiscLocal.x / R, nucDiscLocal.y / R + 0.06, 0.14], text: labels.nucleus, show: true },
-      { local: [0.58, 0.34, 0], text: labels.cytosol, show: true },
-      { local: [1.0, 0.18, 0], text: labels.membrane, show: true },
-    ],
-    [labels, nucDiscLocal, R],
-  );
-
   return (
     <>
       {enabled && ready && cytoTex && nucTex && (
         <group ref={discGroupRef}>
-          {/* 细胞质剖面填充盘（相交圆半径动态缩放; 纯视觉 —— 禁用 raycast,
+          {/* 细胞质剖面填充盘（真实相交轮廓扇形; 纯视觉 —— 禁用 raycast,
               否则会截获点击便既不选中分子也不触发 onPointerMissed 取消选中） */}
-          <mesh ref={cytoDiscRef} renderOrder={96} raycast={() => null}>
-            <circleGeometry args={[R, 96]} />
+          <mesh ref={cytoDiscRef} geometry={cytoFan} renderOrder={96} raycast={() => null} dispose={null}>
             <meshBasicMaterial
               map={cytoTex}
               transparent
@@ -590,14 +810,12 @@ export function SectionClipController({
               polygonOffsetFactor={-4}
             />
           </mesh>
-          {/* 剖面发光边缘（切割亮线, 随相交圆缩放; 纯视觉 —— 不参与拾取） */}
-          <mesh ref={cytoRingRef} renderOrder={97} raycast={() => null}>
-            <ringGeometry args={[R - 0.12, R, 96]} />
+          {/* 剖面发光边缘（真实轮廓缘带三角条, 随相交轮廓贴合; 纯视觉 —— 不参与拾取） */}
+          <mesh ref={cytoRingRef} geometry={cytoRibbon} renderOrder={97} raycast={() => null} dispose={null}>
             <meshBasicMaterial color="#5eead4" transparent opacity={0.65} side={THREE.DoubleSide} depthWrite={false} fog={false} />
           </mesh>
-          {/* 核剖面盘（切面触核后渐入, 半径 √(N²-h²); 纯视觉 —— 不参与拾取） */}
-          <mesh ref={nucDiscRef} renderOrder={98} raycast={() => null}>
-            <circleGeometry args={[N, 64]} />
+          {/* 核剖面盘（真实核相交轮廓; 纯视觉 —— 不参与拾取） */}
+          <mesh ref={nucDiscRef} geometry={nucFan} renderOrder={98} raycast={() => null} dispose={null}>
             <meshBasicMaterial
               map={nucTex}
               transparent
@@ -609,22 +827,29 @@ export function SectionClipController({
               polygonOffsetFactor={-6}
             />
           </mesh>
-          {/* 剖面结构标注（联动解剖标注开关） */}
+          {/* 剖面结构标注（锚定真实轮廓; 联动解剖标注开关） */}
           {showAnatomy &&
-            annos.map((a) => (
-              <Html
-                key={a.text}
-                position={[a.local[0] * R, a.local[1] * R, a.local[2]]}
-                center
-                zIndexRange={[30, 0]}
-                pointerEvents="none"
-                style={{ pointerEvents: 'none', userSelect: 'none' }}
-              >
-                <div className="mol3d-label is-active section-anno" style={{ whiteSpace: 'nowrap' }}>
-                  <span className="mol3d-sym">{a.text}</span>
-                </div>
-              </Html>
-            ))}
+            annoState &&
+            ([
+              { p: annoState.nuc, text: labels.nucleus, key: 'nuc' },
+              { p: annoState.cyto, text: labels.cytosol, key: 'cyto' },
+              { p: annoState.mem, text: labels.membrane, key: 'mem' },
+            ] as { p: [number, number] | null; text: string; key: string }[])
+              .filter((a): a is { p: [number, number]; text: string; key: string } => a.p !== null)
+              .map((a) => (
+                <Html
+                  key={a.key}
+                  position={[a.p[0], a.p[1], 0.02]}
+                  center
+                  zIndexRange={[30, 0]}
+                  pointerEvents="none"
+                  style={{ pointerEvents: 'none', userSelect: 'none' }}
+                >
+                  <div className="mol3d-label is-active section-anno" style={{ whiteSpace: 'nowrap' }}>
+                    <span className="mol3d-sym">{a.text}</span>
+                  </div>
+                </Html>
+              ))}
         </group>
       )}
     </>

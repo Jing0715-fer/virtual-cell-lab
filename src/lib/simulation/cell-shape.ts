@@ -76,11 +76,12 @@ export function shapeFactor(d: Dir3, kind: ShapeKind): number {
       return superellip(d, 3.4) * hex * 0.975;
     }
     case 'pyramidal': {
-      // 锥体神经元: 顶端（+y）收窄成金字塔 + 基底宽展 + 基底角树突根鼓起
-      let r = ellip(d, 1.02, 0.97, 1.02);
-      r *= 1 - 0.46 * smoothstep(0.12, 1, d.y) ** 1.7;
-      r *= 1 - 0.2 * smoothstep(0.08, 1, -d.y) ** 1.3;
-      r *= 1 + 0.05 * smoothstep(0.3, 0.85, -d.y) * Math.cos(4 * lon) ** 2;
+      // 锥体神经元: 顶端（+y）金字塔收窄 + 基底宽展 + 基底角树突根鼓起
+      // （实测轮廓: 顶 0.44R / 底 0.72R / 赤道 1.0R —— 泪滴金字塔; 顶树突/轴突为独立结构延伸轮廓）
+      let r = ellip(d, 1.0, 0.92, 1.0);
+      r *= 1 - 0.52 * smoothstep(0.1, 1, d.y) ** 1.55;
+      r *= 1 - 0.22 * smoothstep(0.06, 1, -d.y) ** 1.3;
+      r *= 1 + 0.06 * smoothstep(0.3, 0.85, -d.y) * Math.cos(4 * lon) ** 2;
       return r;
     }
     case 'sphere': {
@@ -88,24 +89,29 @@ export function shapeFactor(d: Dir3, kind: ShapeKind): number {
       return 1 + 0.045 * Math.cos(4 * lon) * Math.sin(2.5 * lat) + 0.03 * Math.cos(5 * lon + 1.5) * Math.cos(3 * lat);
     }
     case 'columnar': {
-      // 肠上皮柱状: 高:宽 ≈ 2:1, 顶端圆拱 + 基底平坦（极性）
-      let r = ellip(d, 0.64, 1.18, 0.64);
-      r *= 1 - 0.08 * smoothstep(0.55, 1, d.y);
-      r *= 1 - 0.34 * smoothstep(0.5, 1, -d.y) ** 1.25;
+      // 肠上皮柱状: 高:宽 ≈ 1.9:1（实测）, 顶端圆拱 + 基底平坦（极性）
+      let r = ellip(d, 0.6, 1.4, 0.6);
+      r *= 1 - 0.09 * smoothstep(0.6, 1, d.y);
+      r *= 1 - 0.26 * smoothstep(0.5, 1, -d.y) ** 1.2;
       return r;
     }
     case 'rod': {
-      // 心肌杆状: 长:宽 ≈ 3:1, 端面阶梯收窄（闰盘位置）+ 侧支芽鼓包
-      let r = ellip(d, 2.02, 0.7, 0.66);
-      r *= 1 - 0.3 * smoothstep(0.6, 1, Math.abs(d.x)) ** 1.5;
+      // 心肌杆状: 旋转超椭球（p=5 → 近柱身 + 两端钝面收窄 = 闰盘位）+ 侧支芽鼓包
+      // 实测长短径比 ≈ 2.7:1（分支圆柱; Alberts MBoC: 心肌细胞 ~100×25μm）
+      // 注: 旧版 ellip×方向锥化被锥化项抵消, 实测仅 2:1 —— 超椭球直接保证真实杆形
+      const L = 1.62, w = 0.6, p = 5;
+      const rho = Math.sqrt(d.y * d.y + d.z * d.z);
+      let r = ((Math.abs(d.x) / L) ** p + (rho / w) ** p) ** (-1 / p);
       r *= 1 + 0.2 * Math.exp(-(((d.z - 0.78) ** 2 + (d.y + 0.45) ** 2) / 0.06));
       return r;
     }
     case 'spindle': {
-      // 成纤维梭形: 两端尖纺锤
-      let r = ellip(d, 1.82, 0.66, 0.72);
-      r *= 1 - 0.58 * smoothstep(0.15, 1, Math.abs(d.x)) ** 1.6;
-      return r;
+      // 成纤维梭形: 旋转超椭球（p=2.6 → 两端渐尖纺锤）, 实测长短径比 ≈ 2.9:1
+      // （Ross Histology: 真实成纤维细胞为两端渐尖的纺锤形, 长:宽 ≈ 3:1;
+      //   旧版 ellip(1.82)×0.58 锥化互相抵消, 实测仅 1.15:1 —— 几乎球形, 已修）
+      const L = 1.6, w = 0.55, p = 2.6;
+      const rho = Math.sqrt(d.y * d.y + d.z * d.z);
+      return ((Math.abs(d.x) / L) ** p + (rho / w) ** p) ** (-1 / p);
     }
     case 'amoeboid': {
       // 癌细胞: 多频谐波变形 + 不对称大鼓包（恶性多形性）
@@ -212,15 +218,52 @@ export function nucleusRayExit(d: Dir3, kind: ShapeKind, N: number, R: number): 
   return Math.max(0, (-B + Math.sqrt(D)) / (2 * A));
 }
 
-/** 轴向最大延伸倍率（相机视野 / 剖切盘椭圆缩放; 取轴向 ± 采样的保守最大值） */
+/* ============ 形状查询工具（特化结构精确贴膜布局用） ============ */
+
+/** 点是否在基础形状体内（不含 FBM 噪声; 消费方各自留内缩裕量 ≥ 噪声幅度） */
+export function insideShape(p: Dir3, kind: ShapeKind, R: number): boolean {
+  const l = Math.hypot(p.x, p.y, p.z);
+  if (l < 1e-6) return true; // 形心恒在内
+  return l <= shapeFactor({ x: p.x / l, y: p.y / l, z: p.z / l }, kind) * R;
+}
+
+/** 横截面高度 (y,z) 处的体内最大 |x|（30 步二分精确解; 噪声裕量由消费方内缩）
+ *  肌原纤维/应力纤维/纵行 SR 的“止于膜内”布局基准 —— 形状重设计后结构永不穿膜/悬空 */
+export function shapeXExtent(kind: ShapeKind, y: number, z: number, R: number): number {
+  if (!insideShape({ x: 0, y, z }, kind, R)) return 0;
+  let lo = 0;
+  let hi = 2.6 * R;
+  for (let i = 0; i < 30; i++) {
+    const mid = (lo + hi) * 0.5;
+    if (insideShape({ x: mid, y, z }, kind, R)) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** 长轴位置 x 处的横截面半径（旋转体精确解; T 小管/SR 环网站位布局） */
+export function shapeCrossRadius(kind: ShapeKind, x: number, R: number): number {
+  if (!insideShape({ x, y: 0, z: 0 }, kind, R)) return 0;
+  let lo = 0;
+  let hi = 2.6 * R;
+  for (let i = 0; i < 30; i++) {
+    const mid = (lo + hi) * 0.5;
+    if (insideShape({ x, y: mid, z: 0 }, kind, R)) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** 轴向最大延伸倍率（相机视野 / 剖切扫描范围; v7 实测校准 —— 含 FBM 噪声的数值采样最大值 + 余量）
+ *  旧表为声明值（如 spindle 声明 1.84 实测仅 0.83）→ 扫描范围虚宽/机位偏远, 已按实测重标 */
 export const SHAPE_EXTENT: Record<ShapeKind, readonly [number, number, number]> = {
-  polyhedral: [1.0, 0.98, 1.0],
-  pyramidal: [1.04, 0.99, 1.04],
-  sphere: [1.0, 1.0, 1.0],
-  columnar: [0.66, 1.19, 0.66],
-  rod: [2.05, 0.72, 0.7],
-  spindle: [1.84, 0.68, 0.74],
-  amoeboid: [1.22, 1.18, 1.24],
+  polyhedral: [1.12, 1.06, 1.08],
+  pyramidal: [1.12, 0.82, 1.08],
+  sphere: [1.12, 1.12, 1.12],
+  columnar: [0.7, 1.38, 0.68],
+  rod: [1.72, 0.71, 0.71],
+  spindle: [1.72, 0.68, 0.68],
+  amoeboid: [1.3, 1.31, 1.16],
 };
 
 /** 类型化 FBM 噪声参数（有机不规则度差异: 心肌规整 → 癌细胞杂乱） */

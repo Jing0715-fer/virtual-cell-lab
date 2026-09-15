@@ -33,7 +33,7 @@ import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import type { CellBodySpec, Vec3 } from '@/lib/simulation/layout3d';
-import { NUCLEUS_FORM, SHAPE_NOISE, nucleusCenter, nucleusRadius, nucleusRayExit, shapeRadius, type ShapeKind } from '@/lib/simulation/cell-shape';
+import { NUCLEUS_FORM, SHAPE_NOISE, nucleusCenter, nucleusRadius, nucleusRayExit, shapeCrossRadius, shapeRadius, shapeXExtent, type ShapeKind } from '@/lib/simulation/cell-shape';
 import { displaceGeometry, fbm3, fibSphere, hash01, mergeGeoms, sph } from './procedural';
 import { glowSpriteTexture, organicNormalMap, roughnessMap, speckleNormalMap, stripeNormalMap } from './textures';
 import { createTimeUniform, glowMaterial, organelleMaterial, type TimeUniform } from './materials';
@@ -1736,16 +1736,17 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
 
   if (spec.striated) {
     // 肌原纤维束: 沿长轴（x）平行排列的横纹管束 —— 肌节 A/I 带明暗条纹 + Z 线金亮线（顶点色着色）
+    // v7: 长度/环位用形状求解器精确贴膜（旧硬编码 2.02 椭球在真实杆形下穿膜/悬空）
     const fiberN = perf ? 7 : 10;
     const SARCO = 0.62; // 肌节周期（模型单位, ≈2μm 比例感）
+    const rodRing = shapeCrossRadius(SHAPE, 0, R); // 中央横截面半径（真实形状求解）
     const myoParts: { geo: THREE.BufferGeometry }[] = [];
-    const ax = 2.02, ay = 0.7, az = 0.66; // rod 形状椭球主轴（与 cell-shape.ts 一致）
     for (let i = 0; i < fiberN; i++) {
       const a = (i / fiberN) * Math.PI * 2 + 0.3;
-      const ring = i % 2 === 0 ? 0.6 : 0.92;
-      const fy = Math.cos(a) * ring * ay * R * 0.5;
-      const fz = Math.sin(a) * ring * az * R * 0.5;
-      const xr = ax * R * Math.sqrt(Math.max(0.08, 1 - (fy / (ay * R)) ** 2 - (fz / (az * R)) ** 2)) * 0.86;
+      const ring = i % 2 === 0 ? 0.58 : 0.9;
+      const fy = Math.cos(a) * ring * rodRing;
+      const fz = Math.sin(a) * ring * rodRing;
+      const xr = shapeXExtent(SHAPE, fy, fz, R) * 0.93; // 止于膜内（留 FBM 噪声裕量）
       const bow = (hash01(`mf${i}`) - 0.5) * 0.5;
       const fpts = [
         new THREE.Vector3(-xr, fy, fz),
@@ -1780,15 +1781,16 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     })));
     myoMesh.renderOrder = 46;
     group.add(myoMesh);
-    labels.push({ pos: { x: 0, y: -R * 0.78, z: R * 0.3 }, zh: '肌原纤维（肌节横纹）', latin: 'Myofibril' });
+    labels.push({ pos: { x: 0, y: -R * 0.55, z: R * 0.3 }, zh: '肌原纤维（肌节横纹）', latin: 'Myofibril' });
   }
 
   if (spec.intercalated) {
     // 闰盘: 端-端阶梯折面盘（横齿交错剪影）+ 缝隙连接（Cx43）金点
+    // v7: 端面位置由形状求解器确定（真实杆端 = 闰盘所在, 旧硬编码 1.72R 悬浮膜外）
     const discMat = mat({ color: '#fde68a', emissive: '#b45309', emissiveIntensity: 0.45, opacity: 0.85, roughness: 0.35 });
     const gapMat = track(new THREE.MeshStandardMaterial({ color: '#fef3c7', emissive: '#fbbf24', emissiveIntensity: 0.9 * dim, transparent: true, opacity: 0.95 * dim }));
+    const xEnd = shapeXExtent(SHAPE, 0, 0, R) - 0.1; // 端面贴膜（留 FBM 裕量）
     for (const sx of [-1, 1]) {
-      const xEnd = 1.72 * R * sx;
       const segs = [
         { r: 0.5, dx: 0 },
         { r: 0.37, dx: -0.13 * sx },
@@ -1798,7 +1800,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         const disc = new THREE.Mesh(track(new THREE.CylinderGeometry(seg.r * R, seg.r * R, 0.055, 26, 1)), discMat);
         disc.rotation.z = Math.PI / 2;
         disc.scale.set(1, 1, 0.9); // y/z 椭圆截面贴合（local z → world z）
-        disc.position.set(xEnd + seg.dx * R * 0.12, si * 0.18 * sx, si * 0.12 * sx);
+        disc.position.set(sx * xEnd + seg.dx * R * 0.12, si * 0.18 * sx, si * 0.12 * sx);
         disc.renderOrder = 63;
         group.add(disc);
       });
@@ -1808,25 +1810,27 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         const ga = (g / 7) * Math.PI * 2 + hash01(`gd${sx}${g}`) * 0.6;
         const gr = (0.18 + hash01(`gdr${sx}${g}`) * 0.26) * R;
         const gap = new THREE.Mesh(gapGeo, gapMat);
-        gap.position.set(xEnd - 0.06 * sx, Math.cos(ga) * gr, Math.sin(ga) * gr * 0.9);
+        gap.position.set(sx * (xEnd - 0.06), Math.cos(ga) * gr, Math.sin(ga) * gr * 0.9);
         gap.renderOrder = 63;
         group.add(gap);
       }
     }
-    labels.push({ pos: { x: 1.95 * R, y: R * 0.5, z: 0 }, zh: '闰盘（缝隙连接）', latin: 'Intercalated disc' });
+    labels.push({ pos: { x: xEnd + 0.32, y: R * 0.5, z: 0 }, zh: '闰盘（缝隙连接）', latin: 'Intercalated disc' });
   }
 
   if (spec.stressFibers) {
     // 应力纤维: 沿长轴（x）平行的粗 actin 束（贯穿胞质）+ 两端黏着斑亮点 —— 肌成纤维标志
+    // v7: 长度/环位用形状求解器精确贴膜（旧硬编码 1.45R 在真实梭形下穿膜/悬空）
     const sfMat = mat({ color: '#fecdd3', emissive: '#fb7185', emissiveIntensity: 0.3, roughness: 0.4, opacity: 0.62 });
     const faMat = track(new THREE.MeshStandardMaterial({ color: '#fef3c7', emissive: '#fbbf24', emissiveIntensity: 0.8 * dim, transparent: true, opacity: 0.9 * dim }));
     const n = perf ? 5 : 8;
+    const spindleRing = shapeCrossRadius(SHAPE, 0, R); // 中央横截面半径（真实梭形求解）
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + 0.5;
       const ring = 0.5 + hash01(`sfr${i}`) * 0.26;
-      const fy = Math.cos(a) * ring * 0.6 * R;
-      const fz = Math.sin(a) * ring * 0.66 * R;
-      const xr = 1.45 * R * Math.sqrt(Math.max(0.1, 1 - (fy / (0.68 * R)) ** 2 - (fz / (0.74 * R)) ** 2));
+      const fy = Math.cos(a) * ring * spindleRing;
+      const fz = Math.sin(a) * ring * spindleRing * 1.04;
+      const xr = shapeXExtent(SHAPE, fy, fz, R) * 0.94; // 两端渐尖处自动收敛（真实梭形贴膜）
       const fpts = [
         new THREE.Vector3(-xr, fy, fz),
         new THREE.Vector3(0, fy + (hash01(`sfb${i}`) - 0.5) * 0.4, fz),
@@ -1844,7 +1848,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         group.add(fa);
       }
     }
-    labels.push({ pos: { x: 0, y: -R * 0.72, z: R * 0.4 }, zh: '应力纤维（α-SMA 束）', latin: 'Stress fiber' });
+    labels.push({ pos: { x: 0, y: -R * 0.46, z: R * 0.32 }, zh: '应力纤维（α-SMA 束）', latin: 'Stress fiber' });
   }
 
   if (spec.surfaceFolds) {
@@ -1937,10 +1941,10 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
 
   if (spec.ttubules) {
     // T 小管（横小管）: 肌膜在 Z 线位周期性内陷（与肌节周期对齐）+ 连接肌浆网终端池 = 二联体/三联体位形
+    // v7: 站位范围/横截面由形状求解器确定（旧硬编码 1.52R/2.02 椭球在真实杆形下穿膜）
     const SARCO = 0.62; // 与肌原纤维肌节周期一致
-    const ax = 2.02, ay = 0.7, az = 0.66; // rod 主轴（与 cell-shape.ts 一致）
     const stationStep = perf ? SARCO * 3 : SARCO * 2;
-    const xMax = 1.52 * R;
+    const xMax = shapeXExtent(SHAPE, 0, 0, R) * 0.94; // 肌膜内陷站点范围（真实杆长）
     /** 两点间胶囊（默认 Y 轴向 → 定向） */
     const capsuleBetween = (a: THREE.Vector3, b: THREE.Vector3, r: number) => {
       const dir = b.clone().sub(a);
@@ -1956,14 +1960,14 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const ttParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
     const jsrParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
     for (let x0 = -xMax; x0 <= xMax; x0 += stationStep) {
-      // 该站位处椭球横截面收缩因子
-      const sh = Math.sqrt(Math.max(0.12, 1 - (x0 / (ax * R * 0.98)) ** 2));
+      // 该站位处真实横截面半径（旋转体求解; 超椭球杆端自动收缩）
+      const rr = shapeCrossRadius(SHAPE, x0, R) * 0.93;
       const perStation = 6;
       const stationSeed = Math.round(x0 * 10);
       for (let k = 0; k < perStation; k++) {
         const th = (k / perStation) * Math.PI * 2 + hash01(`tt${stationSeed}`) * 0.8;
-        const sy = Math.cos(th) * ay * R * sh;
-        const sz = Math.sin(th) * az * R * sh;
+        const sy = Math.cos(th) * rr;
+        const sz = Math.sin(th) * rr * 1.06;
         // 横管: 肌膜内陷 → 向心深入（0.62 深度比）
         ttParts.push(capsuleBetween(
           new THREE.Vector3(x0, sy * 0.98, sz * 0.98),
@@ -1984,12 +1988,13 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     // 纵行肌浆网（longitudinal SR 网管, 环绕肌原纤维束走行）
     const lsrParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
     const nL = perf ? 6 : 10;
+    const rodMid = shapeCrossRadius(SHAPE, 0, R);
     for (let i = 0; i < nL; i++) {
       const th = (i / nL) * Math.PI * 2 + 0.3;
       const ring = 0.74 + hash01(`lsr${i}`) * 0.18;
-      const fy = Math.cos(th) * ay * R * ring;
-      const fz = Math.sin(th) * az * R * ring;
-      const xr = 1.5 * R;
+      const fy = Math.cos(th) * rodMid * ring;
+      const fz = Math.sin(th) * rodMid * ring * 1.06;
+      const xr = shapeXExtent(SHAPE, fy, fz, R) * 0.9;
       const bow = (hash01(`lsrb${i}`) - 0.5) * 0.5;
       const fpts = [
         new THREE.Vector3(-xr, fy, fz),
@@ -2016,8 +2021,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     }));
     lsr.renderOrder = 60;
     group.add(lsr);
-    labels.push({ pos: { x: R * 1.05, y: -ay * R * 0.82, z: az * R * 0.55 }, zh: 'T 小管（Z 线位内陷）', latin: 'T-tubule' });
-    labels.push({ pos: { x: -R * 1.25, y: ay * R * 0.85, z: 0 }, zh: '肌浆网（Ca²⁺ 库）', latin: 'Sarcoplasmic reticulum' });
+    labels.push({ pos: { x: R * 1.05, y: -rodMid * 0.82, z: rodMid * 0.55 }, zh: 'T 小管（Z 线位内陷）', latin: 'T-tubule' });
+    labels.push({ pos: { x: -R * 1.25, y: rodMid * 0.85, z: 0 }, zh: '肌浆网（Ca²⁺ 库）', latin: 'Sarcoplasmic reticulum' });
   }
 
   if (spec.micronuclei) {
