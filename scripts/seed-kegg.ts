@@ -26,7 +26,13 @@ async function main() {
     ms: number;
   }[] = [];
 
+  /** KEGG 上游限流保护：每条通路间隔 2s */
+  const sleepPolite = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  let first = true;
   for (const entry of PATHWAY_CATALOG) {
+    if (!first) await sleepPolite(2000);
+    first = false;
     const t0 = Date.now();
     try {
       const graph = await getPathwayGraph(entry.id);

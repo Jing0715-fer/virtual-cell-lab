@@ -106,7 +106,11 @@ export interface PathwayGraph {
   meta: PathwayMeta;
   nodes: KeggEntry[]; // KGML 全部 entry（通路图谱视图）
   relations: KeggRelation[]; // KGML 全部 relation
+  /** KGML group 复合物成员映射（缓存行自足重提取/升级用） */
+  components?: { groupId: number; memberIds: number[] }[];
   core: { nodes: CoreNode[]; edges: CoreEdge[] }; // 核心演示子图（虚拟细胞视图）
+  /** 核心子图提取算法版本（旧缓存行触发重抓/升级） */
+  coreVersion?: number;
   stats: { geneCount: number; relationCount: number; coreCount: number };
   fetchedAt: string;
   source: 'kegg-live' | 'db-cache';

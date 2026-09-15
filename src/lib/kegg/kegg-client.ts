@@ -18,7 +18,9 @@ import { PATHWAY_MAP } from '@/data/pathway-catalog';
 import { KEGG_FULL_MAP } from '@/data/kegg-full-catalog';
 import type { KeggEntry, PathwayCatalogEntry, PathwayGraph, PathwayMeta } from '@/types/kegg';
 import { parseKgml } from './kgml-parser';
-import { extractCoreSubgraph, mergeDuplicateNodes } from './subgraph';
+import { extractCoreSubgraph, mergeDuplicateNodes, CORE_ALGO_VERSION } from './subgraph';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { join } from 'path';
 
 const KEGG_BASE = 'https://rest.kegg.jp';
 /** fetch 超时（ms） */
@@ -44,7 +46,7 @@ const g = globalThis as unknown as KeggGlobalCache;
  * 代码版本标记：classify/subgraph 算法迭代后递增版本号使内存缓存自动失效，
  * 避免 dev 热重载后 globalThis 仍持有旧算法产物（生产环境版本恒定无影响）
  */
-const CACHE_VERSION = '2025-01-v8';
+const CACHE_VERSION = '2025-02-v11';
 if (g.cacheVersion !== CACHE_VERSION) {
   g.memCache?.clear();
   g.inflight?.clear();
@@ -72,26 +74,62 @@ async function fetchText(url: string, timeoutMs: number): Promise<string> {
   }
 }
 
-// ---------- hsa id → 官方基因符号映射（lazy 全表） ----------
+// ---------- hsa id → 官方基因符号映射（lazy 全表，磁盘持久缓存） ----------
+/** 符号表磁盘缓存路径（避免 KEGG 限流/抖动时降级提取：写入小图谱） */
+const SYMBOL_DISK_CACHE = join(process.cwd(), 'db', 'hsa-symbols.json');
+
+function parseHsaSymbolText(text: string): Map<string, string> {
+  const map = new Map<string, string>();
+  // 新版 list/hsa 为 4 列 TSV: hsa:id \t 类型 \t 位置 \t "SYM1, SYM2; description"
+  for (const line of text.split('\n')) {
+    const cols = line.split('\t');
+    if (cols.length >= 4 && cols[0].startsWith('hsa:')) {
+      const symbol = cols[3].split(';')[0].split(',')[0].trim();
+      if (symbol && !symbol.includes(' ')) map.set(cols[0], symbol);
+    }
+  }
+  return map;
+}
+
+function readSymbolDiskCache(): Map<string, string> | null {
+  try {
+    if (!existsSync(SYMBOL_DISK_CACHE)) return null;
+    const obj = JSON.parse(readFileSync(SYMBOL_DISK_CACHE, 'utf8')) as Record<string, string>;
+    const map = new Map(Object.entries(obj));
+    return map.size > 10000 ? map : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSymbolDiskCache(map: Map<string, string>): void {
+  try {
+    mkdirSync(join(process.cwd(), 'db'), { recursive: true });
+    writeFileSync(SYMBOL_DISK_CACHE, JSON.stringify(Object.fromEntries(map)));
+  } catch {
+    // 磁盘写失败可容忍（下次重新拉取）
+  }
+}
+
 function getHsaSymbolMap(): Promise<Map<string, string>> {
   if (g.hsaSymbols) return Promise.resolve(g.hsaSymbols);
   if (!g.hsaSymbolsPromise) {
+    // 优先磁盘缓存（进程重启/热重载后免网络拉取，彻底规避上游抖动导致的降级提取）
+    const disk = readSymbolDiskCache();
+    if (disk) {
+      g.hsaSymbols = disk;
+      g.hsaSymbolsPromise = Promise.resolve(disk);
+      return g.hsaSymbolsPromise;
+    }
     g.hsaSymbolsPromise = fetchText(`${KEGG_BASE}/list/hsa`, SYMBOL_TIMEOUT)
       .then((text) => {
-        const map = new Map<string, string>();
-        // 新版 list/hsa 为 4 列 TSV: hsa:id \t 类型 \t 位置 \t "SYM1, SYM2; description"
-        for (const line of text.split('\n')) {
-          const cols = line.split('\t');
-          if (cols.length >= 4 && cols[0].startsWith('hsa:')) {
-            const symbol = cols[3].split(';')[0].split(',')[0].trim();
-            if (symbol && !symbol.includes(' ')) map.set(cols[0], symbol);
-          }
-        }
+        const map = parseHsaSymbolText(text);
         g.hsaSymbols = map;
+        if (map.size > 10000) writeSymbolDiskCache(map);
         return map;
       })
       .catch(() => {
-        // 拉取失败降级为空表（仅退回 label/alias 匹配）
+        // 拉取失败降级为空表（仅退回 label/alias 匹配；不写库防污染）
         g.hsaSymbols = new Map();
         return g.hsaSymbols;
       });
@@ -179,12 +217,21 @@ export function getCatalogEntry(id: string): PathwayCatalogEntry | null {
   };
 }
 
-/** 从 Prisma 缓存行恢复 PathwayGraph（source 标记为 db-cache） */
-async function readDbCache(id: string): Promise<PathwayGraph | null> {
+/**
+ * 从 Prisma 缓存行恢复 PathwayGraph（source 标记为 db-cache）
+ * @param allowLegacy 允许返回旧算法版本的缓存行（仅在线重抓失败时的降级回退）。
+ *   旧缓存行（coreVersion 缺失或不等于当前算法版本）默认返回 null，触发
+ *   在线重抓以升级到新提取算法（扩容后的完整子图）。
+ */
+async function readDbCache(
+  id: string,
+  allowLegacy = false
+): Promise<PathwayGraph | null> {
   try {
     const row = await db.pathwayCache.findUnique({ where: { id } });
     if (!row) return null;
     const graph = JSON.parse(row.graphJson) as PathwayGraph;
+    if (!allowLegacy && graph.coreVersion !== CORE_ALGO_VERSION) return null;
     // meta 始终以当前代码目录为准（描述/级联/双语文案迭代后无需重抓 KGML, 旧缓存行自动获得新 meta）
     const catalog = getCatalogEntry(id);
     if (catalog) graph.meta = buildMeta(catalog, graph.meta?.name ?? '');
@@ -209,7 +256,9 @@ async function fetchLiveGraph(catalog: PathwayCatalogEntry): Promise<PathwayGrap
     meta,
     nodes: enriched,
     relations: parsed.relations,
+    components: parsed.components,
     core,
+    coreVersion: CORE_ALGO_VERSION,
     stats: {
       geneCount: enriched.filter((e) => e.type === 'gene').length,
       relationCount: parsed.relations.length,
@@ -219,26 +268,31 @@ async function fetchLiveGraph(catalog: PathwayCatalogEntry): Promise<PathwayGrap
     source: 'kegg-live',
   };
 
-  // 写库（SQLite 本地写，失败不阻塞响应）；成功后使 stats 缓存失效
-  try {
-    await db.pathwayCache.upsert({
-      where: { id: catalog.id },
-      update: {
-        name: meta.name,
-        graphJson: JSON.stringify(graph),
-        source: 'kegg-live',
-        fetchedAt: new Date(),
-      },
-      create: {
-        id: catalog.id,
-        name: meta.name,
-        graphJson: JSON.stringify(graph),
-        source: 'kegg-live',
-      },
-    });
-    g.statsVersion = (g.statsVersion ?? 0) + 1;
-  } catch {
-    // 缓存写失败可容忍（下次重新在线抓取）
+  // 写库（SQLite 本地写，失败不阻塞响应）；成功后使 stats 缓存失效。
+  // 符号表降级（空表）时跳过写库：种子匹配/别名扩展不完整的提取结果不落盘，
+  // 避免网络抖动时用小子图污染缓存行（内存可返回，但磁盘保持可重试状态）
+  const symbolTableDegraded = hsaSymbols.size === 0;
+  if (!symbolTableDegraded) {
+    try {
+      await db.pathwayCache.upsert({
+        where: { id: catalog.id },
+        update: {
+          name: meta.name,
+          graphJson: JSON.stringify(graph),
+          source: 'kegg-live',
+          fetchedAt: new Date(),
+        },
+        create: {
+          id: catalog.id,
+          name: meta.name,
+          graphJson: JSON.stringify(graph),
+          source: 'kegg-live',
+        },
+      });
+      g.statsVersion = (g.statsVersion ?? 0) + 1;
+    } catch {
+      // 缓存写失败可容忍（下次重新在线抓取）
+    }
   }
 
   return graph;
@@ -292,8 +346,9 @@ export async function getPathwayGraph(id: string): Promise<PathwayGraph> {
       memCache.set(id, live);
       return live;
     } catch (err) {
-      // 3. 在线失败 → 回退 DB（并发场景下可能刚被其他请求写入）
-      const fallback = await readDbCache(id);
+      // 3. 在线失败 → 回退 DB（并发场景下可能刚被其他请求写入；
+      //    旧算法行也接受——降级保可用性，下次在线时自动升级）
+      const fallback = await readDbCache(id, true);
       if (fallback) {
         const normalized = normalize(fallback);
         memCache.set(id, normalized);

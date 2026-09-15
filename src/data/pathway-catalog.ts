@@ -257,6 +257,162 @@ export const PATHWAY_CATALOG: PathwayCatalogEntry[] = [
       'SIRT1', 'FOXO3', 'G6PC', 'PCK1', 'RPS6KB1', 'TSC1', 'SCD', 'FASN',
     ],
   },
+  {
+    id: 'hsa04370',
+    name: 'VEGF signaling pathway',
+    nameZh: 'VEGF 信号通路',
+    category: '环境信息处理 · 信号转导',
+    description:
+      '血管内皮生长因子（VEGF）家族是血管生成的主控信号。VEGFA 结合酪氨酸激酶受体 VEGFR2/KDR（血管内皮的主要信号受体），激活后并行启动三条支路：PLCγ→DAG/IP₃→PKC→Raf-MEK-ERK 驱动内皮细胞增殖；PI3K→Akt→eNOS 磷酸化生成一氧化氮（NO）介导血管扩张与通透性；Src-FAK-paxillin 重构细胞骨架促进迁移。钙-钙调磷酸酶去磷酸化 NFAT 入核诱导 PTGS2/COX-2 等基因。缺氧经 HIF-1 上调 VEGFA 表达——肿瘤血管新生与湿性老年黄斑变性的核心机制，也是贝伐珠单抗等抗 VEGF 生物制剂的靶点。',
+    descriptionEn:
+      'The vascular endothelial growth factor (VEGF) family is the master signal of angiogenesis. VEGFA engages the receptor tyrosine kinase VEGFR2/KDR — the principal signaling receptor on endothelial cells — launching three parallel branches: PLCγ→DAG/IP₃→PKC→Raf-MEK-ERK driving endothelial proliferation; PI3K→Akt→eNOS phosphorylation generating nitric oxide (NO) for vasodilation and permeability; and Src-FAK-paxillin cytoskeletal remodeling for migration. The Ca²⁺-calcineurin arm dephosphorylates NFAT for nuclear entry, inducing PTGS2/COX-2 and other genes. Hypoxia upregulates VEGFA via HIF-1 — the core mechanism of tumor angiogenesis and wet age-related macular degeneration, and the target of anti-VEGF biologics such as bevacizumab.',
+    cascade: 'VEGFA → KDR/VEGFR2 → PLCγ→PKC→Raf→MEK→ERK ∥ PI3K→Akt→eNOS→NO → 增殖/通透性/迁移',
+    cascadeEn: 'VEGFA → KDR/VEGFR2 → PLCγ→PKC→Raf→MEK→ERK ∥ PI3K→Akt→eNOS→NO → proliferation / permeability / migration',
+    seeds: [
+      'VEGFA', 'KDR', 'PLCG1', 'PRKCA', 'RAF1', 'MAP2K1', 'MAPK1', 'MAPK14',
+      'PIK3CA', 'PIK3CB', 'PIK3R1', 'PIK3R2', 'AKT1', 'AKT2', 'AKT3', 'NOS3',
+      'PPP3CA', 'NFATC2', 'PTGS2', 'SRC', 'PTK2', 'PXN', 'RAC1', 'CDC42',
+      'HRAS', 'KRAS', 'MAPKAPK3', 'HSPB1', 'SHC1', 'SHC2', 'SH2D2A', 'SPHK2',
+      'PLA2G4B', 'CASP9', 'BAD', 'VEGFB', 'VEGFC', 'PGF', 'FLT1', 'FLT4',
+      'NRP1', 'HIF1A',
+    ],
+  },
+  {
+    id: 'hsa04390',
+    name: 'Hippo signaling pathway',
+    nameZh: 'Hippo 信号通路',
+    category: '环境信息处理 · 信号转导',
+    description:
+      'Hippo 通路是器官大小与组织稳态的核心抑制性级联（保守自果蝇）。上游输入——细胞极性复合体（CRB/PALS/PATJ、SCRIB/DLG/LGL）、接触抑制（E-cadherin）、NF2/merlin 与 KIBRA/WWC1——汇聚激活 MST1/2·SAV1 激酶复合体，磷酸化 LATS1/2·MOB1；LATS 进而磷酸化 YAP/TAZ（Ser127），创造 14-3-3 结合位点使其滞留胞质并被 β-TrCP 泛素降解。当通路失活（低密度生长、NF2 突变、GPCR-Gαq/Gα12/13 刺激），去磷酸化的 YAP/TAZ 入核结合 TEAD1-4，驱动 CTGF/CYR61、MYC、BIRC5 等增殖与干性基因——器官再生与肿瘤发生的"生长许可开关"，Verteporfin 等 TEAD 抑制剂正在临床开发。',
+    descriptionEn:
+      'The Hippo pathway is the core inhibitory cascade governing organ size and tissue homeostasis (conserved from Drosophila). Upstream inputs — cell-polarity complexes (CRB/PALS/PATJ, SCRIB/DLG/LGL), contact inhibition (E-cadherin), NF2/merlin and KIBRA/WWC1 — converge to activate the MST1/2·SAV1 kinase complex, which phosphorylates LATS1/2·MOB1; LATS in turn phosphorylates YAP/TAZ (Ser127), creating 14-3-3 docking sites that retain them in the cytosol and target them for β-TrCP-mediated degradation. When the pathway is off (sparse growth, NF2 mutation, GPCR-Gαq/Gα12/13 signaling), dephosphorylated YAP/TAZ enter the nucleus and partner with TEAD1-4 to drive CTGF/CYR61, MYC, BIRC5 and other proliferation/stemness genes — the "growth-permission switch" of regeneration and tumorigenesis; TEAD inhibitors such as verteporfin are in clinical development.',
+    cascade: '极性/接触抑制 → MST1/2-SAV1 → LATS1/2-MOB1 → pYAP/TAZ(S127) 胞质滞留 ⊣ 生长基因；失活 → YAP/TAZ-TEAD 入核',
+    cascadeEn: 'Polarity/contact inhibition → MST1/2-SAV1 → LATS1/2-MOB1 → pYAP/TAZ(S127) cytosolic retention ⊣ growth genes; pathway off → YAP/TAZ-TEAD nuclear entry',
+    seeds: [
+      'NF2', 'WWC1', 'FRMD6', 'STK3', 'STK4', 'MST1', 'MST2', 'SAV1',
+      'LATS1', 'LATS2', 'MOB1A', 'MOB1B', 'YAP1', 'WWTR1', 'TEAD1', 'TEAD2',
+      'TEAD3', 'TEAD4', 'VGLL4', 'CCN2', 'CTGF', 'CYR61', 'CCN1', 'BIRC2',
+      'BIRC3', 'BIRC5', 'MYC', 'CCND1', 'AXIN1', 'APC', 'APC2', 'GSK3B',
+      'AMOT', 'AMOTL1', 'AMOTL2', 'PPP1CA', 'PPP2CA', 'PRKCI', 'RASSF1',
+      'RASSF6', 'FBXW11', 'CRB1', 'PALS1', 'PATJ', 'PARD3', 'PARD6A', 'DLG1',
+      'SCRIB', 'LLGL2', 'CDH1', 'CTNNB1', 'CTNNA1', 'LEF1', 'DVL1', 'FZD10',
+      'TGFB1', 'TGFBR1', 'SMAD2', 'SMAD4', 'SMAD7', 'BMPR1A', 'SNAI2', 'SOX2',
+    ],
+  },
+  {
+    id: 'hsa04066',
+    name: 'HIF-1 signaling pathway',
+    nameZh: 'HIF-1 信号通路',
+    category: '环境信息处理 · 信号转导',
+    description:
+      '低氧诱导因子（HIF-1）是缺氧应答的主转录开关。常氧下，脯氨酰羟化酶 PHD/EGLN 以 O₂、Fe²⁺、2-氧代戊二酸与抗坏血酸为辅底物羟基化 HIF-1α（P402/P564），被 VHL 泛素连接酶复合体（Elongin B/C·Cul2·Rbx1）识别后经 26S 蛋白酶体分钟级降解；FIH-1 羟基化 Asn803 阻断 p300/CBP 募集。氧分压降至 ~5% 以下时羟化受阻，HIF-1α 稳定积累、与 HIF-1β/ARNT 二聚，经 p300/CBP 激活缺氧反应元件（HRE）：VEGFA（血管生成）、SLC2A1/GLUT1 与糖酵解酶（代谢重编程）、EPO（红细胞生成）、CA9（pH 稳态）。PI3K-Akt-mTOR 与 Ras-ERK 经翻译层面放大 HIF-1α 合成。肿瘤乏氧区的 HIF-1 激活是侵袭、免疫逃逸与血管新生之基。',
+    descriptionEn:
+      'Hypoxia-inducible factor 1 (HIF-1) is the master transcriptional switch of the hypoxic response. At normoxia, prolyl hydroxylases PHD/EGLN — using O₂, Fe²⁺, 2-oxoglutarate and ascorbate as co-substrates — hydroxylate HIF-1α (P402/P564), tagging it for recognition by the VHL ubiquitin ligase complex (Elongin B/C·Cul2·Rbx1) and minutes-scale degradation by the 26S proteasome; FIH-1 hydroxylation of Asn803 blocks p300/CBP recruitment. Below ~5% O₂, hydroxylation stalls: HIF-1α stabilizes, dimerizes with HIF-1β/ARNT, and — via p300/CBP — activates hypoxia response elements (HREs) driving VEGFA (angiogenesis), SLC2A1/GLUT1 and glycolytic enzymes (metabolic reprogramming), EPO (erythropoiesis) and CA9 (pH homeostasis). PI3K-Akt-mTOR and Ras-ERK amplify HIF-1α synthesis translationally. HIF-1 activation in hypoxic tumor regions underlies invasion, immune escape and neovascularization.',
+    cascade: 'O₂↓ → EGLN/PHD 失活 → HIF-1α 稳定 → HIF-1α/ARNT-p300 → HRE → VEGFA/GLUT1/EPO',
+    cascadeEn: 'O₂↓ → EGLN/PHD stall → HIF-1α stabilization → HIF-1α/ARNT-p300 → HRE → VEGFA/GLUT1/EPO',
+    seeds: [
+      'HIF1A', 'EPAS1', 'ARNT', 'HIF1B', 'VHL', 'EGLN1', 'EGLN2', 'EGLN3',
+      'HIF1AN', 'CREBBP', 'EP300', 'TCEB1', 'TCEB2', 'CUL2', 'RBX1', 'UBE2M',
+      'VEGFA', 'SLC2A1', 'LDHA', 'PDK1', 'CA9', 'CA12', 'NOS2', 'EDN1',
+      'SERPINE1', 'TFRC', 'EPO', 'TIMP1', 'IGF1', 'IGF2', 'INS', 'IGF1R',
+      'INSR', 'PIK3CA', 'PIK3CB', 'PIK3R1', 'PDPK1', 'AKT1', 'AKT2', 'AKT3',
+      'MTOR', 'RPS6KB1', 'RPS6', 'EIF4EBP1', 'HSP90AA1', 'CDKN1A', 'CAMK2A',
+      'STAT3', 'NFKB1', 'MAPK1', 'MAPK14', 'ELK1', 'CREB1', 'TF', 'PRKCA',
+    ],
+  },
+  {
+    id: 'hsa04068',
+    name: 'FoxO signaling pathway',
+    nameZh: 'FoxO 信号通路',
+    category: '环境信息处理 · 信号转导',
+    description:
+      'FoxO（Forkhead box O）转录因子家族（FOXO1/3/4/6）是胰岛素-PI3K-Akt 轴的主要代谢效应端，整合营养、应激与存活决策。Akt 与 SGK1 磷酸化 FoxO 三个保守位点（Thr32/Ser253/Ser315，以 FOXO3a 计），创造 14-3-3 结合位点导致出核滞留；IKKβ 亦可直接磷酸化促进其降解。反向输入：JNK/p38 应激激酶、AMPK（能量匮乏）、SIRT1 去乙酰化与 CNK1E 介导的磷酸化则促 FoxO 入核。核内 FoxO 驱动细胞周期阻滞（p27/p21）、凋亡（BIM/PUMA）、抗氧化防御（SOD2/Catalase）、糖异生（PEPCK/G6Pase）与自噬。热量限制与二甲双胍的延寿效应多经 FoxO 介导；肿瘤中 Akt 持续激活将 FoxO 驱逐出核以逃避凋亡——"代谢记忆的守门人"。',
+    descriptionEn:
+      'The Forkhead box O (FoxO) transcription factors (FOXO1/3/4/6) are the principal metabolic effectors of the insulin-PI3K-Akt axis, integrating nutrient, stress and survival decisions. Akt and SGK1 phosphorylate three conserved FoxO sites (Thr32/Ser253/Ser315, numbered as in FOXO3a), creating 14-3-3 docking sites that drive nuclear export and cytosolic retention; IKKβ can also phosphorylate FoxO directly to promote its degradation. Counter-inputs — JNK/p38 stress kinases, AMPK (energy deprivation), SIRT1 deacetylation and CK1ε-mediated phosphorylation — promote FoxO nuclear entry. Nuclear FoxO drives cell-cycle arrest (p27/p21), apoptosis (BIM/PUMA), antioxidant defense (SOD2/Catalase), gluconeogenesis (PEPCK/G6Pase) and autophagy. Caloric restriction and metformin extend lifespan largely through FoxO; tumors with hyperactive Akt evict FoxO from the nucleus to escape apoptosis — "the gatekeeper of metabolic memory".',
+    cascade: '胰岛素 → PI3K → PIP₃ → PDK1/Akt → pFoxO 出核 ⊣ 靶基因 ∥ 应激(JNK/AMPK/SIRT1) → FoxO 入核 → p27/BIM/SOD2',
+    cascadeEn: 'Insulin → PI3K → PIP₃ → PDK1/Akt → pFoxO nuclear export ⊣ targets ∥ stress (JNK/AMPK/SIRT1) → FoxO nuclear entry → p27/BIM/SOD2',
+    seeds: [
+      'FOXO1', 'FOXO3', 'FOXO4', 'FOXO6', 'INS', 'INSR', 'IGF1', 'IGF1R',
+      'IRS1', 'IRS2', 'PIK3CA', 'PIK3CB', 'PIK3R1', 'PDPK1', 'AKT1', 'AKT2',
+      'AKT3', 'SGK1', 'SGK3', 'MAPK8', 'MAPK9', 'MAPK10', 'MAPK14', 'MAPK11',
+      'MAP2K4', 'MAP2K6', 'STK11', 'PRKAA1', 'PRKAA2', 'SIRT1', 'SIRT2',
+      'USP7', 'SKP2', 'CDKN1A', 'CDKN1B', 'BCL2L11', 'PMAIP1', 'BBC3',
+      'GADD45A', 'GADD45B', 'SOD2', 'CAT', 'PCK1', 'PCK2', 'G6PC', 'PPARGC1A',
+      'PTK6', 'IKBKB', 'CCND1', 'CCND2', 'TGFB1', 'SMAD2', 'SMAD3', 'SMAD4',
+      'SETD7', 'KAT2B', 'PTEN', 'WWTR1', 'NLK', 'CDK2', 'CCNB3',
+    ],
+  },
+  {
+    id: 'hsa04620',
+    name: 'Toll-like receptor signaling pathway',
+    nameZh: 'Toll 样受体信号通路',
+    category: '免疫系统 · 固有免疫识别',
+    description:
+      'Toll 样受体（TLR1-10）是固有免疫识别病原体相关分子模式（PAMP）的主要哨兵：TLR4 与 MD-2/LY96、CD14 共受体识别革兰阴性菌内毒素 LPS；TLR3/7/8/9 识别病毒与细菌核酸；TLR1/2/6 识别脂肽。配体诱导受体二聚化后胞内 TIR 域募集衔接蛋白启动两条主线：MyD88/TIRAP 路径经 IRAK4→IRAK1 自磷酸化激活 TRAF6（K63 泛素支架），TAB1/2-TAK1 随后双线出击——IKK 复合体（IKKβ/IKKα/NEMO）磷酸化 IκBα 释放 NF-κB，MKK-JNK/p38 激活 AP-1，共驱 TNF、IL-1β、IL-6、COX-2 等炎症基因；TRIF/TICAM1 路径（TLR3 与 TLR4 内体相）经 TBK1/IKKε 磷酸化 IRF3/7 入核产生 I 型干扰素（IFN-β）。TOLLIP、A20 与 PI3K 负向刹车。脓毒症细胞因子风暴、系统性红斑狼疮（TLR7 过活）与此通路直接相关。',
+    descriptionEn:
+      'Toll-like receptors (TLR1-10) are the primary sentinels of innate immune recognition of pathogen-associated molecular patterns (PAMPs): TLR4 with its MD-2/LY96 and CD14 co-receptors recognizes Gram-negative endotoxin LPS; TLR3/7/8/9 sense viral and bacterial nucleic acids; TLR1/2/6 recognize lipopeptides. Ligand-induced receptor dimerization recruits adaptors via the cytosolic TIR domain, launching two main routes. The MyD88/TIRAP route activates TRAF6 (a K63-ubiquitin scaffold) through IRAK4→IRAK1 autophosphorylation; TAB1/2-TAK1 then strikes on two fronts — the IKK complex (IKKβ/IKKα/NEMO) phosphorylates IκBα to release NF-κB while MKK-JNK/p38 activate AP-1, jointly driving TNF, IL-1β, IL-6, COX-2 and other inflammatory genes. The TRIF/TICAM1 route (TLR3 and endosomal TLR4) activates TBK1/IKKε to phosphorylate IRF3/7 for type-I interferon (IFN-β) production. TOLLIP, A20 and PI3K provide the brakes. Sepsis cytokine storms and SLE (TLR7 overactivity) map directly onto this pathway.',
+    cascade: 'LPS → TLR4/MD2/CD14 → MyD88 → IRAK4/IRAK1 → TRAF6 → TAK1 → IKK → NF-κB → 炎症基因 ∥ TRIF → TBK1 → IRF3 → IFN-β',
+    cascadeEn: 'LPS → TLR4/MD2/CD14 → MyD88 → IRAK4/IRAK1 → TRAF6 → TAK1 → IKK → NF-κB → inflammatory genes ∥ TRIF → TBK1 → IRF3 → IFN-β',
+    seeds: [
+      'TLR1', 'TLR2', 'TLR3', 'TLR4', 'TLR5', 'TLR6', 'TLR7', 'TLR8',
+      'TLR9', 'TLR10', 'CD14', 'LY96', 'MYD88', 'TIRAP', 'TICAM1', 'TICAM2',
+      'TOLLIP', 'IRAK1', 'IRAK2', 'IRAK4', 'TRAF6', 'TAB1', 'TAB2', 'TAB3',
+      'MAP3K7', 'CHUK', 'IKBKB', 'IKBKG', 'NFKB1', 'RELA', 'NFKBIA', 'NFKBIB',
+      'TNFAIP3', 'TBK1', 'IKBKE', 'IRF3', 'IRF7', 'IRF5', 'IFNB1', 'IFNA1',
+      'TRAF3', 'RIPK1', 'MAPK14', 'MAPK8', 'MAPK9', 'MAPK10', 'MAP2K3',
+      'MAP2K4', 'MAP2K6', 'MAP2K7', 'JUN', 'FOS', 'ELK1', 'MAP3K8', 'RAC1',
+      'CDC42', 'PIK3CA', 'PIK3R1', 'BTK', 'TANK', 'AZI2', 'SARM1', 'FADD',
+      'CASP8', 'TNF', 'IL6', 'IL1B', 'PTGS2',
+    ],
+  },
+  {
+    id: 'hsa04110',
+    name: 'Cell cycle',
+    nameZh: '细胞周期',
+    category: '细胞过程 · 细胞生长与死亡',
+    description:
+      '真核细胞周期由 cyclin-CDK 序列引擎驱动：G1 期生长因子经 Ras-ERK/AP-1 诱导 Cyclin D-CDK4/6 起始磷酸化 Rb，逐步释放 E2F 转录因子——越过限制点后 Cyclin E-CDK2 自主推进（正反馈），加载 ORC/CDC6/Cdt1/MCM2-7 复制许可并进入 S 期；Cyclin A-CDK2 完成复制，Cyclin B-CDK1（促成熟因子 MPF）驱动核膜破裂、纺锤体装配与染色体分离。双层检查点网络守卫进程：DNA 损伤激活 ATM/ATR→CHK1/CHK2，抑制 CDC25 磷酸酶、激活 WEE1，并经 p53→p21/p16 阻滞周期；纺锤体检查点（BUB1/BUBR1/MAD2）滞留 APC/C^Cdc20 至着丝粒全部附着，随后降解 Cyclin B 与 securin 触发后期与退出。p16-Rb-p53 三重抑癌屏障失效是多数人类肿瘤的标志。',
+    descriptionEn:
+      'The eukaryotic cell cycle is driven by a sequential cyclin-CDK engine: in G1, growth factors via Ras-ERK/AP-1 induce Cyclin D-CDK4/6 to initiate Rb phosphorylation, progressively releasing E2F transcription factors — beyond the restriction point Cyclin E-CDK2 self-propels (positive feedback), loads the ORC/CDC6/Cdt1/MCM2-7 replication licence and enters S phase; Cyclin A-CDK2 completes replication while Cyclin B-CDK1 (maturation-promoting factor, MPF) drives nuclear-envelope breakdown, spindle assembly and chromosome segregation. A two-tier checkpoint network guards progression: DNA damage activates ATM/ATR→CHK1/CHK2, which inhibit CDC25 phosphatases, activate WEE1, and arrest the cycle via p53→p21/p16; the spindle checkpoint (BUB1/BUBR1/MAD2) withholds APC/C^Cdc20 until all kinetochores attach, then degrades Cyclin B and securin to trigger anaphase and exit. Failure of the triple p16-Rb-p53 tumor-suppressor barrier marks most human cancers.',
+    cascade: '生长因子 → Cyclin D/CDK4-6 → pRb → E2F → Cyclin E/CDK2 → S 期 → Cyclin B/CDK1 → 有丝分裂；APC/C 退出',
+    cascadeEn: 'Growth factors → Cyclin D/CDK4-6 → pRb → E2F → Cyclin E/CDK2 → S phase → Cyclin B/CDK1 → mitosis; APC/C exit',
+    seeds: [
+      'CCND1', 'CDK4', 'RB1', 'E2F1', 'CCNE1', 'CDK2', 'CCNA2', 'CDK1',
+      'PLK1', 'CDC20', 'CCND2', 'CCND3', 'CDK6', 'CCNE2', 'CCNA1', 'CCNB1',
+      'CCNB2', 'CCNB3', 'E2F2', 'E2F3', 'E2F4', 'E2F5', 'TFDP1', 'TFDP2',
+      'RBL1', 'RBL2', 'CDKN1A', 'CDKN1B', 'CDKN2A', 'CDKN2B', 'CDKN2C',
+      'CDKN2D', 'TP53', 'MDM2', 'CDK7', 'CCNH', 'CDK8', 'CCNC', 'CDC6',
+      'CDT1', 'CDC45', 'CDC25A', 'CDC25B', 'CDC25C', 'WEE1', 'WEE2', 'PKMYT1',
+      'CHEK1', 'CHEK2', 'ATM', 'ATR', 'AURKA', 'AURKB', 'BUB1', 'BUB1B',
+      'BUB3', 'MAD1L1', 'MAD2L1', 'MAD2L2', 'FZR1', 'ANAPC10', 'ESPL1',
+      'TGFB1', 'SMAD2', 'SMAD3', 'SMAD4', 'HDAC1', 'HDAC2', 'SKP1', 'SKP2',
+      'CUL1', 'CCNF', 'PCNA', 'MCM2', 'MCM3', 'MCM4', 'MCM5', 'MCM6', 'MCM7',
+      'MYC', 'GADD45A', 'GADD45G', 'BAX', 'ABL1', 'CREBBP', 'GSK3B', 'SFN',
+    ],
+  },
+  {
+    id: 'hsa04012',
+    name: 'ErbB signaling pathway',
+    nameZh: 'ErbB 信号通路',
+    category: '环境信息处理 · 信号转导',
+    description:
+      'ErbB/HER 受体酪氨酸激酶家族（EGFR/HER1、HER2、HER3、HER4）的信号特异性由配体诱导的二聚体组合决定：EGF/TGF-α/双调蛋白结合 EGFR；神经调节蛋白 NRG1-4 结合 HER3/HER4；HER2 无已知配体却呈"开放"构象、是异二聚体的首选伙伴（信号最强）；HER3 激酶域近乎无活性，仅作 PI3K 的停靠平台——HER2·HER3 异二聚体因此是最强增殖单元。二聚化反式自磷酸化后并行启动五条支路：GRB2/SOS→Ras→Raf-MEK-ERK（增殖）、PI3K→Akt→mTOR（存活与翻译）、PLCγ→PKC（钙信号）、Src→STAT5（分化）与 Cbl 介导的内吞降解（负调控，ERRFI1/MIG6 增强）。HER2 扩增（乳腺癌 ~20%）与 EGFR 激活突变（肺腺癌）使信号组成性激活——曲妥珠单抗、帕妥珠单抗与奥希替尼的临床靶点。',
+    descriptionEn:
+      'Signaling specificity in the ErbB/HER receptor tyrosine kinase family (EGFR/HER1, HER2, HER3, HER4) is encoded by ligand-induced dimer combinations: EGF/TGF-α/amphiregulin bind EGFR; neuregulins NRG1-4 bind HER3/HER4; HER2 has no known ligand yet adopts an "extended" conformation making it the preferred heterodimer partner (strongest signal); HER3 has a nearly dead kinase domain and serves only as a PI3K docking platform — the HER2·HER3 heterodimer is therefore the most potent proliferative unit. Dimerization and trans-autophosphorylation launch five parallel branches: GRB2/SOS→Ras→Raf-MEK-ERK (proliferation), PI3K→Akt→mTOR (survival and translation), PLCγ→PKC (Ca²⁺ signaling), Src→STAT5 (differentiation) and Cbl-mediated endocytic degradation (negative control, enhanced by ERRFI1/MIG6). HER2 amplification (~20% of breast cancers) and EGFR activating mutations (lung adenocarcinoma) render signaling constitutive — the clinical targets of trastuzumab, pertuzumab and osimertinib.',
+    cascade: 'EGF/NRG → EGFR·HER2/HER3 异二聚体 → pY 平台 → GRB2-RAS-ERK ∥ PI3K-Akt ∥ PLCγ → 增殖/存活/迁移',
+    cascadeEn: 'EGF/NRG → EGFR·HER2/HER3 heterodimers → pY platform → GRB2-RAS-ERK ∥ PI3K-Akt ∥ PLCγ → proliferation / survival / migration',
+    seeds: [
+      'EGF', 'TGFA', 'AREG', 'EREG', 'HBEGF', 'BTC', 'NRG1', 'NRG2', 'NRG3',
+      'NRG4', 'EGFR', 'ERBB2', 'ERBB3', 'ERBB4', 'GRB2', 'SHC1', 'SHC2',
+      'SOS1', 'SOS2', 'HRAS', 'KRAS', 'NRAS', 'RAF1', 'BRAF', 'ARAF',
+      'MAP2K1', 'MAP2K2', 'MAPK1', 'MAPK3', 'PIK3CA', 'PIK3CB', 'PIK3CD',
+      'PIK3R1', 'PIK3R2', 'AKT1', 'AKT2', 'AKT3', 'PDPK1', 'MTOR', 'PLCG1',
+      'PLCG2', 'PRKCA', 'SRC', 'ABL1', 'ABL2', 'STAT5A', 'STAT5B', 'CBL',
+      'ERRFI1', 'DUSP4', 'DUSP6', 'SPRY1', 'SPRY2', 'ETV4', 'ETV5', 'JUN',
+      'FOS', 'MYC', 'ELK1', 'CDKN1A', 'CDKN1B', 'CASP9', 'BAD', 'NFKB1',
+      'CRK', 'CRKL', 'RAPGEF1', 'RAP1A', 'NCK1', 'EPS8', 'EPS15', 'GAB1',
+    ],
+  },
 ];
 
 /** 按 id 索引 */

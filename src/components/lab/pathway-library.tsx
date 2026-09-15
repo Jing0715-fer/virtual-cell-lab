@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 const CURATED_TOUR_PATHWAYS = new Set([
   'hsa04010', 'hsa04151', 'hsa04630', 'hsa04024', 'hsa04350', 'hsa04310', 'hsa04330',
   'hsa04150', 'hsa04064', 'hsa04210', 'hsa04115', 'hsa04152', 'hsa04020',
+  'hsa04370', 'hsa04390', 'hsa04066', 'hsa04068', 'hsa04620', 'hsa04110', 'hsa04012',
 ]);
 
 /** 全量目录中排除策划条目后的列表（策划组已展示，避免重复） */

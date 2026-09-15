@@ -237,6 +237,102 @@ const CURATED_TOURS: Record<string, CuratedChain> = {
       'SERCA · 信号复位泵',
     ],
   },
+  // ============ Task 25 新增策划通路教学级联 ============
+  hsa04370: {
+    chain: ['VEGFA', 'KDR', 'PLCG1', 'PRKCA', 'RAF1', 'MAP2K1', 'MAPK1', 'PLA2G4B'],
+    titles: [
+      '信号起点 · 血管内皮生长因子',
+      'VEGFR2 · 激酶域自磷酸化',
+      'PLCγ · 脂质信使生成',
+      'PKCα · DAG 激活转位',
+      'Raf-1 · MAPKKK 膜招募',
+      'MEK · 双特异性磷酸化',
+      'ERK · 终端效应激酶',
+      'cPLA2β · 花生四烯酸输出',
+    ],
+  },
+  hsa04390: {
+    chain: ['NF2', 'STK3', 'LATS2', 'MOB1A', 'YAP1', 'TEAD1', 'CCN2'],
+    titles: [
+      '上游哨兵 · merlin 接触抑制',
+      'MST2 · 级联启动激酶',
+      'LATS2 · 核心抑制激酶',
+      'MOB1 · 激活亚基协同',
+      'YAP · 被标记的命运',
+      'TEAD · 核内转录开关',
+      'CTGF · 生长基因终点',
+    ],
+  },
+  hsa04066: {
+    chain: ['cpd:C00007', 'EGLN1', 'HIF1A', 'VHL', 'ARNT', 'CREBBP', 'VEGFA', 'SLC2A1'],
+    titles: [
+      '辅底物 · 分子氧',
+      'PHD2 · 氧感受器羟化酶',
+      'HIF-1α · 缺氧主开关',
+      'VHL · 泛素降解裁决',
+      'ARNT · 二聚伙伴',
+      'CBP · 组蛋白乙酰化',
+      'VEGFA · 血管生成输出',
+      'GLUT1 · 代谢重编程终点',
+    ],
+  },
+  hsa04068: {
+    chain: ['INS', 'INSR', 'IRS1', 'PIK3CA', 'cpd:C05981', 'PDPK1', 'AKT1', 'FOXO1', 'CDKN1B'],
+    titles: [
+      '信号起点 · 胰岛素',
+      'INSR · 受体自磷酸化',
+      'IRS1 · 接头平台',
+      'PI3K · 脂质激酶',
+      'PIP₃ · 脂质第二信使',
+      'PDK1 · Thr308 引导',
+      'Akt · 完全激活',
+      'FoxO1 · 核排斥命运',
+      'p27 · 靶基因终点',
+    ],
+  },
+  hsa04620: {
+    chain: ['CD14', 'TLR4', 'MYD88', 'IRAK4', 'IRAK1', 'TRAF6', 'MAP3K7', 'IKBKB', 'NFKB1'],
+    titles: [
+      '共受体 · LPS 衣递呈',
+      'TLR4 · 危险识别',
+      'MyD88 · 衔接子募集',
+      'IRAK4 · 上游信号激酶',
+      'IRAK1 · 自磷酸化激活',
+      'TRAF6 · K63 泛素支架',
+      'TAK1 · 双线出击',
+      'IKKβ · IκBα 磷酸化',
+      'NF-κB · 炎症总开关终点',
+    ],
+  },
+  hsa04110: {
+    chain: ['CCND1', 'CDK4', 'RB1', 'E2F1', 'CCNE1', 'CDK2', 'CCNA2', 'CDK1', 'PLK1', 'CDC20'],
+    titles: [
+      'G1 引擎 · Cyclin D',
+      'CDK4 · Rb 起始磷酸化',
+      'Rb · 抑癌闸门失守',
+      'E2F · 转录释放',
+      'Cyclin E · 限制点越过',
+      'CDK2 · S 期自主推进',
+      'Cyclin A · 复制完成',
+      'CDK1 · MPF 有丝分裂驱动',
+      'PLK1 · 有丝分裂辅助激酶',
+      'APC/C · 后期触发终点',
+    ],
+  },
+  hsa04012: {
+    chain: ['EGF', 'EGFR', 'GRB2', 'SOS1', 'HRAS', 'ARAF', 'MAP2K1', 'MAPK1', 'MYC'],
+    titles: [
+      '信号起点 · EGF 扩散',
+      'EGFR · 二聚体平台',
+      'GRB2 · pY 停靠',
+      'SOS · RAS 的 GEF',
+      'HRAS · GTP 装载',
+      'ARAF · 家族代表 MEKK',
+      'MEK · 双特异性接力',
+      'ERK · 终端激酶',
+      'c-Myc · 增殖基因终点',
+    ],
+  },
 };
 
 /** 手工策划链的补充文案（引导语，教育性 framing） */
@@ -267,6 +363,20 @@ const CURATED_INTROS: Record<string, string> = {
     '细胞的能量仪表盘：AMPK 如何感知 AMP:ATP 比值并关闭一切耗能程序——9 站走完从钙信号到脂肪酸氧化、自噬与线粒体生成的完整节能动员。',
   hsa04020:
     '最迅速的第二信使：乙酰胆碱如何在 10 站内引发钙离子火花——从 ER 释放到 CICR 放大、经钙调蛋白分拣给激酶与磷酸酶，最终由 SERCA 泵回 ER 复位（全程毫秒级）。',
+  hsa04370:
+    '血管生成的启动密码：VEGF 如何在 8 站内从内皮细胞外抵达花生四烯酸输出——经典 RTK-PLCγ-PKC-Raf-MEK-ERK 级联的血管版。',
+  hsa04390:
+    '器官大小的刹车踏板：接触抑制信号如何在 7 站内经 merlin-MST2-LATS2 磷酸化 YAP——最后一站揭示刹车松开时 YAP-TEAD 如何驱动 CTGF 生长程序。',
+  hsa04066:
+    '细胞如何感知氧气：8 站看完 HIF-1 的双重命运——常氧时被 PHD 羟基化 + VHL 泛素化分钟级清除，缺氧时稳定积累与 ARNT 二聚驱动 VEGFA/GLUT1 应答。',
+  hsa04068:
+    '代谢与长寿的交叉路口：胰岛素如何在 9 站内经 PI3K-Akt 将 FoxO 驱逐出核——反过来，应激/能量匮乏时 FoxO 入核启动 p27 阻滞与抗氧化程序。',
+  hsa04620:
+    '先天免疫的第一声警报：LPS 如何在 9 站内点亮 NF-κB——从 CD14/TLR4 识别到 IRAK-TRAF6 泛素支架再到 IκBα 降解（K63 泛素链全程参与）。',
+  hsa04110:
+    '生命的复制时钟：10 站走完细胞周期引擎——从 Cyclin D 起步、Rb 闸门失守、E2F 释放，到 MPF 驱动有丝分裂与 APC/C 触发后期退出。',
+  hsa04012:
+    '受体二聚体的组合密码：EGF 如何在 9 站内激活 EGFR-GRB2-RAS-ERK 级联——HER2/HER3 异二聚体为何是最强增殖单元的分子基础。',
 };
 
 const EDGE_BIDIRECTIONAL = new Set(['binding', 'association']);

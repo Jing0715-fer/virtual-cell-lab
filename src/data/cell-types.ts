@@ -67,7 +67,7 @@ export const CELL_TYPES: CellType[] = [
     nucleusNote: '1–2 个圆形大核，核仁明显；约 25% 双核',
     nucleusNoteEn: '1–2 large round nuclei with prominent nucleoli; ~25% binucleate',
     receptors: ['EGFR', 'MET', 'IGF1R', 'INSR', 'TGFBR2', 'ADRB2'],
-    pathways: ['hsa04010', 'hsa04151', 'hsa04152', 'hsa04350'],
+    pathways: ['hsa04010', 'hsa04151', 'hsa04152', 'hsa04350', 'hsa04068'],
     responsiveLigands: ['EGF', 'IGF1', 'INS', 'TGFB1'],
     features: [
       { label: '线粒体', value: '1000–2000 个/细胞', labelEn: 'Mitochondria', valueEn: '1,000–2,000 per cell' },
@@ -123,7 +123,7 @@ export const CELL_TYPES: CellType[] = [
     nucleusNote: '单个大核占胞质约 80%（高核质比，染色质致密）',
     nucleusNoteEn: 'Single large nucleus filling ~80% of the cell (high N:C ratio, dense chromatin)',
     receptors: ['IL2RB', 'IL2RG', 'IFNGR1', 'PLCB2'],
-    pathways: ['hsa04630', 'hsa04020', 'hsa04010', 'hsa04064'],
+    pathways: ['hsa04630', 'hsa04020', 'hsa04010', 'hsa04064', 'hsa04110'],
     responsiveLigands: ['IL2', 'IFNG', 'ACh'],
     features: [
       { label: 'TCR 多样性', value: '~10¹⁵ 克隆型（V(D)J 重排）', labelEn: 'TCR diversity', valueEn: '~10¹⁵ clonotypes (V(D)J recombination)' },
@@ -151,7 +151,7 @@ export const CELL_TYPES: CellType[] = [
     nucleusNote: '单核，位于基底侧 1/3',
     nucleusNoteEn: 'Single nucleus, positioned in the basal third',
     receptors: ['EGFR', 'FZD7', 'NOTCH1', 'TGFBR2', 'LRP6'],
-    pathways: ['hsa04310', 'hsa04330', 'hsa04350', 'hsa04010'],
+    pathways: ['hsa04310', 'hsa04330', 'hsa04350', 'hsa04010', 'hsa04390'],
     responsiveLigands: ['WNT3A', 'EGF', 'TGFB1', 'DLL1'],
     features: [
       { label: '微绒毛', value: '~3000 根/细胞，长约 1 μm', labelEn: 'Microvilli', valueEn: '~3,000 per cell, ~1 μm long' },
@@ -179,7 +179,7 @@ export const CELL_TYPES: CellType[] = [
     nucleusNote: '1–2 个中央核（成体）',
     nucleusNoteEn: '1–2 centrally located nuclei (adult)',
     receptors: ['ADRB1', 'ADRB2', 'IGF1R', 'ATP2A2'],
-    pathways: ['hsa04024', 'hsa04020', 'hsa04151', 'hsa04150'],
+    pathways: ['hsa04024', 'hsa04020', 'hsa04151', 'hsa04150', 'hsa04068'],
     responsiveLigands: ['EPI', 'IGF1'],
     features: [
       { label: '线粒体', value: '占胞质体积 30–35%', labelEn: 'Mitochondria', valueEn: '30–35% of cytoplasmic volume' },
@@ -207,7 +207,7 @@ export const CELL_TYPES: CellType[] = [
     nucleusNote: '单个椭圆核，核仁 1–2 个',
     nucleusNoteEn: 'Single ovoid nucleus with 1–2 nucleoli',
     receptors: ['PDGFRA', 'EGFR', 'TGFBR2', 'IGF1R'],
-    pathways: ['hsa04350', 'hsa04010', 'hsa04151'],
+    pathways: ['hsa04350', 'hsa04010', 'hsa04151', 'hsa04370'],
     responsiveLigands: ['TGFB1', 'EGF', 'IGF1'],
     features: [
       { label: '分泌产物', value: 'I/III 型胶原、FN1、MMPs、TGF-β1', labelEn: 'Secretory output', valueEn: 'Type I/III collagen, FN1, MMPs, TGF-β1' },
@@ -235,7 +235,7 @@ export const CELL_TYPES: CellType[] = [
     nucleusNote: '多形核 / 多核，核仁大而多（嗜银蛋白 AgNOR 增多）',
     nucleusNoteEn: 'Pleomorphic / multiple nuclei with large, numerous nucleoli (increased AgNORs)',
     receptors: ['EGFR', 'IGF1R', 'INTEGRINS', 'DR5'],
-    pathways: ['hsa04010', 'hsa04151', 'hsa04115', 'hsa04210'],
+    pathways: ['hsa04010', 'hsa04151', 'hsa04115', 'hsa04210', 'hsa04110', 'hsa04066', 'hsa04012'],
     responsiveLigands: ['EGF', 'TGFB1', 'FASLG'],
     features: [
       { label: '增殖标记', value: 'Ki-67 指数 >60%（正常 <5%）', labelEn: 'Proliferation marker', valueEn: 'Ki-67 index >60% (normal <5%)' },

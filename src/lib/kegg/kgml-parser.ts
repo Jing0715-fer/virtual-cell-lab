@@ -67,6 +67,16 @@ export const COMPOUND_NAMES: Record<string, string> = {
   C00212: '腺苷 (Adenosine)',
   C00042: '琥珀酸 (Succinate)',
   C00416: '磷脂酸 (Phosphatidate)',
+  // —— 新增（HIF-1/PI3K/FoxO 等新策划通路涉及的辅底物与第二信使，
+  //    名称核对自 rest.kegg.jp/get/cpd:Cxxxxx）——
+  C05981: 'PIP₃ (磷脂酰肌醇 3,4,5-三磷酸)',
+  C00007: 'O₂ (分子氧)',
+  C14818: 'Fe²⁺ (二价铁离子)',
+  C00072: '抗坏血酸 (Ascorbate)',
+  C00026: '2-OG (2-氧代戊二酸)',
+  C00533: 'NO (一氧化氮)',
+  C00001: 'H₂O (水)',
+  C05978: 'PIP₂ (磷脂酰肌醇 4,5-二磷酸)',
 };
 
 /** XML 实体反转义（&gt; &lt; &amp; &quot; &apos;） */
@@ -145,14 +155,23 @@ export function parseKgml(xml: string): ParsedKgml {
     const graphicsName = gAttrs['name'] ?? '';
     const { label, aliases } = splitLabel(graphicsName);
 
-    // 化合物：label 用 cpd id，中文名放入 aliases 供前端展示
+    // 化合物：KGML graphics.name 常直接是 cpd id（如 "C05981"）——优先用
+    // 人类可读短名作为显示 label（如 "PIP₃"），原始 cpd id 与完整名保留在 aliases
     let finalLabel = label;
     let finalAliases = aliases;
     if (type === 'compound') {
       const cpdId = keggIds[0]?.replace(/^cpd:/, '') ?? label;
-      finalLabel = label || cpdId;
       const humanName = COMPOUND_NAMES[cpdId];
-      if (humanName) finalAliases = [humanName, ...aliases];
+      if (humanName && (label === cpdId || label === '')) {
+        // graphics 名为 cpd id → 替换为短名（括号前的主名）；原始 id 保留在 aliases
+        finalLabel = humanName.split(' (')[0];
+        finalAliases = [cpdId, humanName, ...aliases];
+      } else {
+        finalLabel = label || cpdId;
+        if (humanName && !finalAliases.includes(humanName)) {
+          finalAliases = [humanName, ...finalAliases];
+        }
+      }
     }
 
     // group 成员（复合物 component 子元素）

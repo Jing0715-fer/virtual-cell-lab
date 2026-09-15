@@ -1,8 +1,8 @@
 /**
  * 核心演示子图提取算法
  *
- * 从 KGML 全图（数百节点）中提取适合虚拟细胞演示的精简子图（28~42 节点）：
- *   1. 种子匹配 —— catalogEntry.seeds 命中 label / aliases（不足 15 个时按
+ * 从 KGML 全图（数十至上百节点）中提取适合虚拟细胞演示的核心子图（~30-56 节点）：
+ *   1. 种子匹配 —— catalogEntry.seeds 命中 label / aliases（不足 18 个时按
  *      relation 度数补齐，避免孤岛节点；超过上限时按度数截断保留 hub）
  *   2. 邻接扩展 —— 从种子沿 relation 双向 BFS 1 层（信号关键关系与
  *      ligand/receptor/tf 类别加权），低联通时自动加深一层
@@ -28,12 +28,17 @@ import type {
 import { applyExpressionTargets, classifyEntry } from './classify';
 import type { KeggComponent } from './kgml-parser';
 
-/** 节点数目标区间（任务契约：28~42，低于 28 可接受） */
-const EXPAND_TARGET = 34;
-const SEED_LIMIT = 38;
-const HARD_LIMIT = 42;
+/**
+ * 节点数目标区间（v2 扩容：演示完整度优先——覆盖通路主要分支，
+ * 2D 布局引擎按带宽自适应分行、3D 径向布局自然容纳，均无硬编码上限）
+ */
+const EXPAND_TARGET = 50;
+const SEED_LIMIT = 58;
+const HARD_LIMIT = 58;
 /** 种子最少期望数（不足时按度数补齐） */
-const MIN_SEEDS = 15;
+const MIN_SEEDS = 18;
+/** 提取算法版本（写入缓存行，变更时触发旧缓存升级重抓） */
+export const CORE_ALGO_VERSION = 5;
 
 /** 种子配体补全上限（seeds 中配体类符号图中缺失时最多合成数量） */
 const MAX_SEED_LIGANDS = 2;
@@ -252,9 +257,46 @@ export function extractCoreSubgraph(
     return added;
   };
 
+  // ---------- 1.5 化合物信使补全（在度数扩展之前：第二信使优先于拓扑填充） ----------
+  // cAMP、Ca²⁺、O₂、PIP₃…数量少而教学价值高，且 degree 打分常使其落选：
+  // 凡与已选节点（种子）有边的化合物全部纳入（受 HARD_LIMIT 保护）
+  for (const e of entries) {
+    if (e.type !== 'compound' || selected.has(e.entryId)) continue;
+    const nbrs = adjacency.get(e.entryId);
+    if (!nbrs) continue;
+    let touchesSelected = false;
+    for (const nb of nbrs) {
+      if (selected.has(nb)) {
+        touchesSelected = true;
+        break;
+      }
+    }
+    if (touchesSelected && selected.size < HARD_LIMIT) {
+      selected.add(e.entryId);
+    }
+  }
+
   expandOnce();
   // 通路 relation 稀疏时（1 层不足）自动再扩一层
   if (selected.size < EXPAND_TARGET - 6) expandOnce();
+
+  // ---------- 2.5 化合物兜底二遍 ----------
+  // 扩展后新增的种子外节点也可能邻接化合物（如 PKA→cAMP），再补一遍（幂等）
+  for (const e of entries) {
+    if (e.type !== 'compound' || selected.has(e.entryId)) continue;
+    const nbrs = adjacency.get(e.entryId);
+    if (!nbrs) continue;
+    let touchesSelected = false;
+    for (const nb of nbrs) {
+      if (selected.has(nb)) {
+        touchesSelected = true;
+        break;
+      }
+    }
+    if (touchesSelected && selected.size < HARD_LIMIT) {
+      selected.add(e.entryId);
+    }
+  }
 
   // ---------- 3~4. 节点构造（id 唯一化） ----------
   const usedIds = new Set<string>();

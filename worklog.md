@@ -775,3 +775,36 @@ Stage Summary:
 - 产出: layout3d.ts(+projectLayoutToPlane) + virtual-cell-3d.tsx(全屏+贴面+effLayout) + section-view.tsx(即时同步) + molecules.tsx(阈值) + i18n.tsx(+6 键)
 - 风险/遗留: ①无头环境 R3F 帧率 ~1fps(SwiftShader), 真机 60fps 下贴面切换应为亚秒级 ②浅剖深(<0.3)时盘外分子悬于切平面延伸域(设计语义: 载玻片) ③SimEvent 事件文案/PDF 报告仍中文(Task 22 遗留) ④VLM 视觉复验欠账
 - 下阶段建议: ①贴面模式下分子沿切面的自动散点防重叠(浅剖深拥挤) ②SimEvent 双语 ③全屏模式追加快捷键 F/双击画布 ④hero 图换项目 3D 视图截图
+
+---
+Task ID: 25
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户需求——①环境回滚后从 GitHub 重新拉取最新代码 ②继续打磨整个项目 ③获取更多 KEGG pathway ④演示完整性补全（此前仅展示 pathway 的一部分）
+
+Work Log:
+- [代码恢复] 本地环境被回滚至 6259288（Task 24 之前的快照）；确认本地无独有提交后 git reset --hard origin/main → 435fd74（含 Task 24 近全屏+信号贴面两大特性），dev server 稳定运行
+- [通路扩充 13→20] 新增 7 条策划通路（每条含专业双语描述 ~150 字、级联摘要、40-80 精选种子）：
+  · hsa04370 VEGF（血管生成；PLCγ-PKC-Raf-MEK-ERK ∥ PI3K-Akt-eNOS 双支路）
+  · hsa04390 Hippo（器官大小；NF2-MST2-LATS2-YAP/TAZ-TEAD 生长许可开关）
+  · hsa04066 HIF-1（缺氧应答；O₂-PHD-VHL 降解轴 + HRE 转录输出）
+  · hsa04068 FoxO（代谢/长寿；胰岛素-Akt 磷酸化出核 vs 应激入核）
+  · hsa04620 TLR（固有免疫；MyD88-IRAK-TRAF6-TAK1-IKK-NF-κB ∥ TRIF-TBK1-IRF3）
+  · hsa04110 细胞周期（Cyclin D-CDK4/6-Rb-E2F 引擎 + 检查点网络）
+  · hsa04012 ErbB（HER2/HER3 异二聚体组合密码 + 五支路）
+  KGML 全部预拉取校验：7 条通路 entries/relations/关键符号逐一核实（dump-rels/dump-groups 脚本验证教学链每条边真实存在）
+- [演示完整性 · 子图扩容] subgraph.ts：EXPAND_TARGET 34→50 / SEED_LIMIT 38→58 / HARD_LIMIT 42→58 / MIN_SEEDS 15→18；20 条通路平均核心子图 32.9→44.4 节点（+35%），VEGF 实现全通路覆盖（28/28）
+- [化合物信使纳入] 新增 1.5 步化合物补全（扩展前后双遍，与已选节点有边的化合物全部纳入）：Ca²⁺ 通路化合物 0→6、HIF-1 0→7（O₂/Fe²⁺/2-OG/抗坏血酸/NO）、cAMP 通路 19 个（cAMP/DAG/IP₃/神经递质全家）；修复 Set.some 不存在导致的提取崩溃（换 for-of）
+- [化合物人类可读标签] kgml-parser.ts：graphics.name 为 cpd id 时用 COMPOUND_NAMES 短名做 label（"C05981"→"PIP₃"、"C00007"→"O₂"），原始 id 保留 aliases；新增 7 个化合物映射（经 rest.kegg.jp 核名：C14818=Fe²⁺、C00026=2-OG、C00533=NO 等）；同步更新注释/事件键（C00076→Ca²⁺、PIK3CA>PIP3 死键修复为 PIP₃）
+- [缓存升级机制] PathwayGraph +components/coreVersion 字段；readDbCache 旧算法行默认拒绝触发在线重抓（网络失败时 allowLegacy 降级保可用）；CORE_ALGO_VERSION 迭代至 5；CACHE_VERSION v8→v11
+- [符号表落盘缓存] hsa 符号表（22,845 条）持久化 db/hsa-symbols.json——彻底根治 KEGG 限流期"降级提取写入小子图污染缓存行"问题（曾致 JAK-STAT 56→21 节点回退）；符号表降级时跳过 upsert；seed 脚本加 2s 节流
+- [教学体系] guided-tour.ts +7 条教学级联（8-10 站，全部基于已验证 KGML 边）+7 条引导语；pathway-library CURATED_TOUR_PATHWAYS 同步 +7；kegg-full-catalog 7 条 curated: true；cell-types 推荐通路扩充（肝细胞+FoxO、T 细胞+细胞周期、肠上皮+Hippo、成纤维+VEGF、癌细胞+细胞周期/HIF-1/ErbB）
+- [分子注释库] NODE_NOTES +~110 条（VEGF 15/Hippo 19/HIF-1 17/FoxO 14/TLR 21/细胞周期 39/ErbB 21，含药物靶点与疾病关联）；CURATED_EVENTS +~110 条残基级事件（去重后 285 键；含 VHL 泛素裁决、APC/C^Cdc20 泛素化 Cyclin B、HRE 转录、Myddosome 组装等）
+- [2D 密集布局优化] layout.ts 三层重构：①动态分带（各 tier 行数统计后顺序堆叠，行高 38-44 自适应，修复 50 节点时第三行撞带）②配体 3 列×多行网格（修复同受体多配体 44px 重叠）③核内：TF 上半弧多环（弦距约束）+ 靶基因"转录货架"（核下分行，行距 28≥盒高 26 构造性无重叠）+ 砖块错位 + 紧凑节点尺寸（>40 节点 0.8×）；HIF-1 50 节点标签重叠 156→2（阈值 78×26px），yRange 678 不出画布
+- [QA] agent-browser 端到端：通路库 20/20 策划通路可见（新分组"细胞过程·细胞生长与死亡"/"免疫系统·固有免疫识别"）；HIF-1 装配 50 核心节点+播放（阶段 0→3/4）+教学引导 8 站逐站步进（O₂→EGLN1→HIF1A→VHL→ARNT→CREBBP→VEGFA→SLC2A1 全链走通）；EN 模式 7 条新通路英文名/描述全部渲染、html lang 正确；VEGF 28 节点全通路覆盖；console 0 错误；390px/1280px 无横向溢出；lint 0 错误；tsc 项目自有代码 0 错误；dev.log 无异常
+
+Stage Summary:
+- 两大需求全部落地：①策划通路 13→20 条（+7 条高教学价值通路，全带双语科学描述/种子/教学级联/分子注释）②演示完整性显著提升（平均核心子图 +35%、化合物信使全量纳入、VEGF 全通路、2D 密集布局零重叠化）
+- 工程加固：coreVersion 缓存行升级机制（算法迭代不再需要手动清库）+ hsa 符号表磁盘缓存（根治上游限流导致的降级提取污染）+ 化合物人类可读标签
+- 产出文件：pathway-catalog.ts(+7 条目) / kegg-full-catalog.ts(7×curated) / guided-tour.ts(+7 级联) / molecular-notes.ts(+~220 行) / subgraph.ts(扩容+化合物补全) / kgml-parser.ts(化合物标签) / kegg-client.ts(缓存升级+符号表落盘) / layout.ts(密集布局重构) / cell-types.ts(推荐扩充) / types/kegg.ts(+字段) / scripts/seed-kegg.ts(节流)
+- 风险/遗留: ①2D 密集布局仍有 2 处阈值级边缘重叠（HIF-1 50 节点，标签仍可读，画布可缩放）②非策划 372 全量通路缓存行为不变（按需在线抓取）③SimEvent 事件文案/PDF 报告中文（Task 22 遗留）④VLM 视觉复验因配额未做（以 DOM 几何量化替代）⑤旧缓存行（非策划通路 hsa00010 等 3 行 coreVersion=null）将在下次访问时自动升级
+- 下阶段建议: ①SimEvent 事件流文案双语化 ②PDF 报告 EN 版 ③贴面模式下分子沿切面自动散点防重叠（Task 24 遗留）④hero 图换项目自身 3D 视图截图 ⑤通路对比模式补充新通路预设
