@@ -47,6 +47,8 @@ const FALLBACK_SPEC: CellBodySpec = {
   vesicleCount: 0,
   microtubules: 0,
   nucleolus: { count: 1, r: 0.8 },
+  lysosomeCount: 0,
+  peroxisomeCount: 0,
 };
 
 /** 低端设备/软件渲染检测（SwiftShader/CPU 渲染/低核数 → 自动流畅模式，降帧缓冲内存与 CPU 负担）
@@ -358,33 +360,14 @@ export function VirtualCell3D() {
   const [clipAxis, setClipAxis] = useState<SectionAxis>('front');
   // 信号贴面: 信号转导演示投影到剖切面上进行（用户需求 —— 切面演示; 默认 50% 过心切面最佳）
   const [sectionSnap, setSectionSnap] = useState(true);
-  // 全屏弹窗: 优先原生 Fullscreen API（真全屏, 无浏览器 chrome）,
-  // 不支持时（如 iOS Safari 不支持元素全屏）降级为 fixed 视口覆盖层; ESC / 退出按钮均可关闭
+  // 网页内全屏（用户需求: 不再调用原生 Fullscreen API 接管整个物理屏幕）:
+  //   3D 视图以 fixed 视口覆盖层铺满浏览器可见区域 —— 页面级全屏，保留浏览器标签/工具栏，
+  //   嵌入式预览 iframe 中同样可靠; ESC / 退出按钮均可关闭
   const [fullscreen, setFullscreen] = useState(false);
-  // 原生全屏激活标记（未激活时覆盖层保留圆角画框样式, 已激活时铺满物理屏幕）
-  const [nativeFs, setNativeFs] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  const enterFullscreen = () => {
-    setFullscreen(true);
-    rootRef.current?.requestFullscreen?.().catch(() => {
-      /* 被浏览器拒绝 → 保持 fixed 覆盖层降级 */
-    });
-  };
-  const exitFullscreen = () => {
-    setFullscreen(false);
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-  };
-  // 原生全屏被系统退出（ESC/F11/手势）→ 同步关闭弹窗状态
-  useEffect(() => {
-    const onFsChange = () => {
-      const active = !!document.fullscreenElement;
-      setNativeFs(active);
-      if (!active) setFullscreen(false);
-    };
-    document.addEventListener('fullscreenchange', onFsChange);
-    return () => document.removeEventListener('fullscreenchange', onFsChange);
-  }, []);
+  const enterFullscreen = () => setFullscreen(true);
+  const exitFullscreen = () => setFullscreen(false);
   // WebGL 上下文丢失提示（自动恢复尝试中）
   const [ctxLost, setCtxLost] = useState(false);
 
@@ -505,7 +488,7 @@ export function VirtualCell3D() {
     return effLayout.nodes.find((n) => n.id === tourStep.nodeId)?.pos ?? null;
   }, [tourOpen, tourStep, effLayout]);
 
-  // 全屏模式下 ESC 退出（接近全屏检视; 锁定背景滚动）
+  // 网页内全屏模式下 ESC 退出（页面级全屏检视; 锁定背景滚动）
   useEffect(() => {
     if (!fullscreen) return;
     const prevOverflow = document.body.style.overflow;
@@ -533,9 +516,7 @@ export function VirtualCell3D() {
       ref={rootRef}
       className={
         fullscreen
-          ? nativeFs
-            ? 'fixed inset-0 z-[200] overflow-hidden bg-[#030812]'
-            : 'fixed inset-0 z-[200] overflow-hidden bg-[#030812] sm:inset-2 sm:rounded-3xl sm:border sm:border-emerald-500/15 sm:shadow-[0_0_90px_rgba(0,0,0,0.75)]'
+          ? 'vc-fs-in fixed inset-0 z-[200] overflow-hidden bg-[#030812]'
           : 'relative h-full w-full overflow-hidden'
       }
       aria-label={fullscreen ? t('hud.fs') : undefined}
@@ -661,7 +642,7 @@ export function VirtualCell3D() {
         </div>
       )}
 
-      {/* 全屏弹窗 · 顶部信息条（细胞/通路/操作提示/退出 —— 替代常规左上信息卡, 客户大画幅检视） */}
+      {/* 网页内全屏 · 顶部信息条（细胞/通路/操作提示/退出 —— 替代常规左上信息卡, 整页画幅检视） */}
       {fullscreen && (
         <div className="pointer-events-none absolute left-3 right-3 top-3 z-20 md:left-1/2 md:right-auto md:w-[min(58vw,640px)] md:-translate-x-1/2">
           <div className="pointer-events-auto flex items-center gap-2.5 rounded-xl border border-emerald-500/25 bg-slate-950/85 px-3 py-2 shadow-[0_8px_32px_rgba(0,0,0,0.5)] backdrop-blur-lg">
@@ -724,7 +705,7 @@ export function VirtualCell3D() {
           fullscreen ? 'top-[68px] md:top-3' : 'top-3'
         }`}
       >
-        {/* 全屏弹窗（始终可见 —— 移动端尤佳: 画布铺满视口放大观察） */}
+        {/* 网页内全屏（始终可见 —— 移动端尤佳: 画布铺满视口放大观察） */}
         <HudToggle
           active={fullscreen}
           onClick={() => (fullscreen ? exitFullscreen() : enterFullscreen())}

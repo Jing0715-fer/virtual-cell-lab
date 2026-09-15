@@ -13,8 +13,13 @@
  *      - 线粒体: 长条豆状外膜（2.9:1, 对应 2D 椭圆形态语言）+ 12 条低频波浪板层嵴 + 嵴膜 ATP 合酶发光点
  *      - RER: 核旁连续囊池网 + 连接管 + 膜旁核糖体 + 游离多聚核糖体
  *      - 高尔基: 顺→反 5 池梯度（非线性顶点色极性, 层叠扁平囊剪影）+ 反面出芽囊泡 + 顺面运输小泡
- *      - 细胞骨架: 中心体放射微管（原纤维条纹法线）+ 皮层肌动蛋白网
- *      - 胞外悬浮微粒（浸没感）+ 脂双层流动镶嵌（缓慢对流）
+ *      - 细胞骨架: 中心体放射微管（原纤维条纹法线）+ 皮层肌动蛋白网 + 中间丝（波形蛋白笼）
+ *      - 胞外悬浮微粒（浸没感）+ 脂双层流动镶嵌（缓慢对流, 逐实例色相微差）
+ *   6. 精细度补强（v3）:
+ *      - 溶酶体（酸性琥珀体 + 腔内水解酶颗粒）/ 过氧化物酶体（尿酸氧化酶晶核）/ 脂滴（中性脂金滴）
+ *      - 糖萼（胞外多糖绒被）+ 网格蛋白衣被小窝（胞质面刺突穹窿）
+ *      - mtDNA 核样体（线粒体基质亮斑）+ 核孔复合体胞质丝（出核 mRNA 对接轨）
+ *      - 核糖体大小亚基哑铃形 + 跨膜蛋白 3 螺旋束（多次跨膜剪影）
  * 科学参照: Alberts MBoC 6th / Karp Cell & Molecular Biology 9th / cellimagelibrary
  */
 import { useEffect, useMemo } from 'react';
@@ -125,9 +130,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   // 脂双层脂头（外叶/内叶, 缓慢对流 = 膜流动性）
   const headGeo = track(new THREE.SphereGeometry(0.078, 8, 6));
   const headCount = Math.round(860 * q);
-  const makeLeaflet = (offset: number, color: string, opacity: number, emissive: string) => {
+  const makeLeaflet = (offset: number, opacity: number, emissive: string, tints: string[]) => {
     const m = track(new THREE.MeshStandardMaterial({
-      color,
+      color: '#ffffff',
       emissive,
       emissiveIntensity: 0.42 * dim,
       transparent: true,
@@ -137,6 +142,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const inst = new THREE.InstancedMesh(headGeo, m, headCount);
     const mm = new THREE.Matrix4();
     const dir = new THREE.Vector3();
+    const c = new THREE.Color();
     fibSphere(headCount, 1).forEach((p, i) => {
       dir.set(p.x, p.y, p.z).normalize();
       const r = surf(dir, R + offset, MEM_FREQ, MEM_AMP, 3);
@@ -144,17 +150,26 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       mm.makeScale(s, s, s);
       mm.setPosition(dir.x * r, dir.y * r, dir.z * r);
       inst.setMatrixAt(i, mm);
+      // 逐实例脂头色相微差（磷脂/鞘脂/胆固醇混合嵌镶的真实膜读感）
+      inst.setColorAt(i, c.set(tints[i % tints.length]).multiplyScalar(0.82 + hash01(`lhc${i}`) * 0.3));
     });
     inst.instanceMatrix.needsUpdate = true;
+    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
     inst.renderOrder = 60;
     return inst;
   };
-  const outerLeaflet = makeLeaflet(0.05, '#5eead4', 0.72, '#14b8a6');
-  const innerLeaflet = makeLeaflet(-0.05, '#0f766e', 0.55, '#115e59');
+  const outerLeaflet = makeLeaflet(0.05, 0.72, '#14b8a6', ['#5eead4', '#2dd4bf', '#99f6e4', '#4fd1c5']);
+  const innerLeaflet = makeLeaflet(-0.05, 0.55, '#115e59', ['#0f766e', '#115e59', '#134e4a']);
   membraneGroup.add(outerLeaflet, innerLeaflet);
 
-  // 跨膜蛋白（α-螺旋束, 嵌于脂双层）
-  const tmpGeo = track(new THREE.CapsuleGeometry(0.062, 0.5, 4, 10));
+  // 跨膜蛋白（多次跨膜 α-螺旋束 —— 3 螺旋三角排布, GPCR/转运体跨膜区剪影, 嵌于脂双层）
+  const tmpGeo = track(
+    mergeGeoms([
+      { geo: track(new THREE.CapsuleGeometry(0.03, 0.48, 4, 8)), matrix: new THREE.Matrix4().makeTranslation(0.05, 0, 0) },
+      { geo: track(new THREE.CapsuleGeometry(0.03, 0.54, 4, 8)), matrix: new THREE.Matrix4().makeTranslation(-0.032, 0, 0.043) },
+      { geo: track(new THREE.CapsuleGeometry(0.03, 0.44, 4, 8)), matrix: new THREE.Matrix4().makeTranslation(-0.032, 0, -0.043) },
+    ]),
+  );
   const tmpMat = track(new THREE.MeshStandardMaterial({
     color: '#ffffff',
     emissive: '#0d9488',
@@ -188,6 +203,97 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     membraneGroup.add(tmps);
   }
   labels.push({ pos: sph(R * 1.14, 0.62, 0.4), zh: '质膜（脂双层）', latin: 'Plasma membrane' });
+
+  // 糖萼（胞外多糖-糖蛋白绒被 —— 真实细胞表面的 fuzzy coat; 随膜流动缓转）
+  {
+    const gcGeo = track(new THREE.CapsuleGeometry(0.012, 0.2, 3, 5));
+    const gcMat = track(new THREE.MeshStandardMaterial({
+      color: '#99f6e4',
+      emissive: '#14b8a6',
+      emissiveIntensity: 0.22 * dim,
+      transparent: true,
+      opacity: 0.32 * dim,
+      depthWrite: false,
+    }));
+    const gcCount = Math.round(300 * q) + 40;
+    const gc = new THREE.InstancedMesh(gcGeo, gcMat, gcCount);
+    {
+      const mm = new THREE.Matrix4();
+      const qq = new THREE.Quaternion();
+      const up = new THREE.Vector3(0, 1, 0);
+      const dir = new THREE.Vector3();
+      fibSphere(gcCount, 1).forEach((p, i) => {
+        dir.set(p.x, p.y, p.z).normalize();
+        const r = surf(dir, R + 0.17, MEM_FREQ, MEM_AMP, 3);
+        qq.setFromUnitVectors(up, dir);
+        const s = 0.6 + hash01(`gc${i}`) * 0.85;
+        mm.compose(new THREE.Vector3(dir.x * r, dir.y * r, dir.z * r), qq, new THREE.Vector3(1, s, 1));
+        gc.setMatrixAt(i, mm);
+      });
+      gc.instanceMatrix.needsUpdate = true;
+      gc.renderOrder = 62;
+    }
+    membraneGroup.add(gc);
+    labels.push({ pos: sph(R * 1.3, 1.78, 1.1), zh: '糖萼（多糖绒被）', latin: 'Glycocalyx' });
+  }
+
+  // 网格蛋白衣被小窝（质膜胞质面内吞点位 —— 穹窿 + 刺突衣被剪影; 低端设备省略）
+  if (!perf) {
+    const dome = track(new THREE.SphereGeometry(0.3, 14, 9, 0, Math.PI * 2, 0, Math.PI * 0.52));
+    dome.scale(1, 0.62, 1);
+    const spikeParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [{ geo: dome }];
+    const spikeN = 14;
+    const sq = new THREE.Quaternion();
+    const su = new THREE.Vector3(0, 1, 0);
+    for (let s = 0; s < spikeN; s++) {
+      const phi = 0.18 + (s % 7) * 0.2;
+      const theta = (s / 7) * Math.PI * 2 + (s % 2) * 0.5;
+      const sd = new THREE.Vector3(
+        Math.sin(phi) * Math.cos(theta),
+        Math.cos(phi),
+        Math.sin(phi) * Math.sin(theta),
+      );
+      const spike = track(new THREE.ConeGeometry(0.026, 0.15, 5));
+      sq.setFromUnitVectors(su, sd);
+      spikeParts.push({
+        geo: spike,
+        matrix: new THREE.Matrix4().compose(sd.clone().multiplyScalar(0.33), sq.clone(), new THREE.Vector3(1, 1, 1)),
+      });
+    }
+    const pitGeo = track(mergeGeoms(spikeParts));
+    const pitMat = mat({
+      color: '#fbbf24',
+      emissive: '#b45309',
+      emissiveIntensity: 0.3,
+      roughness: 0.4,
+      normalMap: coatNormal,
+      normalScale: 1.1,
+      opacity: 0.8,
+      clearcoat: 0.3,
+    });
+    const pitN = 4;
+    const pits = new THREE.InstancedMesh(pitGeo, pitMat, pitN);
+    {
+      const mm = new THREE.Matrix4();
+      const qq = new THREE.Quaternion();
+      const spin = new THREE.Quaternion();
+      const up = new THREE.Vector3(0, 1, 0);
+      const dir = new THREE.Vector3();
+      for (let i = 0; i < pitN; i++) {
+        dir.setFromSphericalCoords(1, Math.acos((hash01(`cp${i}`, 3) - 0.5) * 2.2), hash01(`cp${i}`, 5) * Math.PI * 2);
+        const r = surf(dir, R + 0.02, MEM_FREQ, MEM_AMP, 3);
+        qq.setFromUnitVectors(up, dir.clone().negate()); // 穹窿朝胞质内凹（内吞出芽位形）
+        spin.setFromAxisAngle(dir, hash01(`cps${i}`) * Math.PI * 2);
+        qq.premultiply(spin);
+        const s = 0.9 + hash01(`cpx${i}`) * 0.4;
+        mm.compose(new THREE.Vector3(dir.x * r, dir.y * r, dir.z * r), qq, new THREE.Vector3(s, 1, s));
+        pits.setMatrixAt(i, mm);
+      }
+      pits.instanceMatrix.needsUpdate = true;
+      pits.renderOrder = 59;
+    }
+    membraneGroup.add(pits);
+  }
 
   /* ================= 核被膜（双层 + 核孔复合体） ================= */
   const NUC_FREQ = 1.5;
@@ -261,6 +367,46 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       inst.renderOrder = 55;
       group.add(inst);
       npcParts.push(inst);
+    }
+    // 胞质丝（NPC 胞质面 8 根柔性丝 —— 出核 mRNA/货物对接轨; 低端设备省略）
+    if (!perf) {
+      const filGeo = track(new THREE.CapsuleGeometry(0.011, 0.26, 3, 5));
+      const filMat = track(new THREE.MeshStandardMaterial({
+        color: '#cbd5e1',
+        emissive: '#64748b',
+        emissiveIntensity: 0.22 * dim,
+        transparent: true,
+        opacity: 0.5 * dim,
+        depthWrite: false,
+      }));
+      const filN = 8;
+      const fil = new THREE.InstancedMesh(filGeo, filMat, mats.length * filN);
+      const fm = new THREE.Matrix4();
+      const up = new THREE.Vector3(0, 1, 0);
+      let fi = 0;
+      mats.forEach((npcM, i) => {
+        for (let f = 0; f < filN; f++) {
+          const ang = (f / filN) * Math.PI * 2 + hash01(`nf${i}${f}`) * 0.6;
+          const tilt = 0.6 + hash01(`nft${i}${f}`) * 0.3; // ~34°-51° 外倾
+          const localDir = new THREE.Vector3(
+            Math.sin(tilt) * Math.cos(ang),
+            Math.sin(tilt) * Math.sin(ang),
+            Math.cos(tilt),
+          );
+          const fq = new THREE.Quaternion().setFromUnitVectors(up, localDir);
+          const local = new THREE.Matrix4().compose(
+            localDir.clone().multiplyScalar(0.3).add(new THREE.Vector3(0, 0, 0.12)),
+            fq,
+            new THREE.Vector3(1, 1, 1),
+          );
+          fm.multiplyMatrices(npcM, local);
+          fil.setMatrixAt(fi, fm);
+          fi++;
+        }
+      });
+      fil.instanceMatrix.needsUpdate = true;
+      fil.renderOrder = 54;
+      group.add(fil);
     }
   }
   labels.push({ pos: sph(N * 1.38, 0.35, 1.9), zh: '核孔复合体', latin: 'Nuclear pore complex' });
@@ -398,6 +544,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     flow: { color: '#5eead4', strength: 0.4, scale: 2.4, speed: 0.2, rim: 0.3 },
   });
   const atpMat = track(new THREE.MeshBasicMaterial({ color: '#fcd34d', transparent: true, opacity: 0.95 * dim }));
+  // mtDNA 核样体材质（粉紫亮斑 —— 区别于 ATP 合酶金点）
+  const mtdnaMat = track(new THREE.MeshBasicMaterial({ color: '#f0abfc', transparent: true, opacity: 0.85 * dim }));
   for (let i = 0; i < mitoCount; i++) {
     const g = new THREE.Group();
     // 外膜（透射）
@@ -456,6 +604,25 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       atps.renderOrder = 47;
     }
     g.add(atps);
+    // mtDNA 核样体（基质内 3 个亮斑 —— 母系基因组 + 线粒体核糖体; 低端设备省略）
+    if (!perf) {
+      const mdParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
+      for (let d = 0; d < 3; d++) {
+        const dr = 0.045 + hash01(`md${i}${d}`) * 0.03;
+        mdParts.push({
+          geo: track(new THREE.SphereGeometry(dr, 6, 5)),
+          matrix: new THREE.Matrix4().setPosition(
+            (hash01(`mdx${i}${d}`) - 0.5) * 0.5,
+            (hash01(`mdy${i}${d}`) - 0.5) * 1.1,
+            (hash01(`mdz${i}${d}`) - 0.5) * 0.34,
+          ),
+        });
+      }
+      const mtdna = new THREE.Mesh(track(mergeGeoms(mdParts)), mtdnaMat);
+      mtdna.scale.set(1, 1, 0.82);
+      mtdna.renderOrder = 47;
+      g.add(mtdna);
+    }
     const p = sph(R * (0.46 + hash01(`m${i}`) * 0.3), (hash01(`m${i}`, 3) - 0.5) * 2.1, hash01(`m${i}`, 5) * Math.PI * 2);
     g.position.set(p.x, p.y, p.z);
     g.rotation.set(hash01(`m${i}`, 9) * 2.1, hash01(`m${i}`, 11) * 2.1, hash01(`m${i}`, 13) * 2.1);
@@ -470,7 +637,13 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   }
 
   /* ================= 粗面内质网（核旁连续囊池 + 连接管 + 核糖体） ================= */
-  const ribosomeGeo = track(new THREE.SphereGeometry(0.064, 6, 5));
+  // 核糖体: 大小亚基哑铃形（60S 大亚基 + 40S 小亚基 —— 电镜双亚基剪影）
+  const ribosomeGeo = track(
+    mergeGeoms([
+      { geo: track(new THREE.SphereGeometry(0.06, 7, 6)), matrix: new THREE.Matrix4().makeTranslation(0, 0.028, 0) },
+      { geo: track(new THREE.SphereGeometry(0.042, 6, 5)), matrix: new THREE.Matrix4().makeTranslation(0, -0.05, 0) },
+    ]),
+  );
   const ribosomeMat = track(new THREE.MeshStandardMaterial({ color: '#fbbf24', emissive: '#d97706', emissiveIntensity: 0.62 * dim, transparent: true, opacity: 0.88 * dim, depthWrite: false }));
   {
     // 渲染层 +2 行（视觉行数增多, 更接近 2D 多行波浪线; 不改 layout3d 契约）; perf ×0.6 缩减
@@ -532,10 +705,14 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const ribos = new THREE.InstancedMesh(ribosomeGeo, ribosomeMat, riboPts.length);
     {
       const mm = new THREE.Matrix4();
+      const qq = new THREE.Quaternion();
+      const eu = new THREE.Euler();
       riboPts.forEach((p, i) => {
         const s = 0.75 + hash01(`rb${i}`) * 0.5;
-        mm.makeScale(s, s, s);
-        mm.setPosition(p.x, p.y, p.z);
+        // 亚基分裂面随机朝向（哑铃形核糖体取向自然化）
+        eu.set(hash01(`rbe${i}`) * Math.PI, hash01(`rbe${i}`, 3) * Math.PI * 2, (hash01(`rbe${i}`, 5) - 0.5) * 0.8);
+        qq.setFromEuler(eu);
+        mm.compose(new THREE.Vector3(p.x, p.y, p.z), qq, new THREE.Vector3(s, s, s));
         ribos.setMatrixAt(i, mm);
       });
       ribos.instanceMatrix.needsUpdate = true;
@@ -553,6 +730,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const chains = Math.round(26 * q) + 6;
     const beads: THREE.Matrix4[] = [];
     const mm = new THREE.Matrix4();
+    const qq2 = new THREE.Quaternion();
+    const upV = new THREE.Vector3(0, 1, 0);
     for (let ch = 0; ch < chains; ch++) {
       const start = sph(R * (0.5 + hash01(`pr${ch}`) * 0.34), (hash01(`pr${ch}`, 3) - 0.5) * 2.4, hash01(`pr${ch}`, 5) * Math.PI * 2);
       const dirV = new THREE.Vector3(hash01(`prd${ch}`) - 0.5, hash01(`prd${ch}`, 3) - 0.5, hash01(`prd${ch}`, 5) - 0.5).normalize().multiplyScalar(0.14);
@@ -560,8 +739,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       for (let b = 0; b < n; b++) {
         const p = new THREE.Vector3(start.x + dirV.x * b, start.y + dirV.y * b, start.z + dirV.z * b);
         const s = 0.7 + hash01(`prb${ch}${b}`) * 0.4;
-        mm.makeScale(s, s, s);
-        mm.setPosition(p.x, p.y, p.z);
+        // 核糖体沿 mRNA 链取向（亚基长轴对齐链方向 → 珠串读感）
+        qq2.setFromUnitVectors(upV, dirV.clone().normalize());
+        mm.compose(p, qq2, new THREE.Vector3(s, s, s));
         beads.push(mm.clone());
       }
     }
@@ -735,6 +915,160 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     labels.push({ pos: p0, zh: '运输囊泡', latin: 'Transport vesicle' });
   }
 
+  /* ================= 溶酶体（酸性水解酶细胞器, pH≈4.5-5） ================= */
+  {
+    const lysoN = perf ? Math.max(2, Math.round(spec.lysosomeCount * 0.6)) : spec.lysosomeCount;
+    if (lysoN > 0) {
+      const bodyGeo = track(displacedSphere(0.38, 2, 3.2, 0.035, 101));
+      const bodyMat = mat({
+        color: '#f59e0b',
+        emissive: '#b45309',
+        emissiveIntensity: 0.38,
+        roughness: 0.34,
+        clearcoat: 0.4,
+        normalMap: coatNormal,
+        normalScale: 0.5,
+        opacity: 0.9,
+        flow: { color: '#fbbf24', strength: 0.18, scale: 1.2, speed: 0.08, rim: 0.3 },
+      });
+      const bodies = new THREE.InstancedMesh(bodyGeo, bodyMat, lysoN);
+      // 腔内水解酶颗粒（酸性磷酸酶/组织蛋白酶等 ~60 种酸性水解酶）
+      const spkGeo = track(new THREE.SphereGeometry(0.045, 5, 4));
+      const spkMat = track(new THREE.MeshStandardMaterial({
+        color: '#fde68a',
+        emissive: '#f59e0b',
+        emissiveIntensity: 0.5 * dim,
+        transparent: true,
+        opacity: 0.7 * dim,
+        depthWrite: false,
+      }));
+      const perLyso = perf ? 10 : 18;
+      const spks = new THREE.InstancedMesh(spkGeo, spkMat, lysoN * perLyso);
+      const centers: THREE.Vector3[] = [];
+      const scales: number[] = [];
+      {
+        const mm = new THREE.Matrix4();
+        const qq = new THREE.Quaternion();
+        const eu = new THREE.Euler();
+        for (let i = 0; i < lysoN; i++) {
+          const p = sph(R * (0.4 + hash01(`ly${i}`, 3) * 0.42), (hash01(`ly${i}`, 5) - 0.5) * 2.4, hash01(`ly${i}`, 7) * Math.PI * 2);
+          const s = 0.75 + hash01(`lys${i}`) * 0.55;
+          centers.push(new THREE.Vector3(p.x, p.y, p.z));
+          scales.push(s);
+          eu.set(hash01(`lyr${i}`) * Math.PI * 2, hash01(`lyr${i}`, 3) * Math.PI * 2, 0);
+          qq.setFromEuler(eu);
+          mm.compose(centers[i], qq, new THREE.Vector3(s, s, s));
+          bodies.setMatrixAt(i, mm);
+        }
+        bodies.instanceMatrix.needsUpdate = true;
+        bodies.renderOrder = 46;
+        const dir = new THREE.Vector3();
+        let si = 0;
+        for (let i = 0; i < lysoN; i++) {
+          for (let k = 0; k < perLyso; k++) {
+            dir.set(hash01(`ls${i}${k}`) - 0.5, hash01(`ls${i}${k}`, 3) - 0.5, hash01(`ls${i}${k}`, 5) - 0.5).normalize();
+            const rr = (0.12 + hash01(`lsr${i}${k}`) * 0.2) * scales[i];
+            const s2 = (0.6 + hash01(`lss${i}${k}`) * 0.7) * scales[i];
+            mm.makeScale(s2, s2, s2);
+            mm.setPosition(centers[i].x + dir.x * rr, centers[i].y + dir.y * rr, centers[i].z + dir.z * rr);
+            spks.setMatrixAt(si, mm);
+            si++;
+          }
+        }
+        spks.instanceMatrix.needsUpdate = true;
+        spks.renderOrder = 47;
+      }
+      group.add(bodies, spks);
+      const l0 = centers[0];
+      labels.push({ pos: { x: l0.x * 1.45, y: l0.y + 0.55, z: l0.z * 1.45 }, zh: '溶酶体（pH≈4.5）', latin: 'Lysosome' });
+    }
+  }
+
+  /* ================= 过氧化物酶体（过氧化氢酶晶体核心） ================= */
+  {
+    const pxN = perf ? Math.max(1, Math.round(spec.peroxisomeCount * 0.6)) : spec.peroxisomeCount;
+    if (pxN > 0) {
+      const bodyGeo = track(new THREE.SphereGeometry(0.26, 12, 10));
+      const bodyMat = mat({
+        color: '#2dd4bf',
+        transmission: transOn ? 0.28 : 0,
+        thickness: 0.3,
+        emissive: '#0f766e',
+        emissiveIntensity: 0.24,
+        roughness: 0.32,
+        opacity: transOn ? 1 : 0.55,
+        clearcoat: 0.35,
+      });
+      const bodies = new THREE.InstancedMesh(bodyGeo, bodyMat, pxN);
+      // 尿酸氧化酶晶核（电镜下的致密芯）
+      const coreGeo = track(new THREE.OctahedronGeometry(0.1, 0));
+      const coreMat = track(new THREE.MeshStandardMaterial({
+        color: '#ccfbf1',
+        emissive: '#5eead4',
+        emissiveIntensity: 0.65 * dim,
+        transparent: true,
+        opacity: 0.85 * dim,
+      }));
+      const cores = new THREE.InstancedMesh(coreGeo, coreMat, pxN);
+      const pxCenters: THREE.Vector3[] = [];
+      {
+        const mm = new THREE.Matrix4();
+        const qq = new THREE.Quaternion();
+        const qc = new THREE.Quaternion();
+        const eu = new THREE.Euler();
+        for (let i = 0; i < pxN; i++) {
+          const p = sph(R * (0.45 + hash01(`px${i}`, 3) * 0.4), (hash01(`px${i}`, 5) - 0.5) * 2.4, hash01(`px${i}`, 7) * Math.PI * 2);
+          const s = 0.7 + hash01(`pxs${i}`) * 0.5;
+          pxCenters.push(new THREE.Vector3(p.x, p.y, p.z));
+          eu.set(hash01(`pxr${i}`) * Math.PI, hash01(`pxr${i}`, 3) * Math.PI * 2, hash01(`pxr${i}`, 5) * Math.PI);
+          qq.setFromEuler(eu);
+          mm.compose(pxCenters[i], qq, new THREE.Vector3(s, s, s));
+          bodies.setMatrixAt(i, mm);
+          eu.set(hash01(`pcr${i}`) * Math.PI, hash01(`pcr${i}`, 3) * Math.PI, 0);
+          qc.setFromEuler(eu);
+          mm.compose(pxCenters[i], qc, new THREE.Vector3(s, s, s));
+          cores.setMatrixAt(i, mm);
+        }
+        bodies.instanceMatrix.needsUpdate = true;
+        bodies.renderOrder = 46;
+        cores.instanceMatrix.needsUpdate = true;
+        cores.renderOrder = 47;
+      }
+      group.add(bodies, cores);
+      const px0 = pxCenters[0];
+      labels.push({ pos: { x: px0.x * 1.5, y: px0.y - 0.6, z: px0.z * 1.5 }, zh: '过氧化物酶体', latin: 'Peroxisome' });
+    }
+  }
+
+  /* ================= 脂滴（中性脂储存库 —— 肝/心肌/癌细胞） ================= */
+  if (spec.lipidDroplets) {
+    const ldN = perf ? 3 : 5;
+    const ldMat = mat({
+      color: '#fcd34d',
+      transmission: transOn ? 0.5 : 0,
+      thickness: 0.8,
+      roughness: 0.12,
+      clearcoat: 0.65,
+      clearcoatRoughness: 0.18,
+      emissive: '#b45309',
+      emissiveIntensity: 0.14,
+      opacity: transOn ? 1 : 0.5,
+      iridescence: 0.22,
+      sheen: 0.4,
+      sheenColor: '#fde68a',
+    });
+    for (let i = 0; i < ldN; i++) {
+      const r = 0.3 + hash01(`ld${i}`) * 0.26;
+      const d = new THREE.Mesh(track(displacedSphere(r, 2, 2.6, r * 0.05, 151 + i)), ldMat);
+      const p = sph(R * (0.5 + hash01(`ldp${i}`) * 0.36), (hash01(`ldl${i}`, 3) - 0.5) * 2.2, hash01(`ldo${i}`, 5) * Math.PI * 2);
+      d.position.set(p.x, p.y, p.z);
+      d.renderOrder = 46;
+      group.add(d);
+    }
+    const lp = sph(R * 0.88, -1.45, 5.0);
+    labels.push({ pos: lp, zh: '脂滴（中性脂）', latin: 'Lipid droplet' });
+  }
+
   /* ================= 细胞骨架 ================= */
   {
     // 中心体（双联体中心粒）
@@ -771,6 +1105,40 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     }));
     mts.renderOrder = 44;
     group.add(mts);
+
+    // 中间丝（核周波形蛋白笼 —— 核被膜到质膜的力学支架, 与微管正交的第三套骨架）
+    {
+      const ifN = perf ? 6 : 12;
+      const ifParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
+      for (let i = 0; i < ifN; i++) {
+        const lat = (hash01(`if${i}`) - 0.5) * 2.2;
+        const lon = hash01(`if${i}`, 3) * Math.PI * 2;
+        const pts: THREE.Vector3[] = [];
+        for (let k = 0; k <= 6; k++) {
+          const t = k / 6;
+          const p = sph(
+            N * 1.06 + t * (R * 0.8 - N * 1.06),
+            lat + Math.sin(t * 5 + i * 1.7) * 0.18,
+            lon + t * 0.6 + Math.sin(t * 3.4 + i) * 0.13,
+          );
+          pts.push(new THREE.Vector3(p.x, p.y, p.z));
+        }
+        ifParts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 22, 0.02, 5)) });
+      }
+      const ifs = new THREE.Mesh(track(mergeGeoms(ifParts)), mat({
+        color: '#a8b7c8',
+        emissive: '#475569',
+        emissiveIntensity: 0.22,
+        opacity: 0.38,
+        roughness: 0.5,
+        sheen: 0.6,
+        sheenColor: '#e2e8f0',
+      }));
+      ifs.renderOrder = 44;
+      group.add(ifs);
+      labels.push({ pos: sph(R * 0.92, -1.25, 3.9), zh: '中间丝（波形蛋白）', latin: 'Intermediate filaments' });
+    }
+
     labels.push({ pos: { x: c.x * 2.5, y: c.y - 0.5, z: c.z * 2.5 }, zh: '微管（中心体放射）', latin: 'Microtubules' });
 
     // 皮层肌动蛋白网
@@ -1076,8 +1444,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
 }
 
 /** 窄视口（移动端）优先保留的主要细胞器标注（前缀匹配）; 其余标签拥挤不可读, 隐藏。zh/latin 双语各自前缀匹配 */
-const MAJOR_ORGANELLE_ZH = ['质膜', '核被膜', '核仁', '线粒体', '高尔基体'];
-const MAJOR_ORGANELLE_LATIN = ['Plasma membrane', 'Nuclear envelope', 'Nucleolus', 'Mitochondrion', 'Golgi apparatus'];
+const MAJOR_ORGANELLE_ZH = ['质膜', '核被膜', '核仁', '线粒体', '高尔基体', '溶酶体'];
+const MAJOR_ORGANELLE_LATIN = ['Plasma membrane', 'Nuclear envelope', 'Nucleolus', 'Mitochondrion', 'Golgi apparatus', 'Lysosome'];
 
 /** 细胞体组件（仅 dim/规格/画质变化时重建, 动画走 imperative 帧驱动） */
 export const CellBody = ({ spec, tint, dim, showAnatomy, perf }: {

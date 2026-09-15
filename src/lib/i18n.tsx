@@ -84,11 +84,11 @@ export const T: Record<string, Entry> = {
   'hud.axis': { zh: '剖面方位', en: 'Orientation' },
   'hud.depth': { zh: '剖深', en: 'Depth' },
   'hud.sectionFill': { zh: '剖开处已填充剖面标本图', en: 'Cut filled with specimen-style section' },
-  'hud.fs': { zh: '全屏检视', en: 'Fullscreen' },
+  'hud.fs': { zh: '网页内全屏', en: 'In-page fullscreen' },
   'hud.exitFs': { zh: '退出全屏', en: 'Exit fullscreen' },
   'hud.fsTip': {
-    zh: '全屏弹窗 · 更大画幅观察细节 · 滚轮/双指缩放 · ESC 退出',
-    en: 'Fullscreen popup · much larger view · scroll / pinch to zoom · ESC to exit',
+    zh: '网页内全屏 · 整页画幅观察细节 · 滚轮/双指缩放 · ESC 退出',
+    en: 'In-page fullscreen · full-page view · scroll / pinch to zoom · ESC to exit',
   },
   'hud.fsHint': {
     zh: '拖拽旋转 · 滚轮缩放 · 中键/右键平移 · 点击分子球或标签查看档案',

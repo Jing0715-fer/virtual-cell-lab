@@ -50,6 +50,12 @@ export interface CellBodySpec {
   neurites?: boolean;
   /** 上皮紧密连接带 */
   tightJunction?: boolean;
+  /** 溶酶体数量（酸性水解酶细胞器） */
+  lysosomeCount: number;
+  /** 过氧化物酶体数量（过氧化氢酶晶体核心） */
+  peroxisomeCount: number;
+  /** 胞质脂滴（肝/心肌/癌细胞代谢储存） */
+  lipidDroplets?: boolean;
 }
 
 /** 各细胞类型的 3D 形态学参数（直径参考 KEGG/Cell Biology 数据，非等比示意） */
@@ -58,36 +64,43 @@ export const CELL_BODY_SPECS: Record<CellMorphKey, CellBodySpec> = {
     membraneR: 10, nucleusR: 4.1, scale: [1, 0.96, 1],
     mitoCount: 9, erSheets: 4, vesicleCount: 14, microtubules: 12,
     nucleolus: { count: 1, r: 0.95 }, glycogen: true,
+    lysosomeCount: 5, peroxisomeCount: 6, lipidDroplets: true,
   },
   neuron: {
     membraneR: 10, nucleusR: 3.9, scale: [1, 1, 1],
     mitoCount: 6, erSheets: 2, vesicleCount: 10, microtubules: 14,
     nucleolus: { count: 1, r: 0.9 }, neurites: true,
+    lysosomeCount: 4, peroxisomeCount: 3,
   },
   tcell: {
     membraneR: 9, nucleusR: 5.4, scale: [1, 1, 1],
     mitoCount: 4, erSheets: 1, vesicleCount: 6, microtubules: 8,
     nucleolus: { count: 1, r: 0.85 },
+    lysosomeCount: 3, peroxisomeCount: 2,
   },
   epithelial: {
     membraneR: 10, nucleusR: 4.0, scale: [1, 1.05, 0.92],
     mitoCount: 6, erSheets: 3, vesicleCount: 12, microtubules: 10,
     nucleolus: { count: 1, r: 0.85 }, microvilli: true, tightJunction: true,
+    lysosomeCount: 4, peroxisomeCount: 3,
   },
   cardiomyocyte: {
     membraneR: 10.5, nucleusR: 3.6, scale: [1.18, 0.82, 0.78],
     mitoCount: 16, erSheets: 2, vesicleCount: 8, microtubules: 8,
     nucleolus: { count: 2, r: 0.7 },
+    lysosomeCount: 4, peroxisomeCount: 5, lipidDroplets: true,
   },
   fibroblast: {
     membraneR: 10, nucleusR: 3.9, scale: [1.36, 0.76, 0.8],
     mitoCount: 5, erSheets: 2, vesicleCount: 8, microtubules: 10,
     nucleolus: { count: 1, r: 0.85 }, collagen: true,
+    lysosomeCount: 3, peroxisomeCount: 2,
   },
   cancer: {
     membraneR: 10.2, nucleusR: 4.5, scale: [1.06, 1, 0.96],
     mitoCount: 7, erSheets: 2, vesicleCount: 16, microtubules: 12,
     nucleolus: { count: 3, r: 0.75 }, blebs: true, nucleusBumpy: true,
+    lysosomeCount: 7, peroxisomeCount: 3, lipidDroplets: true,
   },
 };
 

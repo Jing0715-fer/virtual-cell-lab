@@ -930,3 +930,46 @@ Stage Summary:
 - 附带修复：scaffold 化合物 id 匹配（含 Ca 通路历史静默失效边）、化合物中文名映射 3 条
 - 产出：pathway-catalog(+5 条目) / kegg-full-catalog(5×curated) / pathway-library(+5) / guided-tour(+5 链+5 引导语) / molecular-notes(+84 注释/+51 事件) / cell-types(5 处推荐) / kgml-parser(+3 化合物名) / scaffold(鞘脂生产边+id 匹配修复)
 - 遗留：Ras 3 处侧支死端（种子洪泛挤出的 NFKB1/RAP1A/TBK1 末梢——主级联 ERK/AKT 双臂完整）；孤儿节点 224 个（复合体组件/负调控因子为主，视觉存在但永不激活——下阶段可做"孤儿源头拯救"）
+
+---
+Task ID: 27
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户需求——①继续打磨和提高 3D 虚拟细胞的精细度 ②full screen 改成网页内全屏
+
+Work Log:
+- 读 worklog + git log 确认状态: Task 26-a/b 已提交（152d6da）, 工作树干净, dev server 正常
+- 【网页内全屏改造】virtual-cell-3d.tsx:
+  · 删除原生 Fullscreen API 调用链（requestFullscreen/fullscreenchange 监听/nativeFs 状态三件套全部移除）
+  · enterFullscreen = setFullscreen(true) 纯 React 状态切换; 覆盖层 fixed inset-0 z-200 铺满浏览器视口（页面级全屏, 保留浏览器 chrome, 嵌入式 iframe 预览同样可靠）
+  · 新增 vcFsIn 入场动画（globals.css: opacity 0→1 + scale 0.985→1, 0.32s cubic-bezier; prefers-reduced-motion 降级关闭）
+  · ESC 退出 + 顶部信息条 + body 滚动锁全部保留; i18n hud.fs → "网页内全屏/In-page fullscreen"、fsTip 文案同步
+- 【精细度提升 · 新细胞器三件套】organelles.tsx:
+  · 溶酶体: 位移球体酸性琥珀体（pH≈4.5, FBM 有机轮廓 + coatNormal 衣被质感 + flow 流光）+ 腔内 ~18 颗水解酶发光颗粒（InstancedMesh ×2 draw call）; 移动端主标签收录（MAJOR_ORGANELLE +1）
+  · 过氧化物酶体: 半透 teal 膜体 + 八面体尿酸氧化酶晶核（电镜致密芯剪影）
+  · 脂滴: 高折射金滴（transmission 0.5 + iridescence 0.22 + clearcoat 0.65 + sheen, 5 颗随机半径 0.3-0.56）; 肝/心肌/癌细胞专属（lipidDroplets flag）
+- 【精细度提升 · 膜层与既有结构加密】:
+  · 糖萼: 胞外多糖绒被（~340 根径向短丝 InstancedMesh, 随膜流动缓转 —— membraneGroup 子节点）
+  · 网格蛋白衣被小窝: 质膜胞质面 4 处内吞点位（穹窿 + 14 刺突 merged geometry, 朝胞质内凹的出芽位形）
+  · mtDNA 核样体: 每颗线粒体基质内 3 个粉紫亮斑（区别于 ATP 合酶金点; 随线粒体浮动动画）
+  · NPC 胞质丝: 每个核孔 8 根外倾柔性丝（~512 实例, 出核 mRNA 对接轨剪影）
+  · 中间丝: 核周波形蛋白笼 12 条波动Tube（核被膜→质膜的第三套骨架, 与微管正交）
+  · 核糖体: 单球 → 大小亚基哑铃形（60S+40S merged）; 膜旁核糖体随机欧拉取向, 多聚核糖体沿 mRNA 链方向取向（珠串读感）
+  · 跨膜蛋白: 单胶囊 → 3 螺旋三角排布束（GPCR/转运体多次跨膜剪影, 长度差异化 0.44-0.54）
+  · 脂双层: 逐实例脂头色相微差（外叶 4 色/内叶 3 色调色板 × 明度抖动 —— 磷脂/鞘脂/胆固醇混合嵌镶感）
+- 【规格扩展】layout3d.ts CellBodySpec + lysosomeCount/peroxisomeCount/lipidDroplets; 7 种细胞类型全部赋值（肝 5/6+脂滴、神经元 4/3、T 3/2、上皮 4/3、心肌 4/5+脂滴、成纤维 3/2、癌 7/3+脂滴 —— 癌细胞溶酶体增多符合肿瘤溶酶体生物合成上调）; FALLBACK_SPEC 同步补零
+- 【性能护栏】所有新增结构走 InstancedMesh/merged geometry（净增 ~28 draw call @perf=false）; NPC 丝/mtDNA/小窝 !perf 门控, 溶酶体/过氧化物酶体/中间丝 perf 减量; SwiftShader 软渲染下自动 perfMode 场景构建验证通过
+- QA（agent-browser 端到端, 桌面 1280×800 + 移动 390×844, 中英双语）:
+  · 网页内全屏: 进入后 document.fullscreenElement=null（原生 API 零调用）、根节点 vc-fs-in fixed inset-0 z-200、画布 556×568→1280×800（面积 ×3.24）、信息条+退出按钮就位、body 滚动锁; ESC 退出画布回落 556×568、滚动锁恢复; 退出按钮路径同样验证; 移动端 390×844 全覆盖、无横向溢出
+  · 全屏后 R3F 画布 ≥640px → 窄视口标签过滤解除: 解剖标注 6→17 个, 糖萼/溶酶体/过氧化物酶体/脂滴/中间丝 全部带双语标签渲染
+  · 癌细胞切换: 脂滴/溶酶体(7 颗)/膜出芽/糖萼 全部就位（细胞类型规格差异化生效）
+  · EN 模式: hud.fs="In-page fullscreen"、退出按钮 "Exit fullscreen"、html lang=en、标签英文
+  · 肝细胞恢复 + perfMode（SwiftShader 检测生效）无错误构建; console 0 错误; lint 零错误; tsc 项目自有代码零错误; dev.log 全 200
+  · VLM 视觉复验 429 限流（延续前期状况）, 以 DOM 标注/结构验证替代
+- 工具链发现: 本会话 Bash/Read 显示层会吞掉 ‹m›/‹h› 序列（ANSI 转义误判）—— 已用 python 转义读源码并精确构造 Edit old_str 规避, 文件本身无损
+
+Stage Summary:
+- 用户两项需求全部落地并端到端验证: ①网页内全屏（原生 Fullscreen API 彻底移除, 页面级覆盖层 + 入场动画, 桌面/移动/EN 全通）②3D 细胞精细度 v3（新增溶酶体/过氧化物酶体/脂滴/糖萼/mtDNA/NPC 胞质丝/中间丝/网格蛋白小窝 8 类结构 + 核糖体双亚基/3 螺旋跨膜束/脂头嵌镶色差 3 项既有结构加密）
+- 科学性: 新结构均有电镜/教科书参照（Alberts MBoC 第 6 章）; 癌细胞溶酶体上调、肝/心肌/癌脂滴、核周波形蛋白笼均为类型特异正确表达
+- 产出: organelles.tsx(+~330 行) / layout3d.ts(spec+3 字段) / virtual-cell-3d.tsx(全屏改造) / i18n.tsx(文案) / globals.css(vcFsIn)
+- 遗留/风险: ①SwiftShader 软渲染环境无法测真实 GPU 帧率（新增 ~28 draw call 为边际成本, 真机应无感）②贴面模式下核区标签互叠（Task 25 遗留）③SimEvent 双语化/PDF EN（Task 22 遗留）
+- 下阶段建议: ①贴面核区标签 force-simulate 防重叠 ②溶酶体自噬演示（mTOR 抑制 → 自噬体-溶酶体融合事件）③剖面切面显示细胞器截面（真实标本切面感）④hero 图换 3D 截图
