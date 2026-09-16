@@ -26,6 +26,12 @@
  *        神经元顶端树突丛 + 上皮顶端极性微绒毛 + 基底膜 / 成纤维应力纤维（α-SMA 束 + 黏着斑）
  *        T 细胞表面微褶皱 / 肝胆小管（微绒毛环 + 胆汁微粒）
  *      - 全部表面贴附结构（脂双层/跨膜蛋白/糖萼/小窝/微绒毛/出芽/紧密连接）经 cellSurf 严格贴合类型化膜面
+ *   8. 保真度 v10（参照用户高保真科学插画基准）:
+ *      - 线粒体: 18 条深波形板层嵴 + 更有机的豆状外膜 + 透射加深（嵴腔可见性）
+ *      - ER: 外周迷宫管网（三通节点 + 膜旁核糖体）—— "ER 遍布胞质"读感
+ *      - 高尔基: 7 层曲面板叠 + 12 池间小管 + 11 反面出芽
+ *      - 核孔复合体八重对称轮辐花冠; 异染色质双色调密集团块（38 丛 ×8-12 珠）
+ *      - 中心粒 9×三联微管桶; 胞质分子拥挤 860+; 脂双层 1300 头; 胞质体积雾填充
  * 科学参照: Alberts MBoC 6th / Karp Cell & Molecular Biology 9th / cellimagelibrary
  */
 import { useEffect, useMemo } from 'react';
@@ -162,8 +168,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   const membraneGeo = track(shapedCellGeometry(R, detail, SHAPE));
   const membraneMat = mat({
     color: tint,
-    transmission: transOn ? 0.58 : 0,
-    thickness: 1.6,
+    transmission: transOn ? 0.62 : 0,
+    thickness: 2.0,
     roughness: 0.36,
     roughnessMap: memRough,
     normalMap: memNormal,
@@ -185,9 +191,26 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   glow.renderOrder = 70;
   membraneGroup.add(glow);
 
-  // 脂双层脂头（外叶/内叶, 缓慢对流 = 膜流动性）
-  const headGeo = track(new THREE.SphereGeometry(0.078, 8, 6));
-  const headCount = Math.round(860 * q);
+  // 胞质体积雾填充（v10: 内缩膜面背向面渲染 —— 由内部向外看时的深度背景层，
+  // 与雾/景深叠加产生"半透明原生质体"的体积读感; 不遮挡任何内部结构）
+  {
+    const fillGeo = track(shapedCellGeometry(R, perf ? 2 : 3, SHAPE));
+    fillGeo.scale(0.88, 0.88, 0.88);
+    const fill = new THREE.Mesh(fillGeo, track(new THREE.MeshBasicMaterial({
+      color: '#04302a',
+      transparent: true,
+      opacity: 0.35 * dim,
+      depthWrite: false,
+      side: THREE.BackSide,
+      fog: true,
+    })));
+    fill.renderOrder = 16;
+    membraneGroup.add(fill);
+  }
+
+  // 脂双层脂头（外叶/内叶, 缓慢对流 = 膜流动性）—— v10: 1300 头加密（高保真插画的"磷脂分子镶嵌"读感）
+  const headGeo = track(new THREE.SphereGeometry(0.066, 8, 6));
+  const headCount = Math.round(1300 * q);
   const makeLeaflet = (offset: number, opacity: number, emissive: string, tints: string[]) => {
     const m = track(new THREE.MeshStandardMaterial({
       color: '#ffffff',
@@ -410,7 +433,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   const nucleolusSpeckles: THREE.InstancedMesh[] = [];
   // 共享染色质资源（双核同材质/几何, 形态由各自种子决定）
   const heteroGeo = track(new THREE.SphereGeometry(0.068, 7, 6));
-  const heteroMat = mat({ color: '#be3f68', emissive: '#9d174d', emissiveIntensity: 0.5, roughness: 0.6, opacity: 0.72 });
+  // 异染色质双色调（深玫瑰 × 紫调 —— 参照高保真插画的"活泼紫染色质"读感; emissive 维持核玫瑰家族）
+  const heteroMat = mat({ color: '#ffffff', emissive: '#9d174d', emissiveIntensity: 0.5, roughness: 0.6, opacity: 0.78 });
+  const HETERO_PALETTE = ['#be3f68', '#a84390', '#8e5bb8', '#c2527a', '#9a4bb0'];
   for (const nucInst of nucleiInst) {
     const primary = nucInst.tag === 'A';
     const tag = nucInst.tag;
@@ -446,7 +471,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
 
     const nucleoplasm = new THREE.Mesh(
       track(shapedNucleusGeometry(Nn, 3, SHAPE, NUC_FREQ, nucAmp, seed, -0.26)),
-      track(new THREE.MeshBasicMaterial({ color: '#881337', transparent: true, opacity: 0.12 * dim, depthWrite: false })),
+      track(new THREE.MeshBasicMaterial({ color: '#881337', transparent: true, opacity: 0.16 * dim, depthWrite: false })),
     );
     nucleoplasm.position.copy(nucCK);
     nucleoplasm.renderOrder = 40;
@@ -471,7 +496,19 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       const basket = track(new THREE.ConeGeometry(0.1, 0.15, 12, 1, true));
       basket.rotateX(Math.PI / 2);
       basket.translate(0, 0, -0.24);
-      const geos = perf ? [cytoRing, nucRing, plug] : [cytoRing, nucRing, plug, basket];
+      // 八重对称轮辐花冠（v10: 胞质环上 8 根辐条 —— 高保真插画的 NPC "花冠"剪影）
+      const spokes = (() => {
+        const spokeParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
+        for (let s8 = 0; s8 < 8; s8++) {
+          const a8 = (s8 / 8) * Math.PI * 2;
+          const spoke = track(new THREE.CapsuleGeometry(0.017, 0.13, 3, 5));
+          spoke.rotateZ(Math.PI / 2);
+          spoke.translate(0.152, 0, 0.09);
+          spokeParts.push({ geo: spoke, matrix: new THREE.Matrix4().makeRotationZ(a8) });
+        }
+        return track(mergeGeoms(spokeParts));
+      })();
+      const geos = perf ? [cytoRing, nucRing, plug] : [cytoRing, nucRing, plug, basket, spokes];
       const count = Math.round(60 * q) + 4;
       const mm = new THREE.Matrix4();
       const qq = new THREE.Quaternion();
@@ -542,7 +579,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
 
     // 外周异染色质（致密, 贴内层核膜 —— 真实核型边集化）
     {
-      const clumps = Math.round(24 * q) + 6;
+      const clumps = Math.round(38 * q) + 10;
       const beads: THREE.Matrix4[] = [];
       const mm = new THREE.Matrix4();
       const off = new THREE.Vector3();
@@ -550,7 +587,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         const lat = (hash01(`hc${tag}${c}`) - 0.5) * 2.6;
         const lon = hash01(`hc${tag}${c}`, 3) * Math.PI * 2;
         const cp = nucPointK(new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)), -0.34);
-        const beadsPer = 6 + Math.floor(hash01(`hc${tag}${c}`, 7) * 4);
+        const beadsPer = 7 + Math.floor(hash01(`hc${tag}${c}`, 7) * 5);
         for (let b = 0; b < beadsPer; b++) {
           off.set(hash01(`hb${tag}${c}${b}`) - 0.5, hash01(`hb${tag}${c}${b}`, 3) - 0.5, hash01(`hb${tag}${c}${b}`, 5) - 0.5).normalize().multiplyScalar(0.09 + hash01(`hb${tag}${c}${b}`, 9) * 0.13);
           const s = 0.7 + hash01(`hb${tag}${c}${b}`, 11) * 0.8;
@@ -560,15 +597,20 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         }
       }
       const inst = new THREE.InstancedMesh(heteroGeo, heteroMat, beads.length);
-      beads.forEach((m, i) => inst.setMatrixAt(i, m));
+      const hcol = new THREE.Color();
+      beads.forEach((m, i) => {
+        inst.setMatrixAt(i, m);
+        inst.setColorAt(i, hcol.set(HETERO_PALETTE[i % HETERO_PALETTE.length]).multiplyScalar(0.85 + hash01(`hcc${tag}${i}`) * 0.35));
+      });
       inst.instanceMatrix.needsUpdate = true;
+      if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
       inst.renderOrder = 48;
       group.add(inst);
     }
 
     // 常染色质纤维（伸展活跃区）
     {
-      const fibers = Math.round(16 * q) + 4;
+      const fibers = Math.round(24 * q) + 6;
       const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
       for (let i = 0; i < fibers; i++) {
         const pts: THREE.Vector3[] = [];
@@ -595,7 +637,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         color: '#f9a8d4',
         emissive: '#be185d',
         emissiveIntensity: 0.28,
-        opacity: 0.34,
+        opacity: 0.4,
         sheen: 0.5,
         sheenColor: '#fbcfe8',
       }));
@@ -669,15 +711,15 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   /* ================= 线粒体（双膜 + 板层嵴 + ATP 合酶） ================= */
   const mitos: { obj: THREE.Group; baseY: number; phase: number }[] = [];
   const mitoCount = perf ? Math.max(4, Math.round(spec.mitoCount * 0.6)) : spec.mitoCount;
-  // 板层嵴 12 条（perf 7）: x 槽位拉开 + 低波形频率 → "板层"读感更强
-  const cristaeN = perf ? 7 : 12;
+  // 板层嵴 18 条（perf 9）: v10 深波形密板层 —— 高保真插画中嵴褶皱填满线粒体的读感
+  const cristaeN = perf ? 9 : 18;
   // 外膜: 总长 2.3 / 半径 0.4 ≈ 2.9:1 长条豆状（对应 2D Mitochondrion 椭圆 rx54/ry22 ≈ 2.45:1）
-  // FBM 幅度 0.045 → 0.028: 保留有机感但轮廓明确为豆状（旧幅度会把胶囊"泡圆"）
-  const mitoOuterGeo = track(displaceGeometry(new THREE.CapsuleGeometry(0.4, 1.5, 10, 24), 2.6, 0.028, 17));
+  // v10: FBM 幅度 0.05 + 频率 3.1 —— 有机豆状轮廓更明显（近似电镜下不规则线粒体外形）
+  const mitoOuterGeo = track(displaceGeometry(new THREE.CapsuleGeometry(0.4, 1.5, 12, 28), 3.1, 0.05, 17));
   const mitoOuterMat = mat({
     color: '#0e8f6f',
-    transmission: transOn ? 0.34 : 0, // 降低透射避免外形"洗白", 豆状轮廓更实
-    thickness: 0.7,
+    transmission: transOn ? 0.44 : 0, // v10: 透射加深 —— 嵴腔/基质透过外膜可见（高保真插画读感）
+    thickness: 0.55,
     roughness: 0.3,
     normalMap: orgNormal,
     normalScale: 0.5,
@@ -687,13 +729,13 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     opacity: transOn ? 1 : 0.45,
     flow: { color: '#34d399', strength: 0.32, scale: 1.7, speed: 0.13, rim: 0.42 },
   });
-  const mitoMatrixMat = mat({ color: '#064e3b', emissive: '#022c22', emissiveIntensity: 0.25, opacity: 0.3 });
+  const mitoMatrixMat = mat({ color: '#064e3b', emissive: '#022c22', emissiveIntensity: 0.25, opacity: 0.22 });
   const cristaeMat = mat({
     color: '#99f6e4',
     emissive: '#5eead4',
-    emissiveIntensity: 0.85,
+    emissiveIntensity: 1.0,
     roughness: 0.4,
-    opacity: 0.72,
+    opacity: 0.78,
     sheen: 0.6,
     sheenColor: '#a7f3d0',
     flow: { color: '#5eead4', strength: 0.4, scale: 2.4, speed: 0.2, rim: 0.3 },
@@ -723,21 +765,21 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       const ph = hash01(`cr${c}`, i * 31);
       const slots = Math.ceil(cristaeN / 2);
       const slot = Math.floor(c / 2);
-      const xSlot = (slot / Math.max(1, slots - 1) - 0.5) * 0.34; // 相邻板层间距拉开
-      const zRow = c % 2 === 0 ? -0.07 : 0.07;
+      const xSlot = (slot / Math.max(1, slots - 1) - 0.5) * 0.44; // 相邻板层间距拉开（v10 加宽嵴带）
+      const zRow = c % 2 === 0 ? -0.09 : 0.09;
       const pts: THREE.Vector3[] = [];
       for (let k = 0; k <= 10; k++) {
         const t = k / 10;
-        // 波形频率调低（约 0.55~0.95 个全长波形）→ "板层"感更强
+        // 波形频率调低（约 0.55~0.95 个全长波形）→ "板层"感更强; v10 波幅 0.16 深褶皱
         pts.push(new THREE.Vector3(
-          Math.sin(t * Math.PI * (0.6 + ph * 0.5)) * 0.03,
+          Math.sin(t * Math.PI * (0.6 + ph * 0.5)) * 0.035,
           (t - 0.5) * 1.5,
-          zRow + Math.cos(t * Math.PI * (1.1 + ph * 0.8)) * 0.12,
+          zRow + Math.cos(t * Math.PI * (1.1 + ph * 0.8)) * 0.16,
         ));
       }
-      const tube = track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.062, 7));
-      // 压扁 0.55 → 板层; T·S 顺序使 x 槽平移不受压扁缩放
-      const m = new THREE.Matrix4().makeTranslation(xSlot, 0, 0).multiply(new THREE.Matrix4().makeScale(0.55, 1, 1));
+      const tube = track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.075, 7));
+      // 压扁 0.5 → 板层; T·S 顺序使 x 槽平移不受压扁缩放
+      const m = new THREE.Matrix4().makeTranslation(xSlot, 0, 0).multiply(new THREE.Matrix4().makeScale(0.5, 1, 1));
       parts.push({ geo: tube, matrix: m });
     }
     const cristae = new THREE.Mesh(track(mergeGeoms(parts)), cristaeMat);
@@ -746,7 +788,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     g.add(cristae);
     // 嵴膜 ATP 合酶（F1 颗粒, 发光）
     const atpGeo = track(new THREE.SphereGeometry(0.032, 5, 5));
-    const atpCount = Math.round(18 * q) + 4;
+    const atpCount = Math.round(26 * q) + 5;
     const atps = new THREE.InstancedMesh(atpGeo, atpMat, atpCount);
     {
       const mm = new THREE.Matrix4();
@@ -903,7 +945,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
 
   // 游离多聚核糖体（胞质中的翻译车间）
   {
-    const chains = Math.round(26 * q) + 6;
+    const chains = Math.round(34 * q) + 8;
     const beads: THREE.Matrix4[] = [];
     const mm = new THREE.Matrix4();
     const qq2 = new THREE.Quaternion();
@@ -932,6 +974,78 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     inst.instanceMatrix.needsUpdate = true;
     inst.renderOrder = 44;
     group.add(inst);
+  }
+
+  // 外周 ER 管网（v10: 延展到细胞外周的迷宫管网 —— 高保真插画中"ER 遍布胞质"的读感;
+  // 动态管状网络 + 三通节点 + 膜旁核糖体 —— 与核旁囊池共同构成连续的內质网系统）
+  {
+    const tubN = perf ? 5 : 9;
+    const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
+    const periphCurves: THREE.CatmullRomCurve3[] = [];
+    for (let i = 0; i < tubN; i++) {
+      const pts: THREE.Vector3[] = [];
+      for (let k = 0; k <= 6; k++) {
+        const t = k / 6;
+        const peDir = new THREE.Vector3(
+          Math.cos((hash01(`pe${i}`, 3) - 0.5) * 2.3 + Math.sin(t * 3.7 + i * 1.3) * 0.22) * Math.cos(hash01(`pe${i}`, 5) * Math.PI * 2 + t * 1.1),
+          Math.sin((hash01(`pe${i}`, 3) - 0.5) * 2.3 + Math.sin(t * 3.7 + i * 1.3) * 0.22),
+          Math.cos((hash01(`pe${i}`, 3) - 0.5) * 2.3 + Math.sin(t * 3.7 + i * 1.3) * 0.22) * Math.sin(hash01(`pe${i}`, 5) * Math.PI * 2 + t * 1.1),
+        ).normalize();
+        const p = insidePos(peDir, 0.55 + hash01(`pe${i}`) * 0.38 + Math.sin(t * 2.6 + i) * 0.1, 0.11, 0.35);
+        pts.push(new THREE.Vector3(p.x, p.y, p.z));
+      }
+      const curve = new THREE.CatmullRomCurve3(pts);
+      periphCurves.push(curve);
+      parts.push({ geo: track(new THREE.TubeGeometry(curve, 30, 0.09, 7)) });
+    }
+    // 三通节点（动态管网交汇小室）
+    const pjGeo = track(new THREE.SphereGeometry(0.1, 8, 6));
+    for (let j = 0; j < 6; j++) {
+      const pjDir = new THREE.Vector3(
+        Math.cos((hash01(`pj${j}`, 3) - 0.5) * 2.0) * Math.cos(hash01(`pj${j}`, 5) * Math.PI * 2),
+        Math.sin((hash01(`pj${j}`, 3) - 0.5) * 2.0),
+        Math.cos((hash01(`pj${j}`, 3) - 0.5) * 2.0) * Math.sin(hash01(`pj${j}`, 5) * Math.PI * 2),
+      ).normalize();
+      const jp = insidePos(pjDir, 0.5 + hash01(`pj${j}`) * 0.42, 0.13, 0.4);
+      parts.push({ geo: pjGeo, matrix: new THREE.Matrix4().setPosition(jp.x, jp.y, jp.z) });
+    }
+    const periph = new THREE.Mesh(track(mergeGeoms(parts)), mat({
+      color: '#16b3a0',
+      emissive: '#0d9488',
+      emissiveIntensity: 0.14,
+      roughness: 0.4,
+      opacity: 0.42,
+      clearcoat: 0.25,
+      flow: { color: '#14b8a6', strength: 0.14, scale: 0.9, speed: 0.06, rim: 0.18 },
+    }));
+    periph.renderOrder = 45;
+    group.add(periph);
+    // 外周管网膜旁核糖体（rER 语义贯穿全胞质 —— 高保真插画的"千颗金珠"读感）
+    const riboPts2: THREE.Vector3[] = [];
+    for (const curve of periphCurves) {
+      const n = Math.round(18 * q) + 5;
+      for (let k = 0; k <= n; k++) {
+        const p = curve.getPoint(k / n);
+        riboPts2.push(new THREE.Vector3(p.x, p.y + 0.12, p.z));
+        if (k % 2 === 0) riboPts2.push(new THREE.Vector3(p.x, p.y - 0.11, p.z));
+      }
+    }
+    const ribos2 = new THREE.InstancedMesh(ribosomeGeo, ribosomeMat, riboPts2.length);
+    {
+      const mm = new THREE.Matrix4();
+      const qq = new THREE.Quaternion();
+      const eu = new THREE.Euler();
+      riboPts2.forEach((p, i) => {
+        const s = 0.7 + hash01(`prr${i}`) * 0.5;
+        eu.set(hash01(`pre${i}`) * Math.PI, hash01(`pre${i}`, 3) * Math.PI * 2, (hash01(`pre${i}`, 5) - 0.5) * 0.8);
+        qq.setFromEuler(eu);
+        mm.compose(new THREE.Vector3(p.x, p.y, p.z), qq, new THREE.Vector3(s, s, s));
+        ribos2.setMatrixAt(i, mm);
+      });
+      ribos2.instanceMatrix.needsUpdate = true;
+      ribos2.renderOrder = 44;
+    }
+    group.add(ribos2);
   }
 
   // 滑面内质网（肝细胞解毒管系 —— CYP450 管网）
@@ -984,27 +1098,27 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const cisCol = new THREE.Color('#99f6e4');
     const transCol = new THREE.Color('#f59e0b');
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4; color?: THREE.Color }[] = [];
-    const cistN = 5;
-    // 非线性极性插值: 前 2 层 teal 系 → 第 3 层过渡 → 后 2 层琥珀系（顺→反读感更分明）
-    const POLARITY_MIX = [0, 0.16, 0.5, 0.84, 1];
+    const cistN = 7;
+    // 非线性极性插值: 前 3 层 teal 系 → 中 2 层过渡 → 后 2 层琥珀系（v10 七池梯度更细腻）
+    const POLARITY_MIX = [0, 0.08, 0.2, 0.42, 0.66, 0.88, 1];
     for (let i = 0; i < cistN; i++) {
       const col = cisCol.clone().lerp(transCol, POLARITY_MIX[i] ?? 1);
-      // 更薄更扁的囊（管径 0.165）+ 更大半径 + 1.28π 弧 → 层叠弯曲扁平囊剪影
-      const torus = track(new THREE.TorusGeometry(1.06 + i * 0.06, 0.165, 12, 46, Math.PI * 1.28));
+      // 更薄更扁的囊（v10: 管径 0.15 + 层间距 0.24 + 逐层旋叠 0.26 —— 高保真插画的"层叠弯曲扁平囊"读感）
+      const torus = track(new THREE.TorusGeometry(1.02 + i * 0.055, 0.15, 12, 46, Math.PI * 1.28));
       const m = new THREE.Matrix4()
-        .makeScale(1, 0.22, 1)
-        .multiply(new THREE.Matrix4().makeRotationZ(i * 0.3))
+        .makeScale(1, 0.2, 1)
+        .multiply(new THREE.Matrix4().makeRotationZ(i * 0.26))
         .multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2))
-        .setPosition(0, i * 0.3, 0);
+        .setPosition(0, i * 0.24, 0);
       parts.push({ geo: torus, matrix: m, color: col });
     }
-    // 池间小管连接（随新半径/层间距同步）
-    for (let c = 0; c < 8; c++) {
+    // 池间小管连接（v10: 12 条随七池梯度同步）
+    for (let c = 0; c < 12; c++) {
       const i = c % (cistN - 1);
       const ang = 0.5 + hash01(`gc${c}`) * 2.2;
-      const r = 1.06 + i * 0.06;
-      const a = new THREE.Vector3(Math.cos(ang) * r, i * 0.3, Math.sin(ang) * r * 0.34);
-      const b = new THREE.Vector3(Math.cos(ang) * r, (i + 1) * 0.3, Math.sin(ang) * r * 0.34);
+      const r = 1.02 + i * 0.055;
+      const a = new THREE.Vector3(Math.cos(ang) * r, i * 0.24, Math.sin(ang) * r * 0.34);
+      const b = new THREE.Vector3(Math.cos(ang) * r, (i + 1) * 0.24, Math.sin(ang) * r * 0.34);
       const mid = a.clone().add(b).multiplyScalar(0.5).add(new THREE.Vector3(0, 0, 0.22));
       parts.push({ geo: track(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(a, mid, b), 10, 0.035, 6)), color: new THREE.Color('#2dd4bf') });
     }
@@ -1035,7 +1149,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       normalScale: 0.9,
       clearcoat: 0.3,
     });
-    const budCount = 7;
+    const budCount = 11;
     const buds = new THREE.InstancedMesh(budGeo, budMat, budCount);
     {
       const mm = new THREE.Matrix4();
@@ -1062,7 +1176,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       normalScale: 0.8,
       clearcoat: 0.3,
     });
-    const cisBudCount = perf ? 2 : 3;
+    const cisBudCount = perf ? 3 : 6;
     const cisBuds = new THREE.InstancedMesh(cisBudGeo, cisBudMat, cisBudCount);
     {
       const mm = new THREE.Matrix4();
@@ -1167,7 +1281,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         opacity: 0.7 * dim,
         depthWrite: false,
       }));
-      const perLyso = perf ? 10 : 18;
+      const perLyso = perf ? 12 : 24;
       const spks = new THREE.InstancedMesh(spkGeo, spkMat, lysoN * perLyso);
       const centers = lysoCenters;
       const scales: number[] = [];
@@ -1453,7 +1567,22 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const c = nucC.clone().add(
       SHAPE === 'columnar' ? new THREE.Vector3(0.9, 2.3, 1.2) : new THREE.Vector3(1.9, -1.1, 1.6),
     );
-    const centGeo = track(new THREE.CylinderGeometry(0.13, 0.13, 0.42, 14));
+    // 中心粒（v10: 9 组三联微管桶 + 中央辐 —— 电镜横截面剪影，高保真插画读感）
+    const centGeo = (() => {
+      const centParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
+      for (let b = 0; b < 9; b++) {
+        const base = (b / 9) * Math.PI * 2;
+        for (let t = 0; t < 3; t++) {
+          const rr = 0.095 + t * 0.03;
+          const aa = base + t * 0.17;
+          const blade = track(new THREE.CylinderGeometry(0.02, 0.02, 0.42, 6));
+          blade.translate(rr, 0, 0);
+          centParts.push({ geo: blade, matrix: new THREE.Matrix4().makeRotationY(aa) });
+        }
+      }
+      centParts.push({ geo: track(new THREE.CylinderGeometry(0.04, 0.04, 0.42, 8)) });
+      return track(mergeGeoms(centParts));
+    })();
     const centMat = mat({ color: '#94a3b8', emissive: '#475569', emissiveIntensity: 0.4, roughness: 0.4, metalness: 0.2, opacity: 0.85 });
     const cent1 = new THREE.Mesh(centGeo, centMat);
     const cent2 = new THREE.Mesh(centGeo, centMat);
@@ -1565,13 +1694,14 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   const cytosol = (() => {
     const geo = track(new THREE.SphereGeometry(1, 7, 6));
     const m2 = track(new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#0b3b36', emissiveIntensity: 0.28 * dim, roughness: 0.65, transparent: true, opacity: 0.33 * dim, depthWrite: false }));
-    const count = Math.round(430 * q) + 60;
+    // v10: 860+ 颗粒 + 更细粒径谱（0.026-0.1）—— 高保真插画的"大分子拥挤"读感（macromolecular crowding）
+    const count = Math.round(860 * q) + 60;
     const inst = new THREE.InstancedMesh(geo, m2, count);
     const mm = new THREE.Matrix4();
     const c = new THREE.Color();
-    const palette = ['#115e59', '#134e4a', '#0f766e', '#3f6212', '#78350f', '#475569', '#7f1d3a', '#155e50'];
+    const palette = ['#115e59', '#134e4a', '#0f766e', '#3f6212', '#78350f', '#475569', '#7f1d3a', '#155e50', '#2f5d50', '#6b5d2e'];
     for (let i = 0; i < count; i++) {
-      const r = 0.04 + hash01(`s${i}`) * 0.075;
+      const r = 0.026 + hash01(`s${i}`) * 0.075;
       // v6: 体内形状化采样 —— 430+ 颗粒按真实形状体积分布（旧球形壳在长轴端悬空、窄轴穿膜）
       const sDir = new THREE.Vector3(
         Math.cos((hash01(`s${i}`, 5) - 0.5) * 2.7) * Math.cos(hash01(`s${i}`, 7) * Math.PI * 2),

@@ -15,7 +15,8 @@ import { Canvas, useFrame, useThree, events as createPointerEvents } from '@reac
 import type { RootState } from '@react-three/fiber';
 import { setSceneSnapshot } from '@/lib/simulation/scene-capture';
 import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
-import { EffectComposer, Bloom, Noise, Vignette } from '@react-three/postprocessing';
+import { EffectComposer, Bloom, DepthOfField, Noise, Vignette } from '@react-three/postprocessing';
+import type { DepthOfFieldEffect } from 'postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
@@ -346,6 +347,30 @@ function SceneCapture() {
   return null;
 }
 
+/** 自适应景深（高保真显微摄影质感）: 焦平面逐帧追踪「相机 → 控制目标」距离，
+ *  焦深范围随拍摄距离自适应 —— 细胞整体保持清晰可检视，胞外远场与前景柔和虚化，
+ *  空间层次感参考高保真科学插画。HD 模式专用（流畅模式跳过）。 */
+function AdaptiveDof({ controlsRef, bokehScale = 2.4 }: {
+  controlsRef: RefObject<OrbitControlsImpl | null>;
+  bokehScale?: number;
+}) {
+  const ref = useRef<DepthOfFieldEffect | null>(null);
+  const tgt = useRef(new THREE.Vector3());
+  useFrame(({ camera }) => {
+    const dof = ref.current;
+    if (!dof) return;
+    const controls = controlsRef.current;
+    if (controls) tgt.current.copy(controls.target);
+    else tgt.current.set(0, 0, 0);
+    const d = camera.position.distanceTo(tgt.current);
+    // target 自动对焦: effect.update() 每帧按相机距离计算 focusDistance（世界单位）;
+    // 焦深范围手动随拍摄距离自适应（细胞整体清晰, 远近场柔和虚化）
+    dof.target = tgt.current;
+    dof.cocMaterial.focusRange = Math.max(5, d * 0.5);
+  });
+  return <DepthOfField ref={ref} bokehScale={bokehScale} />;
+}
+
 export function VirtualCell3D() {
   const { t, lang } = useLang();
   const graph = useLabStore((s) => s.graph);
@@ -593,6 +618,8 @@ export function VirtualCell3D() {
         >
           <ambientLight intensity={0.4} />
           <directionalLight position={[6, 10, 8]} intensity={0.9} color="#e7fffb" />
+          {/* 轮廓背光（高保真插画的“边缘分离”读感: 逆侧冷青勾出质膜边緣） */}
+          <directionalLight position={[-9, 5, -11]} intensity={0.62} color="#6ff2df" />
           <pointLight position={[0, 2.2, 0]} intensity={16} distance={26} decay={2} color="#14b8a6" />
           <pointLight position={[0, 0, 0]} intensity={7} distance={9} decay={2} color="#fb7185" />
           {/* 指数雾: 深度层次感（远端结构淡入背景） */}
@@ -640,10 +667,11 @@ export function VirtualCell3D() {
             mouseButtons={MOUSE_MAP}
             makeDefault
           />
-          {/* 生物荧光辉光: Bloom 提亮发光体 + 微粒胶片噪声 + 暗角聚焦视线（流畅模式降采样） */}
+          {/* 生物荧光辉光: 自适应景深（层次感）→ Bloom 提亮发光体 → 微粒胶片噪声 → 暗角聚焦视线 */}
           {glow && (
             <EffectComposer multisampling={perfMode ? 0 : 4} enableNormalPass={false}>
-              <Bloom mipmapBlur intensity={1.15} luminanceThreshold={0.5} luminanceSmoothing={0.3} />
+              {!perfMode && <AdaptiveDof controlsRef={controlsRef} bokehScale={2.4} />}
+              <Bloom mipmapBlur intensity={1.38} luminanceThreshold={0.44} luminanceSmoothing={0.32} />
               {!perfMode && <Noise premultiply opacity={0.05} />}
               <Vignette offset={0.22} darkness={0.52} />
             </EffectComposer>
