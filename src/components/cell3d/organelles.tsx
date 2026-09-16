@@ -111,8 +111,9 @@ export interface CisternaFrame {
   b: THREE.Vector3;
 }
 
-/** 沿曲线取帧（径向参考系: N=径向投影, B=T×N）——囊池几何与核糖体满铺共用 */
-function cisternaFrames(
+/** 沿曲线取帧（径向参考系: N=径向投影, B=T×N）——囊池几何与核糖体满铺共用
+ *  （v16 导出: 分裂演示复用主细胞同一建模标准 —— RER 囊池冠/高尔基囊堆） */
+export function cisternaFrames(
   curve: THREE.Curve<THREE.Vector3>,
   count: number,
   center: THREE.Vector3,
@@ -139,8 +140,9 @@ function cisternaFrames(
   return frames;
 }
 
-/** 带状扁平囊池几何: 沿曲线扫掠扁平椭圆截面（宽沿 B、薄沿 N 径向）, 端部极点收口 */
-function flatCisternaGeometry(
+/** 带状扁平囊池几何: 沿曲线扫掠扁平椭圆截面（宽沿 B、薄沿 N 径向）, 端部极点收口
+ *  （v16 导出: 分裂演示复用） */
+export function flatCisternaGeometry(
   frames: CisternaFrame[],
   width: number,
   thickness: number,
@@ -189,8 +191,9 @@ function flatCisternaGeometry(
  *   - 厚度沿径向中央厚缘薄（饼缘圆润: 0.6+0.4·sin(πt) 包络）
  *   - 杯曲 y = cup·t²（越靠边缘翘起越高 —— trans 囊更弯 → 经典杯状栈剪影）
  *   - 边缘半径 3+5 谐波调制（有机花边膨大, 每层独立种子）
- *   - 顶/底双面 + 缘带缝合为闭合壳（透射材质下无背面穿帮） */
-function golgiCisternaGeometry(
+ *   - 顶/底双面 + 缘带缝合为闭合壳（透射材质下无背面穿帮）
+ *  （v16 导出: 分裂演示复用 —— 间期/子代高尔基囊堆同一形态标准） */
+export function golgiCisternaGeometry(
   radius: number,
   thickness: number,
   cup: number,
@@ -612,9 +615,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     Math.cos(golgiLat) * Math.sin(golgiLon),
   ).normalize();
   const GOLGI_SCALE = (SHAPE === 'columnar' ? 1.05 : N / 4.1) * (R < 9.2 ? 0.92 : 1); // 盘径随核径缩放, 小细胞再收敛
-  const GOLGI_CIST_N = 7; // 扁平囊层数（cis→trans）
-  const GOLGI_DISK_R = 1.92 * GOLGI_SCALE; // cis 盘半径（直径≈核半径 96%）
-  const GOLGI_STEP = 0.148 * GOLGI_SCALE; // 囊层距
+  const GOLGI_CIST_N = 8; // 扁平囊层数（cis→trans; v16: 7→8 —— 囊堆层次读感更密实）
+  const GOLGI_DISK_R = 2.02 * GOLGI_SCALE; // cis 盘半径（直径≈核半径 100%; v16: 1.92→2.02 更醒目）
+  const GOLGI_STEP = 0.165 * GOLGI_SCALE; // 囊层距（v16: 0.148→0.165 —— 层间隙更可辨, 「叠杯」剪影更利落）
   const GOLGI_STACK_H = GOLGI_CIST_N * GOLGI_STEP; // 囊堆总高
   const GOLGI_RADIAL = 1.02 * GOLGI_SCALE; // 堆中心距核被膜径向距离
   /** 囊堆径向外包络（RER 让位目标高度: 扇区内囊池外跃至囊堆上空 —— 背侧象限外跃 = 远离相机, 不遮挡） */
@@ -1074,7 +1077,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     group.add(g);
     mitos.push({ obj: g, baseY: p.y, phase: hash01(`m${i}`, 17) * Math.PI * 2 });
     // v14 悬停锚点: 每颗线粒体各自感应（悬停任一颗即现「线粒体」标记）
-    hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: 2.0, zh: '线粒体（板层嵴）', latin: 'Mitochondrion', group: 'energy' });
+    // v16: r 2.0→1.7 —— 线粒体本体半长约 1.15, 1.7 已宽松; 收敛后与 ER/高尔基锚点重叠区不再互扰
+    hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: 1.7, zh: '线粒体（板层嵴）', latin: 'Mitochondrion', group: 'energy' });
   }
   if (mitos.length) {
     const m0 = mitos[0].obj.position;
@@ -1100,59 +1104,64 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const sheetCurves: THREE.CatmullRomCurve3[] = [];
     const allRiboPts: THREE.Vector3[] = [];
     // v13 参照图布局: 平行长囊池堆（千层丝带 —— 径向逐层 + 纬度微扇形展开, 非旧"绕核线团"）
+    // v16 用户反馈「还是不太形象」: 每壳层改双平行囊池（经度错开 0.55π + 纬度相位差）——
+    // 参照图 ER 的「片层迷宫」读感 = 同层多条平行丝带并列, 非单丝带绕核; 囊池加宽 1.38→1.5
+    const ribbons = perf ? 1 : 2;
     for (let s = 0; s < sheets; s++) {
-      // v14 大冠: 纬度自核下 (-0.78) 扫到核上 (+0.75), 每层纬度步进加大 → 冠罩整个核被膜
-      const latBase = -0.78 + s * 0.17;
-      const lon0 = -0.95 + s * 0.07;
-      const lonSpan = Math.PI * 1.08;
-      const ofs = 0.42 + s * 0.165;
-      const pts: THREE.Vector3[] = [];
-      for (let k = 0; k <= 13; k++) {
-        const t = k / 13;
-        const lat = latBase + Math.sin(t * Math.PI * 1.7 + s * 0.9) * 0.16;
-        const lon = lon0 + t * lonSpan;
-        // 囊池贴核被膜平行延展（径向 ofs 逐层 —— 同心壳层层叠）
-        const dir = new THREE.Vector3(
-          Math.cos(lat) * Math.cos(lon),
-          Math.sin(lat),
-          Math.cos(lat) * Math.sin(lon),
-        ).normalize();
-        // v15 高尔基让位窗: 囊池带经过高尔基扇区时径向外跃至囊堆上空（GOLGI_OUTER）——
-        // 高尔基在后上背侧象限(z<0), 外跃的 ER 囊池恒在囊堆「后方」（远离默认相机, 不遮挡;
-        // v15b 曾试内潜 —— 侧视角下与囊堆深度重合, 视觉互叠, 外跃才是正解）
-        let vofs = ofs + Math.sin(t * Math.PI * 1.4 + s * 1.3) * 0.12;
-        const angNear = dir.angleTo(GOLGI_DIR);
-        if (angNear < 0.62) {
-          const kSmooth = 1 - angNear / 0.62; // 扇区中心 1 → 边缘 0
-          let vault = vofs + (GOLGI_OUTER - vofs) * kSmooth;
-          const probe = nucPoint(dir, vault);
-          const pl = probe.length();
-          if (pl > 1e-6) {
-            const lim = cellSurf(probe.clone().normalize(), R, SHAPE, -0.95);
-            if (pl > lim) vault -= pl - lim; // 紧细胞硬钳: 让位高度受限但不穿膜（带半宽余量 0.95）
+      for (let rb = 0; rb < ribbons; rb++) {
+        // v14 大冠: 纬度自核下 (-0.78) 扫到核上 (+0.75), 每层纬度步进加大 → 冠罩整个核被膜
+        const latBase = -0.78 + s * 0.17 + rb * 0.09;
+        const lon0 = -0.95 + s * 0.07 + rb * 0.55 * Math.PI;
+        const lonSpan = Math.PI * (perf ? 1.08 : 1.18);
+        const ofs = 0.42 + s * 0.165;
+        const pts: THREE.Vector3[] = [];
+        for (let k = 0; k <= 13; k++) {
+          const t = k / 13;
+          const lat = latBase + Math.sin(t * Math.PI * 1.7 + s * 0.9 + rb * 1.6) * 0.16;
+          const lon = lon0 + t * lonSpan;
+          // 囊池贴核被膜平行延展（径向 ofs 逐层 —— 同心壳层层叠）
+          const dir = new THREE.Vector3(
+            Math.cos(lat) * Math.cos(lon),
+            Math.sin(lat),
+            Math.cos(lat) * Math.sin(lon),
+          ).normalize();
+          // v15 高尔基让位窗: 囊池带经过高尔基扇区时径向外跃至囊堆上空（GOLGI_OUTER）——
+          // 高尔基在后上背侧象限(z<0), 外跃的 ER 囊池恒在囊堆「后方」（远离默认相机, 不遮挡;
+          // v15b 曾试内潜 —— 侧视角下与囊堆深度重合, 视觉互叠, 外跃才是正解）
+          let vofs = ofs + Math.sin(t * Math.PI * 1.4 + s * 1.3 + rb * 0.8) * 0.12;
+          const angNear = dir.angleTo(GOLGI_DIR);
+          if (angNear < 0.62) {
+            const kSmooth = 1 - angNear / 0.62; // 扇区中心 1 → 边缘 0
+            let vault = vofs + (GOLGI_OUTER - vofs) * kSmooth;
+            const probe = nucPoint(dir, vault);
+            const pl = probe.length();
+            if (pl > 1e-6) {
+              const lim = cellSurf(probe.clone().normalize(), R, SHAPE, -0.95);
+              if (pl > lim) vault -= pl - lim; // 紧细胞硬钳: 让位高度受限但不穿膜（带半宽余量 0.95）
+            }
+            vofs = Math.max(vofs, vault);
           }
-          vofs = Math.max(vofs, vault);
+          const p = nucPoint(dir, vofs);
+          pts.push(new THREE.Vector3(p.x, p.y, p.z));
         }
-        const p = nucPoint(dir, vofs);
-        pts.push(new THREE.Vector3(p.x, p.y, p.z));
-      }
-      const curve = new THREE.CatmullRomCurve3(pts);
-      sheetCurves.push(curve);
-      // 带状扁平囊池几何（v14 宽 1.38 / 厚 0.105 ≈ 13:1 —— 更宽阔的带面, 远景可读性↑）
-      const frames = cisternaFrames(curve, perf ? 26 : 40, nucC);
-      parts.push({ geo: track(flatCisternaGeometry(frames, 1.38, 0.105, 12)) });
-      // 满铺核糖体点彩（参照实测 47% 高频像素 —— 两宽面网格化铺满, 非旧"两排"; v13b: 7 列×0.17 步距加密）
-      const wFrac = perf ? [-0.6, 0, 0.6] : [-0.68, -0.51, -0.34, -0.17, 0, 0.17, 0.34, 0.51, 0.68];
-      for (let i = 1; i < frames.length - 1; i++) {
-        const { p, n, b } = frames[i];
-        for (const f of wFrac) {
-          for (const face of [1, -1]) {
-            const jitter = 0.013;
-            allRiboPts.push(new THREE.Vector3(
-              p.x + n.x * face * 0.075 + b.x * f * 0.5 + (hash01(`rj${s}${i}${f}${face}`) - 0.5) * jitter * 2,
-              p.y + n.y * face * 0.075 + b.y * f * 0.5 + (hash01(`rj${s}${i}${f}${face}`, 3) - 0.5) * jitter * 2,
-              p.z + n.z * face * 0.075 + b.z * f * 0.5 + (hash01(`rj${s}${i}${f}${face}`, 5) - 0.5) * jitter * 2,
-            ));
+        const curve = new THREE.CatmullRomCurve3(pts);
+        sheetCurves.push(curve);
+        // 带状扁平囊池几何（v16 宽 1.5 / 厚 0.11 ≈ 13.6:1 —— 更宽阔的带面, 双丝带并列迷宫感）
+        const frames = cisternaFrames(curve, perf ? 26 : 40, nucC);
+        parts.push({ geo: track(flatCisternaGeometry(frames, 1.5, 0.11, 12)) });
+        // 满铺核糖体点彩（参照实测 47% 高频像素 —— 两宽面网格化铺满; v16: 10 列加宽覆盖 ±0.75）
+        const wFrac = perf ? [-0.6, 0, 0.6] : [-0.75, -0.585, -0.42, -0.25, -0.085, 0.085, 0.25, 0.42, 0.585, 0.75];
+        for (let i = 1; i < frames.length - 1; i++) {
+          const { p, n, b } = frames[i];
+          for (const f of wFrac) {
+            for (const face of [1, -1]) {
+              const jitter = 0.013;
+              allRiboPts.push(new THREE.Vector3(
+                p.x + n.x * face * 0.08 + b.x * f * 0.5 + (hash01(`rj${s}${rb}${i}${f}${face}`) - 0.5) * jitter * 2,
+                p.y + n.y * face * 0.08 + b.y * f * 0.5 + (hash01(`rj${s}${rb}${i}${f}${face}`, 3) - 0.5) * jitter * 2,
+                p.z + n.z * face * 0.08 + b.z * f * 0.5 + (hash01(`rj${s}${rb}${i}${f}${face}`, 5) - 0.5) * jitter * 2,
+              ));
+            }
           }
         }
       }
@@ -1165,8 +1174,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       const conn = new THREE.QuadraticBezierCurve3(a, mid, b);
       parts.push({ geo: track(new THREE.TubeGeometry(conn, 16, 0.07, 6)) });
     }
-    // 外周带状囊池堆（v13: 与核旁堆呼应的平行短片层 —— 参照图 ER 迷宫的"层叠丝带"读感; v14 ×4 堆）
-    const stackN = perf ? 1 : 4;
+    // 外周带状囊池堆（v13: 与核旁堆呼应的平行短片层 —— 参照图 ER 迷宫的"层叠丝带"读感; v16: 4→5 堆）
+    const stackN = perf ? 1 : 5;
+    const stackAnchors: THREE.Vector3[] = [];
     for (let st = 0; st < stackN; st++) {
       const stDir = new THREE.Vector3(
         Math.cos((hash01(`st${st}`, 3) - 0.5) * 2.0) * Math.cos(hash01(`st${st}`, 5) * Math.PI * 2),
@@ -1174,6 +1184,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         Math.cos((hash01(`st${st}`, 3) - 0.5) * 2.0) * Math.sin(hash01(`st${st}`, 5) * Math.PI * 2),
       ).normalize();
       const anchor = insidePos(stDir, 0.4 + hash01(`stq${st}`) * 0.24, 0.95, 0.6);
+      stackAnchors.push(anchor);
       // 堆内正交基: u = 囊池长轴走向, m = 层叠法向
       const az = hash01(`sta${st}`) * Math.PI * 2;
       const el = (hash01(`ste${st}`) - 0.5) * 1.5;
@@ -1198,9 +1209,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         }
         const curve = new THREE.CatmullRomCurve3(pts);
         const frames = cisternaFrames(curve, perf ? 12 : 18, new THREE.Vector3(anchor.x, anchor.y, anchor.z));
-        parts.push({ geo: track(flatCisternaGeometry(frames, 0.85, 0.08, 10)) });
-        // 外周堆核糖体满铺（密度略低于核旁堆）
-        const wFrac2 = [-0.55, 0, 0.55];
+        parts.push({ geo: track(flatCisternaGeometry(frames, 0.9, 0.08, 10)) });
+        // 外周堆核糖体满铺（密度略低于核旁堆; v16: 3→4 列）
+        const wFrac2 = [-0.6, -0.2, 0.2, 0.6];
         for (let i = 1; i < frames.length - 1; i += perf ? 2 : 1) {
           const { p, n, b } = frames[i];
           for (const f of wFrac2) {
@@ -1226,10 +1237,11 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       normalScale: 0.4,
       opacity: transOn ? 1 : 0.72,
       emissive: '#4a5a70',
-      emissiveIntensity: 0.3,
+      // v16: 发射 0.3→0.36 + sheen 0.5→0.58 —— 双丝带迷宫的层间阴影更可辨（用户反馈「不太形象」）
+      emissiveIntensity: 0.36,
       clearcoat: 0.55,
       clearcoatRoughness: 0.16,
-      sheen: 0.5,
+      sheen: 0.58,
       sheenColor: REF.sheen,
       flow: { color: '#74869c', strength: 0.18, scale: 0.8, speed: 0.07, rim: 0.2 },
     }));
@@ -1256,11 +1268,15 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     if (sheets) {
       const p = nucPoint(new THREE.Vector3(Math.cos(-0.62) * Math.cos(1.4), Math.sin(-0.62), Math.cos(-0.62) * Math.sin(1.4)), 1.15);
       labels.push({ pos: { x: p.x, y: p.y + 0.75, z: p.z }, zh: '粗面内质网（核糖体）', latin: 'Rough ER' });
-      // v14 悬停锚点: 沿核周冠多点感应（曲线中段采样 —— 悬停任一处囊池冠即现标记）
-      hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: 2.6, zh: '粗面内质网（核糖体）', latin: 'Rough ER', group: 'endomembrane' });
+      // v16 悬停精度: 锚点半径收敛 2.6→2.1 / 2.4→1.9 + 外周堆各自锚点 ——
+      // 配合 hover 层相对评分, 悬停线粒体时不再被 ER 大感应域错标（用户反馈修复）
+      hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: 2.1, zh: '粗面内质网（核糖体）', latin: 'Rough ER', group: 'endomembrane' });
       for (let s = 1; s < sheetCurves.length; s += 2) {
         const a = sheetCurves[s].getPoint(0.45);
-        hover.push({ pos: { x: a.x, y: a.y, z: a.z }, r: 2.4, zh: '粗面内质网（核糖体）', latin: 'Rough ER', group: 'endomembrane' });
+        hover.push({ pos: { x: a.x, y: a.y, z: a.z }, r: 1.9, zh: '粗面内质网（核糖体）', latin: 'Rough ER', group: 'endomembrane' });
+      }
+      for (const sa of stackAnchors) {
+        hover.push({ pos: { x: sa.x, y: sa.y, z: sa.z }, r: 1.7, zh: '粗面内质网（外周囊池堆）', latin: 'Rough ER', group: 'endomembrane' });
       }
     }
   }
@@ -1425,28 +1441,29 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const cisCol = new THREE.Color(REF.golgiCis);
     const transCol = new THREE.Color(REF.golgiTrans);
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4; color?: THREE.Color }[] = [];
-    // 非线性极性插值: 暖棕金(cis) → 赭石(trans) —— 顶点色逐层梯度
-    const POLARITY_MIX = [0, 0.07, 0.17, 0.32, 0.5, 0.72, 1];
+    // 非线性极性插值: 暖棕金(cis) → 赭石(trans) —— 顶点色逐层梯度（v16: 8 层梯度更细腻）
+    const POLARITY_MIX = [0, 0.06, 0.14, 0.26, 0.41, 0.58, 0.78, 1];
     for (let i = 0; i < GOLGI_CIST_N; i++) {
       const col = cisCol.clone().lerp(transCol, POLARITY_MIX[i] ?? 1);
       // 盘径逐层收窄(cis 最宽) + 杯曲逐层加深(trans 最弯) → 经典「叠杯/漏斗」剪影 —— 与 ER 带状囊池彻底区分
-      const rad = GOLGI_DISK_R * (1 - i * 0.055);
-      const cup = (0.1 + i * 0.035) * GOLGI_SCALE;
+      // v16: 锥度 0.055→0.062 / 杯梯度 0.035→0.045 —— cis→trans 形态对比更强烈（参照图叠杯读感）
+      const rad = GOLGI_DISK_R * (1 - i * 0.062);
+      const cup = (0.12 + i * 0.045) * GOLGI_SCALE;
       const geo = track(golgiCisternaGeometry(rad, 0.085 * GOLGI_SCALE, cup, i * 7 + 3, perf ? 7 : 9, perf ? 32 : 48));
       const m = new THREE.Matrix4()
-        .makeRotationY(i * 0.13)
+        .makeRotationY(i * 0.16)
         .setPosition(0, i * GOLGI_STEP - GOLGI_STACK_H * 0.5, 0); // 堆中心置于局部原点（cis 底/trans 顶）
       parts.push({ geo, matrix: m, color: col });
     }
     // 池间小管（相邻囊缘的细连接 —— 高尔基「梯骨」结构; 随层梯度同步收窄）
-    const tubN = perf ? 4 : 7;
+    const tubN = perf ? 4 : 8;
     for (let c = 0; c < tubN; c++) {
       const i = c % (GOLGI_CIST_N - 1);
       const ang = (c / tubN) * Math.PI * 2 + hash01(`gt${c}`) * 0.8;
-      const rA = GOLGI_DISK_R * (1 - i * 0.055) * 0.96;
-      const rB = GOLGI_DISK_R * (1 - (i + 1) * 0.055) * 0.96;
-      const cupA = (0.1 + i * 0.035) * GOLGI_SCALE;
-      const cupB = (0.1 + (i + 1) * 0.035) * GOLGI_SCALE;
+      const rA = GOLGI_DISK_R * (1 - i * 0.062) * 0.96;
+      const rB = GOLGI_DISK_R * (1 - (i + 1) * 0.062) * 0.96;
+      const cupA = (0.12 + i * 0.045) * GOLGI_SCALE;
+      const cupB = (0.12 + (i + 1) * 0.045) * GOLGI_SCALE;
       const a = new THREE.Vector3(Math.cos(ang) * rA, i * GOLGI_STEP - GOLGI_STACK_H * 0.5 + cupA, Math.sin(ang) * rA);
       const b = new THREE.Vector3(Math.cos(ang) * rB, (i + 1) * GOLGI_STEP - GOLGI_STACK_H * 0.5 + cupB, Math.sin(ang) * rB);
       const mid = a.clone().add(b).multiplyScalar(0.5).multiplyScalar(1.08); // 微外凸弧
@@ -1458,12 +1475,12 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       transmission: transOn ? 0.26 : 0,
       thickness: 0.4,
       // v15 扁平囊: 更亮清晰的囊面读感（与 ER 的带状囊池形成「盘栈 vs 丝带」形态对比）
+      // v16: 发射 0.5→0.62 + 透膜/剖面双视图下金色恒醒目（用户反馈「不太形象」—— 对比度提升）
       roughness: 0.26,
       opacity: transOn ? 1 : 0.66,
       clearcoat: 0.6,
-      // v15b: 发射 0.3→0.5 —— 完整视图（透膜观察）下金色恒可辨; 剖面窗口内更亮一层
       emissive: '#6a5638',
-      emissiveIntensity: 0.5,
+      emissiveIntensity: 0.62,
       sheen: 0.6,
       sheenColor: '#a8906a',
     }));
@@ -1485,11 +1502,11 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       normalScale: 0.9,
       clearcoat: 0.3,
     });
-    const budCount = perf ? 6 : 11;
+    const budCount = perf ? 7 : 14;
     const buds = new THREE.InstancedMesh(budGeo, budMat, budCount);
     {
       const mm = new THREE.Matrix4();
-      const transDiskR = GOLGI_DISK_R * (1 - (GOLGI_CIST_N - 1) * 0.055);
+      const transDiskR = GOLGI_DISK_R * (1 - (GOLGI_CIST_N - 1) * 0.062);
       for (let v = 0; v < budCount; v++) {
         const r = (0.14 + hash01(`gv${v}`) * 0.07) * GOLGI_SCALE;
         const ang = 0.4 + v * (Math.PI * 2 / budCount) + hash01(`gva${v}`) * 0.5;
@@ -1518,7 +1535,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       normalScale: 0.8,
       clearcoat: 0.3,
     });
-    const cisBudCount = perf ? 3 : 6;
+    const cisBudCount = perf ? 4 : 7;
     const cisBuds = new THREE.InstancedMesh(cisBudGeo, cisBudMat, cisBudCount);
     {
       const mm = new THREE.Matrix4();
@@ -3058,8 +3075,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     // 感应半径表（latin 前缀匹配 —— 大尺度细胞器给更远的作用范围）
     const R_TABLE: [string, number][] = [
       ['Plasma membrane', 2.8], ['Glycocalyx', 2.4], ['Nuclear envelope', 2.7], ['Nuclear pore complex', 1.7],
-      ['Nucleolus', 1.9], ['Heterochromatin', 1.8], ['Mitochondrion', 2.0], ['Rough ER', 2.5], ['Smooth ER', 2.0],
-      ['Golgi apparatus', 2.9], ['Transport vesicle', 1.7], ['Lysosome', 1.8], ['Autophagosome', 1.7],
+      ['Nucleolus', 1.9], ['Heterochromatin', 1.8], ['Mitochondrion', 1.8], ['Rough ER', 2.2], ['Smooth ER', 2.0],
+      ['Golgi apparatus', 2.6], ['Transport vesicle', 1.7], ['Lysosome', 1.8], ['Autophagosome', 1.7],
       ['Peroxisome', 1.6], ['Lipid droplet', 1.6], ['Microtubules', 2.4], ['Intermediate filaments', 2.0],
     ];
     const G_TABLE: [string, HoverGroupKey][] = [

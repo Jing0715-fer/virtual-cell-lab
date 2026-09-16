@@ -164,7 +164,11 @@ export function OrganelleHoverLayer({ targets, enabled, locate }: {
       if (proj < 1) continue; // 相机背后/过近
       const perp2 = tmp.current.lengthSq() - proj * proj;
       if (perp2 > t.r * t.r) continue;
-      const score = Math.sqrt(perp2);
+      // v16 用户反馈「悬停不准: 有的线粒体不显示/错标为内质网」:
+      // 旧评分用绝对垂直距离 —— 大感应半径的 ER/质膜锚点（r≈2.5）恒抢占小锚点;
+      // 改为相对评分（垂直距离 / 感应半径）→ 射线穿过哪个锚点的「核心带」更深的那个胜出,
+      // 小而精确的细胞器锚点（线粒体 r≈1.7）在重叠区域反超大而模糊的冠层锚点 —— 命中与所见一致。
+      const score = Math.sqrt(perp2) / t.r;
       if (score < bestScore) {
         bestScore = score;
         best = t;

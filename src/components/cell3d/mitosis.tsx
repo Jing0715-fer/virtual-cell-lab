@@ -1,20 +1,28 @@
 'use client';
 
 /**
- * 细胞分裂（有丝分裂）3D 演示 v14 —— 「基于现有 3D 细胞标准, 不过度简化」
+ * 细胞分裂（有丝分裂）3D 演示 v16 —— 「基于现有 3D 细胞标准, 不过度简化」
  * 相位（MBoC 6th Ch.17 时序）: 间期 → 前期 → 前中期 → 中期 → 后期 → 末期 → 胞质分裂
  *
  * 复用主细胞体标准:
  *   - REF 参照图配色系统（染色体熏衣草族/微管石板族/线粒体暖古铜/膜 tint 同源）
  *   - organelleMaterial 有机流光材质工厂 + 程序化法线贴图
  *   - 程序化几何工具（mergeGeoms/displaceGeometry/hash01）
+ *   - v16: flatCisternaGeometry/golgiCisternaGeometry 直接复用主细胞几何工厂 ——
+ *     分裂细胞（「干细胞」）的 RER 核周囊池冠 + 高尔基扁平囊堆与主细胞同一建模标准
+ *
+ * v16 用户反馈修复:
+ *   - 质膜: 透射管线 → 普适 alpha 薄纱（0.42/0.5 恒透明 —— 任何 GPU 上内部主角直读）
+ *   - 收纳: 星体微管逐帧钳回膜面内; 染色质末期向极区子核聚拢（不再悬垂缢裂中桥戳出膜外）
  *
  * 结构完整度（拒绝过度简化）:
  *   - 染色体: 10 对 × 双姐妹染色单体（短臂 p + 长臂 q + 着丝粒 + 极向动粒金盘）
- *   - 纺锤体: 动粒微管（逐染色体双极连接, 逐帧跟随）/ 极微管（中央重叠区）/ 星体微管
+ *   - 纺锤体: 动粒微管（逐染色体双极连接, 逐帧跟随）/ 极微管（中央重叠区）/ 星体微管（逐帧膜面钳制）
  *   - 核被膜: 间期完整 → 前中期崩解为膜泡碎片（lamins 磷酸化解体语义）→ 末期双子核重组
  *   - 质膜: 逐帧轮廓形态学（球 → 拉长 → 哑铃 → 中间体连接的两个子细胞）
- *   - 细胞器分配: 线粒体/运输囊泡/高尔基碎片/外周 ER 管网/核糖体 —— 双子细胞不均等分配
+ *   - 粗面内质网: 核周双丝带囊池冠 + 满铺核糖体（间期 → 前期管网化回缩 → 末期双子核重建）
+ *   - 高尔基体: 5 层叠杯囊堆 + trans 出芽（间期核旁 → 前中期碎片化 → 末期双子细胞各一栈）
+ *   - 细胞器分配: 线粒体/运输囊泡/外周 ER 管网/核糖体 —— 双子细胞不均等分配
  *   - 收缩环（actomyosin）→ 中间体（致密胞质桥）
  *   - 全程悬停标记（复用 OrganelleHoverLayer —— 相位感知动态目标）
  */
@@ -24,6 +32,7 @@ import { useFrame } from '@react-three/fiber';
 import { organelleMaterial, REF, createTimeUniform, type TimeUniform } from './materials';
 import { mergeGeoms, hash01 } from './procedural';
 import { organicNormalMap, stripeNormalMap } from './textures';
+import { cisternaFrames, flatCisternaGeometry, golgiCisternaGeometry } from './organelles';
 import { OrganelleHoverLayer, type HoverTarget } from './hover-labels';
 import { useLang } from '@/lib/i18n';
 
@@ -150,8 +159,11 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   const memGeo = track(new THREE.SphereGeometry(1, perf ? 36 : 56, perf ? 24 : 36));
   const memMat = mat({
     color: '#4e5a55',
-    // v13 发表级锐度同款: transmission 0.7 + roughness 0.07（透射 mip 近零模糊 —— 染色体主角锐利透读）
-    transmission: perf ? 0 : 0.7,
+    // v16 用户反馈「细胞不是透明的, 内部什么都看不到」: 透射管线（transmission render target）
+    // 在部分 GPU/后处理链下呈近实心读感 —— 彻底改用普适 alpha 薄纱:
+    //   HD 0.42 / 流畅 0.5 双档恒透明, 任何设备上染色体/纺锤体主角直读;
+    //   roughness 0.07 + clearcoat 0.8 保留湿润膜高光, 流光注入保留轮廓呼吸感
+    transmission: 0,
     thickness: 0.55,
     roughness: 0.07,
     normalMap: memNormal,
@@ -161,8 +173,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     iridescence: 0.25,
     sheen: 0.4,
     sheenColor: REF.sheen,
-    // 流畅模式: 半透明薄纱 0.5（0.85 会把内景主角糊成暗影）
-    opacity: perf ? 0.5 : 1,
+    opacity: perf ? 0.5 : 0.42,
     emissive: '#2a3438',
     emissiveIntensity: 0.1,
     flow: { color: '#5a7a84', strength: 0.14, scale: 0.8, speed: 0.06, rim: 0.2 },
@@ -370,26 +381,22 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     sheen: 0.4,
     sheenColor: REF.sheen,
   });
-  // 星体微管（每极放射状, 静态几何 + 组 z 缩放跟随极位）
-  {
-    const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
-    const astralN = perf ? 9 : 14;
-    for (const side of [-1, 1]) {
-      for (let i = 0; i < astralN; i++) {
-        const lat = (hash01(`as${side}${i}`, 3) - 0.5) * 1.9;
-        const lon = hash01(`as${side}${i}`, 5) * Math.PI * 2;
-        const dir = new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)).normalize();
-        const end = dir.clone().multiplyScalar(6.9).setZ(side * POLE_Z0 + dir.z * 6.9 * 0.4);
-        const start = new THREE.Vector3(0, 0, side * POLE_Z0);
-        const ctrl = start.clone().lerp(end, 0.55);
-        ctrl.y += (hash01(`asc${side}${i}`) - 0.5) * 0.9;
-        parts.push({ geo: track(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(start, ctrl, end), 18, 0.026, 5)) });
-      }
+  // 星体微管（每极放射状）—— v16: 静态合并网格 → 逐帧 InstancedMesh
+  // v14 静态端点 dir×6.9 在中期即戳出 R=8.5 质膜（用户反馈「结构跑到细胞外」根因之一）;
+  // v16 逐帧将端点钳回当前质膜回转面内（u=(z/L+1)/2 → r(u)×0.93）—— 恒「触皮质」而不穿膜
+  const astralN = perf ? 9 : 14;
+  const astralDirs: THREE.Vector3[] = [];
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < astralN; i++) {
+      const lat = (hash01(`as${side}${i}`, 3) - 0.5) * 1.9;
+      const lon = hash01(`as${side}${i}`, 5) * Math.PI * 2;
+      astralDirs.push(new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)).normalize());
     }
-    const astral = new THREE.Mesh(track(mergeGeoms(parts)), mtMat);
-    astral.renderOrder = 43;
-    spindle.add(astral);
   }
+  const astralGeo = track(new THREE.CylinderGeometry(0.026, 0.026, 1, 5));
+  const astrals = new THREE.InstancedMesh(astralGeo, mtMat, astralDirs.length);
+  astrals.renderOrder = 43;
+  group.add(astrals);
   // 极微管（两极反向伸向中央重叠区; antiparallel 交叉语义）
   {
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
@@ -438,7 +445,8 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     emissive: '#4a4456',
     emissiveIntensity: 0.32,
     roughness: 0.3,
-    opacity: 1,
+    // v16: 流畅模式透射关闭时给 0.5 alpha —— 否则核被膜实心化, 间期染色质/核仁被完全遮蔽
+    opacity: perf ? 0.5 : 1,
     clearcoat: 0.5,
     transmission: perf ? 0 : 0.35,
     thickness: 0.4,
@@ -550,36 +558,170 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     r: 0.14 + hash01(`vs${i}`) * 0.12,
   }));
   group.add(vesicles);
-  // 高尔基碎片（每子细胞一个 mini 囊堆; 前中期碎片化消失 → 末期重现）
-  const golgiMat = mat({
-    color: REF.golgiCis,
-    emissive: '#4a3f30',
-    emissiveIntensity: 0.3,
-    roughness: 0.35,
+  /* ---------- 高尔基体（v16: 复用 golgiCisternaGeometry —— 扁平囊堆「叠杯」, 主细胞同款形态标准） ----------
+   * 旧 golgiMini = TorusGeometry 弧堆 —— 与 ER 管系视觉语言混同（用户反馈「更像内质网」）;
+   *  v16: 5 层弯透镜盘叠杯栈（cis 宽 → trans 窄弯, 顶点色梯度）+ trans 出芽囊泡;
+   *  间期核旁一栈 → 前中期碎片化淡出 → 末期双子细胞各重建一栈（核旁位） */
+  const golgiStackMat = mat({
+    color: '#ffffff',
+    vertexColors: true,
+    transmission: perf ? 0 : 0.18,
+    thickness: 0.35,
+    roughness: 0.28,
     opacity: 0,
-    clearcoat: 0.4,
-    sheen: 0.5,
+    clearcoat: 0.5,
+    // v16: 发射 0.55 —— 透纱质膜下金色囊堆恒可辨
+    emissive: '#6a5638',
+    emissiveIntensity: 0.55,
+    sheen: 0.55,
     sheenColor: '#a8906a',
   });
-  const golgiMini = (() => {
-    const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
-    for (let i = 0; i < 4; i++) {
-      const torus = track(new THREE.TorusGeometry(0.72 + i * 0.05, 0.1, 8, 30, Math.PI * 1.3));
-      const m = new THREE.Matrix4()
-        .makeScale(1, 0.22, 1)
-        .multiply(new THREE.Matrix4().makeRotationZ(i * 0.24))
-        .multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2))
-        .setPosition(0, i * 0.17, 0);
-      parts.push({ geo: torus, matrix: m });
+  const GOLGI_STACK_SEED = 31;
+  const buildGolgiStack = (scale: number, seed: number): THREE.Group => {
+    const g = new THREE.Group();
+    const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4; color?: THREE.Color }[] = [];
+    const cisCol = new THREE.Color(REF.golgiCis);
+    const transCol = new THREE.Color(REF.golgiTrans);
+    const CIST_N = 5;
+    const step = 0.165 * scale;
+    const diskR = 1.15 * scale;
+    const stackH = CIST_N * step;
+    const MIX = [0, 0.12, 0.3, 0.55, 1];
+    for (let i = 0; i < CIST_N; i++) {
+      const col = cisCol.clone().lerp(transCol, MIX[i]);
+      const rad = diskR * (1 - i * 0.062);
+      const cup = (0.12 + i * 0.045) * scale;
+      const geo = track(golgiCisternaGeometry(rad, 0.082 * scale, cup, seed + i * 7, perf ? 6 : 8, perf ? 26 : 40));
+      const m = new THREE.Matrix4().makeRotationY(i * 0.16).setPosition(0, i * step - stackH * 0.5, 0);
+      parts.push({ geo, matrix: m, color: col });
     }
-    return new THREE.Mesh(track(mergeGeoms(parts)), golgiMat);
-  })();
-  const golgiMini2 = golgiMini.clone();
-  golgiMini2.rotation.y = Math.PI / 2;
-  golgiMini.renderOrder = 45;
-  golgiMini2.renderOrder = 45;
-  group.add(golgiMini, golgiMini2);
-  // 外周 ER 管网（前期回缩 → 末期重建）
+    // trans 面出芽囊泡 ×5（顶点色并入同一网格 —— 单 draw call）
+    for (let v = 0; v < 5; v++) {
+      const r = (0.1 + hash01(`gb${seed}${v}`) * 0.05) * scale;
+      const ang = v * (Math.PI * 2 / 5) + hash01(`gba${seed}${v}`) * 0.6;
+      const rr = diskR * (0.5 + hash01(`gbr${seed}${v}`) * 0.42);
+      const sph = track(new THREE.SphereGeometry(r, 8, 6));
+      sph.translate(Math.cos(ang) * rr, stackH * 0.5 + 0.14 * scale, Math.sin(ang) * rr);
+      parts.push({ geo: sph, color: new THREE.Color(REF.golgiTrans) });
+    }
+    const mesh = new THREE.Mesh(track(mergeGeoms(parts)), golgiStackMat);
+    mesh.renderOrder = 45;
+    g.add(mesh);
+    return g;
+  };
+  // 间期核旁主栈（前右侧 —— 舞台旋转后朝相机可读; 距核心 4.15 = 核面 3.4 + 冠外余量）
+  const golgiMain = buildGolgiStack(0.82, GOLGI_STACK_SEED);
+  golgiMain.position.set(2.72, -0.83, 2.63);
+  {
+    const axis = new THREE.Vector3(0.7, 0.2, 0.69).normalize();
+    const qAlign = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
+    const qSpin = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.8);
+    golgiMain.quaternion.copy(qAlign).multiply(qSpin);
+  }
+  group.add(golgiMain);
+  // 末期双子细胞各一栈（核旁位, 逐帧跟随子核 z）
+  const golgiDauA = buildGolgiStack(0.52, GOLGI_STACK_SEED + 57);
+  const golgiDauB = buildGolgiStack(0.52, GOLGI_STACK_SEED + 113);
+  {
+    const axisA = new THREE.Vector3(0.82, 0.26, -0.51).normalize();
+    const axisB = new THREE.Vector3(0.82, 0.26, 0.51).normalize();
+    golgiDauA.quaternion.copy(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axisA));
+    golgiDauB.quaternion.copy(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axisB));
+  }
+  group.add(golgiDauA, golgiDauB);
+
+  /* ---------- 粗面内质网（v16: 复用 flatCisternaGeometry —— 核周双丝带囊池冠 + 满铺核糖体） ----------
+   *  用户反馈「分裂演示的细胞（干细胞）没有粗面内质网」—— 间期细胞器全套补齐;
+   *  间期核周冠 → 前期 ER 重构管网化回缩（NEBD 语义）→ 末期围绕双子核重建双冠 */
+  const rerMat = mat({
+    color: REF.erSheet,
+    emissive: '#4a5a70',
+    emissiveIntensity: 0.34,
+    roughness: 0.24,
+    normalMap: orgNormal,
+    normalScale: 0.4,
+    opacity: 0,
+    clearcoat: 0.5,
+    sheen: 0.55,
+    sheenColor: REF.sheen,
+    flow: { color: '#74869c', strength: 0.16, scale: 0.8, speed: 0.07, rim: 0.2 },
+  });
+  const rerRibMat = track(new THREE.MeshStandardMaterial({
+    color: '#a07a54',
+    emissive: '#8a6240',
+    emissiveIntensity: 1.0,
+    roughness: 0.5,
+    transparent: true,
+  }));
+  const rerRiboGeo = track(new THREE.SphereGeometry(0.058, 5, 4));
+  const ORIGIN = new THREE.Vector3(0, 0, 0);
+  const buildRerCrown = (scale: number, seedTag: string): { mesh: THREE.Mesh; ribos: THREE.InstancedMesh } => {
+    const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
+    const riboPts: THREE.Vector3[] = [];
+    const sheets = perf ? 3 : 5;
+    const ribbons = perf ? 1 : 2;
+    const nR = NUC_R * scale;
+    for (let s = 0; s < sheets; s++) {
+      for (let rb = 0; rb < ribbons; rb++) {
+        // 双丝带/壳层（主细胞 v16 同款「片层迷宫」生成参数的迷你版）
+        const latBase = -0.7 + s * 0.3 + rb * 0.08;
+        const lon0 = -0.9 + s * 0.3 + rb * 0.55 * Math.PI;
+        const lonSpan = Math.PI * 1.15;
+        const ofs = (0.45 + s * 0.14) * scale;
+        const pts: THREE.Vector3[] = [];
+        for (let k = 0; k <= 10; k++) {
+          const t = k / 10;
+          const lat = latBase + Math.sin(t * Math.PI * 1.6 + s * 0.9 + rb * 1.5) * 0.15;
+          const lon = lon0 + t * lonSpan;
+          const dir = new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)).normalize();
+          const vofs = ofs + Math.sin(t * Math.PI * 1.3 + s * 1.1 + rb * 0.7) * 0.1 * scale;
+          pts.push(dir.clone().multiplyScalar(nR + vofs));
+        }
+        const curve = new THREE.CatmullRomCurve3(pts);
+        const frames = cisternaFrames(curve, perf ? 18 : 26, ORIGIN);
+        parts.push({ geo: track(flatCisternaGeometry(frames, 1.02 * scale, 0.09 * scale, 10)) });
+        // 满铺核糖体点彩（两宽面 × 5 列）
+        const wFrac = perf ? [-0.5, 0, 0.5] : [-0.65, -0.32, 0, 0.32, 0.65];
+        for (let i = 1; i < frames.length - 1; i++) {
+          const { p, n, b } = frames[i];
+          for (const f of wFrac) {
+            for (const face of [1, -1]) {
+              const jit = (hash01(`${seedTag}rj${s}${rb}${i}${f}${face}`) - 0.5) * 0.02;
+              riboPts.push(new THREE.Vector3(
+                p.x + n.x * face * 0.075 * scale + b.x * f * 0.5 + jit,
+                p.y + n.y * face * 0.075 * scale + b.y * f * 0.5 + jit,
+                p.z + n.z * face * 0.075 * scale + b.z * f * 0.5 + jit,
+              ));
+            }
+          }
+        }
+      }
+    }
+    const mesh = new THREE.Mesh(track(mergeGeoms(parts)), rerMat);
+    mesh.renderOrder = 44;
+    const ribos = new THREE.InstancedMesh(rerRiboGeo, rerRibMat, Math.max(1, riboPts.length));
+    {
+      const mm = new THREE.Matrix4();
+      const qq = new THREE.Quaternion();
+      const eu = new THREE.Euler();
+      riboPts.forEach((p, i) => {
+        const sz = 0.9 + hash01(`${seedTag}rs${i}`) * 0.45;
+        eu.set(hash01(`${seedTag}re${i}`) * Math.PI, hash01(`${seedTag}re${i}`, 3) * Math.PI * 2, 0);
+        qq.setFromEuler(eu);
+        mm.compose(p, qq, new THREE.Vector3(sz, sz, sz));
+        ribos.setMatrixAt(i, mm);
+      });
+      ribos.instanceMatrix.needsUpdate = true;
+      ribos.renderOrder = 45;
+    }
+    return { mesh, ribos };
+  };
+  const rerCrown = buildRerCrown(1, 'mito'); // 间期核周冠（核径同 NUC_R）
+  group.add(rerCrown.mesh, rerCrown.ribos);
+  const rerDauA = buildRerCrown(0.62, 'dauA'); // 末期双子核迷你冠
+  const rerDauB = buildRerCrown(0.62, 'dauB');
+  group.add(rerDauA.mesh, rerDauA.ribos, rerDauB.mesh, rerDauB.ribos);
+  // 外周 ER 管网（SER 语义; 前期回缩 → 末期重建 —— RER 冠之外的持续 ER 网络）
   const erMat = mat({
     color: REF.erSheet,
     emissive: '#3a4a5c',
@@ -653,7 +795,8 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   const chromatinMatRef = chromatinMat as THREE.MeshPhysicalMaterial;
   const fragMatRef = fragMat as THREE.MeshPhysicalMaterial;
   const dauNeMatRef = dauNeMat as THREE.MeshPhysicalMaterial;
-  const golgiMatRef = golgiMat as THREE.MeshPhysicalMaterial;
+  const golgiStackMatRef = golgiStackMat as THREE.MeshPhysicalMaterial;
+  const rerMatRef = rerMat as THREE.MeshPhysicalMaterial;
   const erMatRef = erMat as THREE.MeshPhysicalMaterial;
   const ringMatRef = ringMat as THREE.MeshPhysicalMaterial;
   const midbodyMatRef = midbodyMat as THREE.MeshPhysicalMaterial;
@@ -672,13 +815,14 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     uTime.value += dt;
     const PZ = poleZ(t);
 
-    /* 质膜形态学 */
-    const { r: rProfile } = updateMembrane(t);
+    /* 质膜形态学（v16: 同时返回当前回转面参数 —— 星体微管逐帧钳制消费） */
+    const { L: memL, r: rProfile } = updateMembrane(t);
 
     /* 凝聚/去凝聚与不透明度 */
     const condense = ramp(t, 0.15, 1.25); // 前期凝聚
     const decondense = ramp(t, 4.3, 5.5); // 末期去凝聚
-    const chrOpacity = clamp01(ramp(t, 0.1, 0.8) * (1 - ramp(t, 4.4, 5.6) * 0.55)); // 染色体凝聚可见 → 末期半淡出（去凝聚染色质团）
+    // 染色体凝聚可见 → 末期大幅淡出（去凝聚染色质融入双子核读感; v16: 0.55→0.7 —— 末/胞质期不悬垂）
+    const chrOpacity = clamp01(ramp(t, 0.1, 0.8) * (1 - ramp(t, 4.4, 5.6) * 0.7));
     chrMatRef.opacity = chrOpacity;
     centroMatRef.opacity = chrOpacity;
     kinMatRef.opacity = clamp01(ramp(t, 1.2, 1.7) * (1 - ramp(t, 3.05, 3.6)));
@@ -697,15 +841,19 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       // 位置: home（间期核内散布）→ plate（赤道板）; 个体微延迟 → 汇集不同步的自然读感
       const k = clamp01(congress + chr.delay * 0.12);
       vA.copy(chr.home).lerp(chr.plate, k);
-      // 接近两极时 xy 向染色体团收拢（去凝聚前的极区聚集）
-      const tightXY = 1 - clusterTight * 0.42;
+      // v16 收纳修复（用户反馈「染色质跑到细胞外」）:
+      //  ① 后期分离即开始 xy 收敛（外周染色体臂长 ~2.7, 不收敛会戳穿侧面膜面）
+      //  ② 末期去凝聚进一步向极区轴线聚拢 —— 配合 cZ 恒驻极区, 染色质团始终在子细胞腔内
+      const tightXY = Math.max(0.1, 1 - clusterTight * 0.42 - segregate * 0.34 - decondense * 0.45);
       // z: home.z → 0（板上; ramp 1.4-2.6 与汇集同步）
       const flatZ = 1 - ramp(t, 1.4, 2.6) * 0.92;
-      g.position.set(vA.x * tightXY, vA.y * (1 - clusterTight * 0.3), vA.z * flatZ);
+      g.position.set(vA.x * tightXY, vA.y * (1 - clusterTight * 0.3 - segregate * 0.18), vA.z * flatZ);
       // 后期: 姐妹染色单体反向拉向两极（cA → −Z, cB → +Z; 群组 z 不动 —— 单体偏移承载极向运动）
       const sepA = clamp01(segregate - chr.delay * 0.3);
       const reach = PZ * 0.92;
-      const cZ = (0.08 + sepA * reach) * (1 - decondense * 0.85); // 末期单体回拢聚团
+      // v16 末期去向修复: 分离后恒驻极区（旧版 decondense×0.85 回拉向赤道 → 染色质悬垂在缢裂中桥区,
+      // 中桥膜半径仅 ~1.2 而染色质团伸展 ~4.4 —— 戳出膜外的直接根因; 现末期子核在极区包围重组）
+      const cZ = 0.08 + sepA * reach;
       chr.cA.position.z = -cZ;
       chr.cB.position.z = cZ;
       chr.cA.position.x = -0.105 - sepA * 0.1;
@@ -719,15 +867,49 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
         (1 - orient) * chr.spin * 4 + orient * chr.spin,
         osc + wobble * 0.4,
       );
-      // 尺寸: 凝聚收缩变粗 → 末期去凝聚舒展
-      const scl = (1.62 + hash01(`cs${ci}`) * 0.42) * (0.55 + condense * 0.45) * (1 + decondense * 0.35);
+      // 尺寸: 凝聚收缩变粗 → 末期去凝聚微展舒（v16: 0.35→0.12 —— 舒展过大也会戳膜）
+      const scl = (1.62 + hash01(`cs${ci}`) * 0.42) * (0.55 + condense * 0.45) * (1 + decondense * 0.12);
       g.scale.setScalar(Math.max(0.001, scl * clamp01(ramp(t, 0.05, 0.6))));
     });
 
     /* 动粒微管（逐帧: 极 → 染色体着丝粒） */
     const kfiberOpacity = clamp01(ramp(t, 1.15, 1.8) * (1 - ramp(t, 4.1, 4.9)));
     kfiberMatRef.opacity = kfiberOpacity;
-    mtMatRef.opacity = clamp01(ramp(t, 0.7, 1.6) * (1 - ramp(t, 4.3, 5.3)));
+    const mtOpacity = clamp01(ramp(t, 0.7, 1.6) * (1 - ramp(t, 4.3, 5.3)));
+    mtMatRef.opacity = mtOpacity;
+    /* 星体微管（v16 逐帧: 极位 + 定向芽长, 端点钳回当前质膜回转面内 —— 恒「触皮质」不穿膜） */
+    if (mtOpacity > 0.01) {
+      let ai = 0;
+      for (const side of [-1, 1]) {
+        for (let i = 0; i < astralN; i++) {
+          const dir = astralDirs[side < 0 ? i : astralN + i];
+          const len = 4.4 + hash01(`asl${side}${i}`) * 1.8; // 4.4-6.2 芽长（有意长于膜面 → 钳制后恒贴皮质）
+          vA.set(0, 0, side * PZ); // 极
+          vB.copy(dir).multiplyScalar(len).add(vA); // 芽端
+          // 膜面钳制: |z| ≤ 0.93L; 柱面半径 ≤ 0.93·r(u)
+          if (Math.abs(vB.z) > memL * 0.93) vB.z = Math.sign(vB.z) * memL * 0.93;
+          const u = (vB.z / memL + 1) / 2;
+          const rr = Math.max(0.05, rProfile(u)) * 0.93;
+          const rc = Math.hypot(vB.x, vB.y);
+          if (rc > rr) {
+            const kk = rr / rc;
+            vB.x *= kk;
+            vB.y *= kk;
+          }
+          kDir.subVectors(vB, vA);
+          const kl = Math.max(0.01, kDir.length());
+          kMid.addVectors(vA, vB).multiplyScalar(0.5);
+          kQuat.setFromUnitVectors(kUp, kDir.normalize());
+          kScale.set(1, kl, 1);
+          kM.compose(kMid, kQuat, kScale);
+          astrals.setMatrixAt(ai++, kM);
+        }
+      }
+      astrals.instanceMatrix.needsUpdate = true;
+      astrals.visible = true;
+    } else {
+      astrals.visible = false;
+    }
     if (kfiberOpacity > 0.01) {
       let ki = 0;
       for (const chr of chromosomes) {
@@ -770,7 +952,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     /* 核被膜: 完整 → 崩解碎片 → 双子核重组 */
     const nebd = ramp(t, 1.1, 1.85);
     const neFade = clamp01(1 - nebd);
-    neMatRef.opacity = neFade;
+    neMatRef.opacity = neFade * (perf ? 0.55 : 1); // v16: 流畅模式恒半透（染色质可读）
     npcMatRef.opacity = 0.85 * neFade;
     ne.visible = neFade > 0.02;
     npcs.visible = ne.visible;
@@ -837,13 +1019,31 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       });
       ribos.instanceMatrix.needsUpdate = true;
     }
-    // 高尔基: 前中期碎片化消失 → 末期双子细胞重建
-    golgiMatRef.opacity = clamp01((1 - ramp(t, 1.2, 2.2)) + ramp(t, 4.6, 5.6)) * 0.85;
+    /* 高尔基（v16 叠杯栈）: 间期核旁主栈 → 前中期碎片化淡出 → 末期双子细胞各一栈（核旁位跟随子核） */
+    const golgiFadeOut = 1 - ramp(t, 1.2, 2.2);
+    const golgiReform = ramp(t, 4.6, 5.6);
+    golgiStackMatRef.opacity = clamp01(Math.max(golgiFadeOut, golgiReform)) * 0.9;
+    golgiMain.visible = golgiFadeOut > 0.02;
+    golgiDauA.visible = golgiReform > 0.02;
+    golgiDauB.visible = golgiReform > 0.02;
     const golgiZ = THREE.MathUtils.lerp(3.4, 6.1, ramp(t, 5, 6));
-    golgiMini.position.set(1.9, -1.2, -golgiZ);
-    golgiMini2.position.set(-1.9, -1.2, golgiZ);
-    golgiMini.visible = golgiMatRef.opacity > 0.02;
-    golgiMini2.visible = golgiMini.visible;
+    golgiDauA.position.set(1.62, -1.05, -golgiZ + 0.35);
+    golgiDauB.position.set(-1.62, -1.05, golgiZ - 0.35);
+    /* 粗面内质网（v16 核周囊池冠）: 间期 → 前期 ER 重构管网化回缩 → 末期双子核重建双冠 */
+    const rerFadeOut = 1 - ramp(t, 0.8, 1.8);
+    const rerReform = ramp(t, 4.9, 5.9);
+    rerMatRef.opacity = clamp01(Math.max(rerFadeOut, rerReform)) * 0.88;
+    rerRibMat.opacity = clamp01(Math.max(rerFadeOut, rerReform));
+    rerCrown.mesh.visible = rerFadeOut > 0.02;
+    rerCrown.ribos.visible = rerCrown.mesh.visible;
+    rerDauA.mesh.visible = rerReform > 0.02;
+    rerDauB.mesh.visible = rerReform > 0.02;
+    rerDauA.ribos.visible = rerDauA.mesh.visible;
+    rerDauB.ribos.visible = rerDauB.mesh.visible;
+    rerDauA.mesh.position.set(0, 0, -dauZ);
+    rerDauB.mesh.position.set(0, 0, dauZ);
+    rerDauA.ribos.position.set(0, 0, -dauZ);
+    rerDauB.ribos.position.set(0, 0, dauZ);
     // 外周 ER: 前期回缩 → 末期重建
     erMatRef.opacity = clamp01((1 - ramp(t, 0.8, 1.8)) + ramp(t, 4.9, 5.9)) * 0.5;
     erNet.visible = erMatRef.opacity > 0.02;
@@ -880,13 +1080,18 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     } else {
       push('中心体（已复制, 贴核）', 'Centrosome', 0.5, 1.1, 1.5, 1.8);
     }
-    push('线粒体（暖古铜）', 'Mitochondrion', 4.8, 1.2, 0, 2.2);
-    push('线粒体（暖古铜）', 'Mitochondrion', -4.2, -1.6, 2.4, 2.2);
+    push('线粒体（暖古铜）', 'Mitochondrion', 4.8, 1.2, 0, 1.7);
+    push('线粒体（暖古铜）', 'Mitochondrion', -4.2, -1.6, 2.4, 1.7);
     if (phase === 0) {
       push('细胞核（核被膜）', 'Nuclear envelope', 0, 0, 0, 3.6);
       push('染色质（松散纤维）', 'Chromatin', 1.2, 0.8, -0.6, 2.4);
       push('核仁', 'Nucleolus', 0.6, 0.7, -0.5, 1.6);
       push('游离核糖体', 'Polysomes', 2.6, -2.0, 1.5, 2.4);
+      // v16: 间期全套细胞器（用户反馈「分裂细胞没有 RER/高尔基」—— 悬停目录同步补齐）
+      push('粗面内质网（核糖体冠）', 'Rough ER', -2.35, 1.5, -2.9, 2.2);
+      push('粗面内质网（核糖体冠）', 'Rough ER', -2.6, -1.7, 2.1, 2.2);
+      push('高尔基体（扁平囊堆）', 'Golgi apparatus', 2.72, -0.83, 2.63, 2.0);
+      push('运输囊泡', 'Transport vesicle', -3.1, 2.2, -1.2, 1.6);
     }
     if (phase === 1 || phase === 2) {
       push('凝聚中的染色体', 'Condensing chromosomes', -1.8, 1.4, 0.8, 2.6);
@@ -920,6 +1125,13 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       push('子代核被膜（重组）', 'Daughter envelope', 0, 0, 4.4, 2.4);
       push('游离核糖体', 'Polysomes', 2.6, -2.0, 3.0, 2.4);
     }
+    if (phase >= 5) {
+      // v16: 末期重建的子代 RER 冠 + 高尔基栈（核旁位, 悬停可指认）
+      push('粗面内质网（子代重建）', 'Rough ER', 0, 0.6, -5.3, 2.0);
+      push('粗面内质网（子代重建）', 'Rough ER', 0, 0.6, 5.3, 2.0);
+      push('高尔基体（重建）', 'Golgi apparatus', 1.62, -1.05, -5.35, 1.7);
+      push('高尔基体（重建）', 'Golgi apparatus', -1.62, -1.05, 5.35, 1.7);
+    }
     if (phase === 5 || phase === 6) {
       push('收缩环（actomyosin）', 'Contractile ring', 3.6, 0, 0, 2.2);
     }
@@ -927,7 +1139,6 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       push('中间体（胞质桥）', 'Midbody', 0, 0, 0, 1.6);
       push('子细胞 ×2', 'Daughter cells', 0, 0, -6.4, 3.2);
       push('子细胞 ×2', 'Daughter cells', 0, 0, 6.4, 3.2);
-      push('高尔基体（重建）', 'Golgi apparatus', 1.9, -1.2, -6.1, 1.8);
     }
     return T;
   };
