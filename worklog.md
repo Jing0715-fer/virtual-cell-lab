@@ -1193,3 +1193,45 @@ Stage Summary:
 - 产出: cell-shape.ts(多核体系+并集射线) / organelles.tsx(双核循环重构+自噬流粒子系统+条件标注+贴面防叠) / section-view.tsx(多核核盘) / virtual-cell-3d.tsx(核机位+贴面传参) / mrna-flow.tsx(最近核出核) / engine.ts(自噬闸门基序) / scaffold.ts(2 条 AMPK→ULK1 支架边) / autophagy.ts(新) / scripts/verify-binucleate.ts(新)
 - 遗留/风险: ①SimEvent 双语化/PDF EN（Task 22 遗留未变）②贴面模式下核区"分子标签"仍可能与核盘标注轻叠（本次消除的是解剖标注侧; 分子标签 force-simulate 仍为可选增强）③SwiftShader GPU 帧率无法实测（自噬几何一次性构建, 帧内仅变换更新）④390px 真机断点未复测
 - 下阶段建议: ①mTOR 教学引导增加"雷帕霉素→自噬"站点（引导用户投药观察自噬流）②过氧化物酶体自噬（pexophagy）与线粒体自噬（mitophagy, PINK1/Parkin）特化货物叙事 ③肝细胞核多倍体（4N/8N 多倍体核型）④TFEB 自噬-溶酶体转录正反馈（核内 TFEB 激活时自噬体/溶酶体增量生成）
+
+---
+Task ID: 33
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户需求——"能达到图片中这种精细度吗？目前的细胞还是太粗糙了"——渲染管线图片级精细度升级（材质/体积/后处理/背景四线并进）
+
+Work Log:
+- 【现状评估】环境已恢复（Task 32 已提交 37ffd7b, dev server 正常）; 通读 materials.ts/textures.ts/organelles.tsx 渲染架构, 定位"粗糙感"四大根因:
+  ①胞质/核质为平面色 MeshBasicMaterial 填充（无体积渐变层次）
+  ②质膜几何 detail 4 + transmission 0.62（透读不足、不够湿润）
+  ③无环境光遮蔽（细胞器之间缺接触阴影 → 空间扁平）+ 无镜头色散/背景深度分离
+  ④线粒体外膜 transmission 0.44 + 厚度 0.55（板层嵴透读模糊）
+- 【渲染管线 v11（virtual-cell-3d.tsx）】:
+  · N8AO 环境光遮蔽（aoRadius 1.15/intensity 1.45/halfRes/medium —— 细胞器之间的接触阴影与空间深度; HD 模式专用）
+  · ChromaticAberration 微色散（offset [0.00055, 0.0008] + radialModulation 0.38 —— 镜头边缘的物理色散读感）
+  · dpr [1,1.75]→[1,2] + ACES 曝光 1.12（toneMappingExposure; 暗部提升不发灰）
+  · Environment 分辨率 128→256（湿润透射材质的高光形体更细腻）
+  · Bloom threshold 0.44→0.46 / intensity 1.42（高光更收敛锐利）
+- 【半透明原生质体积（materials.ts 新 volumeMaterial + organelles.tsx 接入）】:
+  · 自定义 ShaderMaterial: Fresnel 光程渐变（BackSide 盘心 |dot|→1 厚/边缘薄 —— 果冻状体积物理读感）+ 双频 FBM 环流微光 + 类型 tint 派生三色（core×0.55/rim/flow lerp #7ffcf0 0.45）
+  · 替换胞质平面填充（baseAlpha 0.3 + coreBoost 0.22 + rimBoost 0.1）与核质平面填充（玫瑰系 #5e0d2c/#a03a5e/#f472b6）
+  · 【关键修复】ShaderMaterial 手动接入全局裁剪平面: clipping:true + clipping_planes_pars/fragment chunks + begin/project_vertex 复用（否则剖面模式下体积层不被剖切穿帮）; 顶点 gl_Position 双投影 bug 一并修复
+- 【质膜 v11】几何 memDetail 5（~20k 三角形, 剪影丝滑无棱; 核系维持 4 避免双核叠加成本）; 材质 transmission 0.72/thickness 1.7/clearcoat 0.85/roughness 0.18 尾差/iridescence 0.45/sheen 0.65 —— 湿润透射的"油亮生物膜"
+- 【线粒体 v11】外膜 transmission 0.58 + thickness 0.38（板层嵴透过外膜清晰透读）+ 嵴 emissiveIntensity 1.0→1.28（经透射外膜后仍高对比）
+- 【核被膜 v11】transmission 0.52/thickness 0.75 —— 染色质/核仁透过双层核被膜隐约透读
+- 【背景柔光幕布（SceneContents）】150×90 远景平面（z=-46）+ glowSpriteTexture 径向渐变 + AdditiveBlending —— 细胞从纯黑背景浮起的"深空舞台"深度分离（高保真插画的背景层次读感）
+- QA（agent-browser 端到端, 1280×800, VLM 全程 429 → readPixels 量化）:
+  · 渲染健康: 肝细胞 nonBlack 0.463（基线 0.471 同量级）; 体积渐变生效 —— 过心水平线亮度剖面 39-72 有机起伏（非平面填充的均匀值）
+  · 裁剪平面接入: 重载后剖面紫像素 0.065（核盘+胞质盘正常）, 0 着色器编译错误
+  · 全 7 类细胞逐一像素验证: 肝 0.463 / 心肌 0.365 / 神经元 1.0（rose 0.049 核可见）/ 成纤维 0.934 / 癌 1.0 / 上皮 0.979 / CD4 T 1.0
+  · 流畅模式降级 ✓（重后处理全关路径渲染正常）; 分子点击 DUSP1 is-selected ✓; 解剖标注 11 个（含双核教学标注）✓
+  · 背景幕布: nonBlack 0.451→0.819（柔光环绕细胞, 四角自然径向衰减）
+  · 全程 console 0 错误; lint 零错误; tsc cell3d 文件零错误; dev.log 全 200
+- 环境备注: SwiftShader QA 下 HD 重后处理帧率慢（eval 偶超时, 用户真实 GPU 无此问题）; 4 连续 eval 命令需拆步执行
+
+Stage Summary:
+- 用户"图片级精细度"诉求的渲染管线四线升级全部落地并量化验证: ①N8AO+微色散+曝光+dpr2 后处理管线 ②Fresnel 果冻体积胞质/核质（平面填充彻底退役）③质膜 detail5+湿润透射 ④线粒体/核被膜透射提升（内部结构透读）
+- 附带修复 1 个自引入 bug: ShaderMaterial 裁剪平面接入（否则剖面模式体积层穿帮）+ 顶点双投影
+- 架构沉淀: volumeMaterial() 成为体积层标准工厂（胞质/核质两处消费, 后续自噬体基质等可复用）; 后处理管线 N8AO 为独立 Pass 不依赖 normalPass
+- 产出: virtual-cell-3d.tsx（管线+幕布+曝光）/ materials.ts（volumeMaterial+clipping）/ organelles.tsx（质膜/线粒体/核被膜/体积层接入）
+- 遗留/风险: ①SimEvent 双语化/PDF EN（Task 22 遗留未变）②SwiftShader QA 帧率慢（非用户问题）③真实 GPU 帧率未实测（N8AO halfRes+medium 已保守; 流畅模式可全降级）④VLM 429 持续 → 像素量化 QA 为标准替代
+- 下阶段建议: ①HERO 区配图换 3D 实渲染截图 ②微绒毛/纤毛细节增强 ③溶酶体内容物条纹（电镜糖原/脂褐素读感）④核孔密度按核面面积真实 ~2000/核缩放视觉密度

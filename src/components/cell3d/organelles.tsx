@@ -42,7 +42,7 @@ import type { CellBodySpec, Vec3 } from '@/lib/simulation/layout3d';
 import { NUCLEUS_FORM, SHAPE_NOISE, nucleusCenter, nucleusInstances, nucleusRadius, nucleusRayExit, shapeCrossRadius, shapeRadius, shapeXExtent, type ShapeKind } from '@/lib/simulation/cell-shape';
 import { displaceGeometry, fbm3, fibSphere, hash01, mergeGeoms, sph } from './procedural';
 import { glowSpriteTexture, organicNormalMap, roughnessMap, speckleNormalMap, stripeNormalMap } from './textures';
-import { createTimeUniform, glowMaterial, organelleMaterial, type TimeUniform } from './materials';
+import { createTimeUniform, glowMaterial, organelleMaterial, volumeMaterial, type TimeUniform } from './materials';
 import { autophagyLevel, AUTOPHAGY_VISIBLE_THRESHOLD } from '@/lib/simulation/autophagy';
 import { useLabStore } from '@/store/lab-store';
 import { useLang } from '@/lib/i18n';
@@ -140,6 +140,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   const N = spec.nucleusR;
   const q = perf ? 0.45 : 1; // 实例数量缩放
   const detail = perf ? 3 : 4;
+  // v11 图片级: 质膜几何细分 5（~20k 三角形）—— 剖面/剪影曲线丝滑无棱; 核系维持 4 避免双核叠加成本
+  const memDetail = perf ? 3 : 5;
   const transOn = !perf; // 低端设备禁用折射
 
   const uTime: TimeUniform = createTimeUniform();
@@ -165,19 +167,20 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   const membraneGroup = new THREE.Group();
   group.add(membraneGroup);
 
-  const membraneGeo = track(shapedCellGeometry(R, detail, SHAPE));
+  const membraneGeo = track(shapedCellGeometry(R, memDetail, SHAPE));
   const membraneMat = mat({
     color: tint,
-    transmission: transOn ? 0.62 : 0,
-    thickness: 2.0,
-    roughness: 0.36,
+    // v11 图片级湿润透射: 透射↑（内部结构清晰透读）+ 清漆高光↑（湿生物膜油亮质感）+ 虹彩↑（脂质膜光泽）
+    transmission: transOn ? 0.72 : 0,
+    thickness: 1.7,
+    roughness: 0.32,
     roughnessMap: memRough,
     normalMap: memNormal,
     normalScale: 0.55,
-    clearcoat: 0.55,
-    clearcoatRoughness: 0.3,
-    iridescence: 0.32,
-    sheen: 0.5,
+    clearcoat: 0.85,
+    clearcoatRoughness: 0.18,
+    iridescence: 0.45,
+    sheen: 0.65,
     sheenColor: '#99f6e4',
     flow: { color: '#2dd4bf', strength: 0.14, scale: 0.3, speed: 0.05, rim: 0.26 },
   });
@@ -191,18 +194,26 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   glow.renderOrder = 70;
   membraneGroup.add(glow);
 
-  // 胞质体积雾填充（v10: 内缩膜面背向面渲染 —— 由内部向外看时的深度背景层，
-  // 与雾/景深叠加产生"半透明原生质体"的体积读感; 不遮挡任何内部结构）
+  // 胞质半透明体积（v11 图片级: Fresnel 光程渐变 + FBM 环流微光 —— 替代平面色填充的"果冻状原生质体"读感;
+  //  BackSide 内缩膜面背景层, 不遮挡任何内部结构, 与雾/景深叠加产生体积深度）
   {
     const fillGeo = track(shapedCellGeometry(R, perf ? 2 : 3, SHAPE));
     fillGeo.scale(0.88, 0.88, 0.88);
-    const fill = new THREE.Mesh(fillGeo, track(new THREE.MeshBasicMaterial({
-      color: '#04302a',
-      transparent: true,
-      opacity: 0.35 * dim,
-      depthWrite: false,
-      side: THREE.BackSide,
-      fog: true,
+    const tintCore = new THREE.Color(tint).multiplyScalar(0.55);
+    const tintRim = new THREE.Color(tint);
+    const tintFlow = new THREE.Color(tint).lerp(new THREE.Color('#7ffcf0'), 0.45);
+    const fill = new THREE.Mesh(fillGeo, track(volumeMaterial({
+      coreColor: `#${tintCore.getHexString()}`,
+      rimColor: `#${tintRim.getHexString()}`,
+      flowColor: `#${tintFlow.getHexString()}`,
+      baseAlpha: 0.3,
+      coreBoost: 0.22,
+      rimBoost: 0.1,
+      flowStrength: 0.16,
+      scale: 0.32,
+      speed: 0.045,
+      uTime,
+      dim,
     })));
     fill.renderOrder = 16;
     membraneGroup.add(fill);
@@ -416,8 +427,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   };
   const nucMat = mat({
     color: '#fb7185',
-    transmission: transOn ? 0.42 : 0,
-    thickness: 0.9,
+    // v11 图片级: 透射↑ —— 染色质/核仁透过双层核被膜隐约透读（活细胞核的半透明读感）
+    transmission: transOn ? 0.52 : 0,
+    thickness: 0.75,
     roughness: 0.3,
     normalMap: orgNormal,
     normalScale: 0.4,
@@ -471,7 +483,19 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
 
     const nucleoplasm = new THREE.Mesh(
       track(shapedNucleusGeometry(Nn, 3, SHAPE, NUC_FREQ, nucAmp, seed, -0.26)),
-      track(new THREE.MeshBasicMaterial({ color: '#881337', transparent: true, opacity: 0.16 * dim, depthWrite: false })),
+      track(volumeMaterial({
+        coreColor: '#5e0d2c',
+        rimColor: '#a03a5e',
+        flowColor: '#f472b6',
+        baseAlpha: 0.15,
+        coreBoost: 0.11,
+        rimBoost: 0.05,
+        flowStrength: 0.1,
+        scale: 0.55,
+        speed: 0.035,
+        uTime,
+        dim,
+      })),
     );
     nucleoplasm.position.copy(nucCK);
     nucleoplasm.renderOrder = 40;
@@ -718,9 +742,10 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   const mitoOuterGeo = track(displaceGeometry(new THREE.CapsuleGeometry(0.4, 1.5, 12, 28), 3.1, 0.05, 17));
   const mitoOuterMat = mat({
     color: '#0e8f6f',
-    transmission: transOn ? 0.44 : 0, // v10: 透射加深 —— 嵴腔/基质透过外膜可见（高保真插画读感）
-    thickness: 0.55,
-    roughness: 0.3,
+    // v11 图片级: 透射↑+厚度↓ —— 板层嵴/基质透过外膜清晰透读（电镜插画的"嵴褶皱填满线粒体"读感）
+    transmission: transOn ? 0.58 : 0,
+    thickness: 0.38,
+    roughness: 0.28,
     normalMap: orgNormal,
     normalScale: 0.5,
     clearcoat: 0.35,
@@ -733,9 +758,10 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   const cristaeMat = mat({
     color: '#99f6e4',
     emissive: '#5eead4',
-    emissiveIntensity: 1.0,
+    // v11: 嵴亮度↑ —— 经 0.58 透射外膜后仍保持高对比可读
+    emissiveIntensity: 1.28,
     roughness: 0.4,
-    opacity: 0.78,
+    opacity: 0.82,
     sheen: 0.6,
     sheenColor: '#a7f3d0',
     flow: { color: '#5eead4', strength: 0.4, scale: 2.4, speed: 0.2, rim: 0.3 },

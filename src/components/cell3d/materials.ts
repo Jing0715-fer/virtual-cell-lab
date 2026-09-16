@@ -213,3 +213,136 @@ export function glowMaterial(color: string, opacity: number, side: THREE.Side = 
   });
   return mat;
 }
+
+/* ============ 半透明原生质体积（v11 —— 图片级精细度核心） ============ */
+
+export interface VolumeOpts {
+  /** 核心深色（盘心读感 —— 光程最长的"厚"区） */
+  coreColor: string;
+  /** 边缘亮色（剪影边 —— 薄区透光） */
+  rimColor: string;
+  /** 流光色（胞质环流微光） */
+  flowColor: string;
+  baseAlpha: number;
+  /** 盘心密度增益（厚体积读感） */
+  coreBoost: number;
+  /** 剪影边透光增益 */
+  rimBoost: number;
+  flowStrength: number;
+  /** 噪声尺度（对象空间频率） */
+  scale: number;
+  speed: number;
+  uTime: TimeUniform;
+  dim?: number;
+}
+
+const VOLUME_VERT = /* glsl */ `
+#include <clipping_planes_pars_vertex>
+varying vec3 vVolNormal;
+varying vec3 vVolView;
+varying vec3 vVolObj;
+void main() {
+  vVolObj = position;
+  #include <begin_vertex>
+  #include <project_vertex>
+  vVolNormal = normalize(normalMatrix * normal);
+  vVolView = normalize(-mvPosition.xyz);
+  #include <clipping_planes_vertex>
+}`;
+
+const VOLUME_FRAG = /* glsl */ `
+#include <clipping_planes_pars_fragment>
+varying vec3 vVolNormal;
+varying vec3 vVolView;
+varying vec3 vVolObj;
+uniform float uTime;
+uniform float uDim;
+uniform vec3 uCore;
+uniform vec3 uRim;
+uniform vec3 uFlowCol;
+uniform float uBaseAlpha;
+uniform float uCoreBoost;
+uniform float uRimBoost;
+uniform float uFlowStrength;
+uniform float uScale;
+uniform float uSpeed;
+
+float vHash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123); }
+float vNoise(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float n000 = vHash(i);
+  float n100 = vHash(i + vec3(1.0, 0.0, 0.0));
+  float n010 = vHash(i + vec3(0.0, 1.0, 0.0));
+  float n110 = vHash(i + vec3(1.0, 1.0, 0.0));
+  float n001 = vHash(i + vec3(0.0, 0.0, 1.0));
+  float n101 = vHash(i + vec3(1.0, 0.0, 1.0));
+  float n011 = vHash(i + vec3(0.0, 1.0, 1.0));
+  float n111 = vHash(i + vec3(1.0, 1.0, 1.0));
+  float x00 = mix(n000, n100, f.x);
+  float x10 = mix(n010, n110, f.x);
+  float x01 = mix(n001, n101, f.x);
+  float x11 = mix(n011, n111, f.x);
+  return mix(mix(x00, x10, f.y), mix(x01, x11, f.y), f.z);
+}
+float vFbm(vec3 p) {
+  float s = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 3; i++) {
+    s += a * vNoise(p);
+    p = p * 2.03 + vec3(9.2, 4.1, 7.7);
+    a *= 0.5;
+  }
+  return s / 0.875;
+}
+
+void main() {
+  #include <clipping_planes_fragment>
+  // 视线-法向夹角因子: BackSide 渲染下盘心处 |dot|→1（光程厚）, 剪影边→0（薄）
+  float ndv = abs(dot(normalize(vVolNormal), normalize(vVolView)));
+  float center = pow(ndv, 1.35);
+  float rim = pow(1.0 - ndv, 2.6);
+  // 胞质环流: 双频 FBM 上升流 + 时间流动（亚感知的活体呼吸感）
+  vec3 fp = vVolObj * uScale + vec3(0.0, uTime * uSpeed, uTime * uSpeed * 0.6);
+  float n = vFbm(fp);
+  float n2 = vFbm(fp * 2.4 + 27.0);
+  float flow = smoothstep(0.3, 0.82, n * 0.7 + n2 * 0.3);
+
+  vec3 col = mix(uRim, uCore, center);
+  col += uFlowCol * flow * uFlowStrength;
+
+  float alpha = (uBaseAlpha + center * uCoreBoost + rim * uRimBoost + flow * 0.045) * uDim;
+  alpha = min(alpha, 0.96);
+  gl_FragColor = vec4(col, alpha);
+}`;
+
+/** 半透明原生质体体积材质（BackSide 背景层）—— 替代平面色填充:
+ *  盘心厚/边缘薄的物理光程读感 + FBM 环流微光, 参照高保真科学插画的"果冻状半透明细胞质"。
+ *  用于胞质（青系）与核质（玫瑰系）两处体积层。 */
+export function volumeMaterial(o: VolumeOpts): THREE.ShaderMaterial {
+  const mat = new THREE.ShaderMaterial({
+    vertexShader: VOLUME_VERT,
+    fragmentShader: VOLUME_FRAG,
+    uniforms: {
+      uTime: o.uTime,
+      uDim: { value: o.dim ?? 1 },
+      uCore: { value: new THREE.Color(o.coreColor) },
+      uRim: { value: new THREE.Color(o.rimColor) },
+      uFlowCol: { value: new THREE.Color(o.flowColor) },
+      uBaseAlpha: { value: o.baseAlpha },
+      uCoreBoost: { value: o.coreBoost },
+      uRimBoost: { value: o.rimBoost },
+      uFlowStrength: { value: o.flowStrength },
+      uScale: { value: o.scale },
+      uSpeed: { value: o.speed },
+    },
+    transparent: true,
+    depthWrite: false,
+    side: THREE.BackSide,
+    fog: false,
+    // 全局裁剪平面（剖面模式）支持: 让 renderer 注入 NUM_CLIPPING_PLANES 定义与 clippingPlanes uniform
+    clipping: true,
+  });
+  return mat;
+}

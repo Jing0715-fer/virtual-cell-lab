@@ -15,7 +15,7 @@ import { Canvas, useFrame, useThree, events as createPointerEvents } from '@reac
 import type { RootState } from '@react-three/fiber';
 import { setSceneSnapshot } from '@/lib/simulation/scene-capture';
 import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
-import { EffectComposer, Bloom, DepthOfField, Noise, Vignette } from '@react-three/postprocessing';
+import { EffectComposer, Bloom, ChromaticAberration, DepthOfField, Noise, N8AO, Vignette } from '@react-three/postprocessing';
 import type { DepthOfFieldEffect } from 'postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick } from 'lucide-react';
@@ -30,6 +30,7 @@ import { EdgeLayer } from './signal-edges';
 import { MrnaFlow } from './mrna-flow';
 import { EventPulses } from './event-pulses';
 import { SectionClipController, SECTION_ORIENTS, AXIS_N, type SectionAxis } from './section-view';
+import { glowSpriteTexture } from './textures';
 import { NUCLEUS_EXTENT, SHAPE_EXTENT, nucleusInstances, type ShapeKind } from '@/lib/simulation/cell-shape';
 import { useLang } from '@/lib/i18n';
 
@@ -276,6 +277,20 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, sim, snapPlane }:
 
   return (
     <group>
+      {/* v11 背景柔光幕布: 细胞身后的大尺度径向渐变 —— 高保真科学插画的"深空舞台"深度分离
+       *  （细胞从纯黑背景中浮起, 剪影读感立刻提升）; 远景 + 不受雾影响 + 不写深度 */}
+      <mesh position={[0, 0, -46]} renderOrder={-10}>
+        <planeGeometry args={[150, 90]} />
+        <meshBasicMaterial
+          map={glowSpriteTexture()}
+          color="#0d5c5c"
+          transparent
+          opacity={0.55}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          fog={false}
+        />
+      </mesh>
       {/* 剖面贴附模式: 核内部标注让位（核盘自带剖面标注）—— 消除核区标签互叠 */}
       <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} compactNucleusLabels={!!snapPlane} />
       <EdgeLayer edges={layout.edges} sim={sim} />
@@ -601,10 +616,12 @@ export function VirtualCell3D() {
         >
         <Canvas
           camera={{ fov: 42, near: 0.1, far: 300, position: [0, 9, 28] }}
-          dpr={perfMode ? [0.7, 1] : [1, 1.75]}
+          dpr={perfMode ? [0.7, 1] : [1, 2]}
           gl={{ antialias: !perfMode, alpha: true, preserveDrawingBuffer: !perfMode }}
           events={canvasRelativePointerEvents}
           onCreated={({ gl }) => {
+            // v11 图片级曝光: ACES 胶片色调映射下的微幅提升（暗部提升而不发灰）
+            gl.toneMappingExposure = 1.12;
             // WebGL 上下文丢失防护（低端 GPU 内存回收时常见）: 提示 + 浏览器自动恢复
             gl.domElement.addEventListener('webglcontextlost', (e) => {
               e.preventDefault();
@@ -624,8 +641,8 @@ export function VirtualCell3D() {
           <pointLight position={[0, 0, 0]} intensity={7} distance={9} decay={2} color="#fb7185" />
           {/* 指数雾: 深度层次感（远端结构淡入背景） */}
           <fogExp2 attach="fog" args={['#020a12', 0.0072]} />
-          {/* 程序化环境光照: Lightformer 阵列烘焙镜面形体感（离线, 无外部 HDR） */}
-          <Environment resolution={perfMode ? 64 : 128} frames={1}>
+          {/* 程序化环境光照: Lightformer 阵列烘焙镜面形体感（离线, 无外部 HDR; v11 分辨率翻倍 —— 湿润透射材质的高光形体更细腻） */}
+          <Environment resolution={perfMode ? 64 : 256} frames={1}>
             <color attach="background" args={['#02101a']} />
             {/* 顶部主光: 冷青生物荧光 */}
             <Lightformer intensity={2.4} color="#7ffcf0" position={[0, 14, 4]} scale={[12, 8, 1]} rotation-x={-Math.PI / 2.2} />
@@ -667,11 +684,24 @@ export function VirtualCell3D() {
             mouseButtons={MOUSE_MAP}
             makeDefault
           />
-          {/* 生物荧光辉光: 自适应景深（层次感）→ Bloom 提亮发光体 → 微粒胶片噪声 → 暗角聚焦视线 */}
+          {/* 生物荧光辉光管线 v11（图片级精细度）: AO 接触阴影（细胞器之间的空间深度）→ 景深 → Bloom → 镜头微色散 → 胶片噪声 → 暗角 */}
           {glow && (
             <EffectComposer multisampling={perfMode ? 0 : 4} enableNormalPass={false}>
+              {!perfMode && (
+                <N8AO
+                  aoRadius={1.15}
+                  intensity={1.45}
+                  distanceFalloff={0.62}
+                  halfRes
+                  quality="medium"
+                  screenSpaceRadius={false}
+                />
+              )}
               {!perfMode && <AdaptiveDof controlsRef={controlsRef} bokehScale={2.4} />}
-              <Bloom mipmapBlur intensity={1.38} luminanceThreshold={0.44} luminanceSmoothing={0.32} />
+              <Bloom mipmapBlur intensity={1.42} luminanceThreshold={0.46} luminanceSmoothing={0.32} />
+              {!perfMode && (
+                <ChromaticAberration offset={[0.00055, 0.0008]} radialModulation modulationOffset={0.38} />
+              )}
               {!perfMode && <Noise premultiply opacity={0.05} />}
               <Vignette offset={0.22} darkness={0.52} />
             </EffectComposer>
