@@ -1461,3 +1461,23 @@ Work Log:
 
 Stage Summary:
 - 本轮五项用户反馈全部交付并推送; 后续由 cron 巡检任务自动接续开发与 QA
+
+---
+Task ID: 39
+Agent: 主协调 Agent (Z.ai Code)
+Task: 沙箱重置回滚恢复 —— 从远程仓库拉取最新代码 + 环境重建验证
+
+Work Log:
+- 诊断: 本地 main 停在旧 commit 73ab872（回滚前时代）, 远程 origin/main 已到 f6dcf9c（含 v13-v16 全部 3D 修复 + worklog）; 本地仅 .zscripts/dev.pid 脏改（无价值）
+- 恢复: git fetch + git reset --hard origin/main → HEAD = f6dcf9c; upload/pasted_image_1789526571897.png 参照图完好; node_modules/db/custom.db/prisma schema 全部完好
+- dev server: 进程存活且 HMR 自动重编译（dev.log GET / 200, API 正常）; 无需重启
+- QA（agent-browser 端到端 + sharp 像素分析）:
+  · 首页: 1280x577, 非暗 42.6%, HERO 区 LIVE 有丝分裂标注全在
+  · 模拟实验台 3D 视图: 画布区非暗 54.0%, 暖金(RER/高尔基) 2.31% + 紫(核/染色质) 2.90% + 绿(线粒体) 2.99% —— v16 全部细胞器渲染确认
+  · 分裂演示: workspace「分裂演示」Tab 存在且点击生效; 7 相位 chips（间期/前期/前中期/中期/后期/末期/胞质分裂）+ 速度(0.5x/2x) + 重播 全部在位
+- cron 巡检: 旧 7 个任务全部「Disabled due to exec limits exceeded」→ 重建新任务 job_id 389980（0 */15 * * * ?, Asia/Shanghai, webDevReview, priority 5）
+
+Stage Summary:
+- 沙箱重置影响已完全消除: 代码回到远程最新 f6dcf9c（Task 37/38 全部修复在位）, 服务渲染/QA 三层验证通过（首页/3D 主视图/分裂演示）, 巡检任务已重建
+- 环境备注同前: dev server 后台运行勿重启勿 build; VLM 429 用像素量化 QA; 内存 3.9GB 防 OOM
+- 下阶段建议（继承 Task 38）: ①线粒体/溶酶体剖面窗口化（复用 cutaway renderOrder 手法）②「发表模式」截图按钮 ③减数分裂演示 ④核孔密度真实缩放 ⑤微绒毛/纤毛细节增强
