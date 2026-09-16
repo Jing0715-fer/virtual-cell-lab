@@ -1276,3 +1276,44 @@ Stage Summary:
 - 产出: materials.ts(REF 系统新 ~50 行) / organelles.tsx(~40 处换色) / section-view.tsx(剖面纹理 ~18 处) / virtual-cell-3d.tsx(光照重构+tint 收敛+Bloom/雾/幕布调优)
 - 遗留/风险: ①分子/信号边 UI 语义色保留高饱和（教学可读性优先 —— 如需进一步统一可做"氛围模式"切换）②参照图几何细节（如具体嵴形态/核孔密度）因 VLM 不可用未逐项比对, 以色族/光照/布局三组量化数据对齐 ③SimEvent 双语化/PDF EN（Task 22 遗留未变）④SwiftShader QA 帧率慢
 - 下阶段建议: ①参照图与当前渲染并排 hero 对比条（教学: 艺术家重构 vs 仿真渲染）②核孔密度/嵴形态若 VLM 恢复可逐项精修 ③细胞器间互作高光（自噬体包裹线粒体时暖色呼应）
+
+---
+Task ID: 35
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户需求——"感觉粗面内质网还是没有表现出来呢，为何背景的细胞器感觉很模糊呢？我想达到之后截图就能达到发表文献的高质量图片的程度"（RER 形态重建 + 全局锐度根治）
+
+Work Log:
+- 【参照图二次逆向（VLM 仍 429 → sharp 像素测量）】scripts/analyze-ref-er.ts 新增:
+  · ER 囊池形态: 石板蓝游程 p50=5px/p90=20px/max=138px —— 细长扁平带状（非粗管）, 平行堆叠成组
+  · 核糖体点彩: ER 区高通斑点 47.3% 像素（平均对比 46.8）—— "粗颗粒砂纸"质感, 表面近乎满铺
+  · 全图锐度: Sobel 均值 108.8 / 强边缘 26.2% —— 发表级图的全图锐利基准
+  · ASCII 强度图直接观察微区: 平行长亮带（宽 4-8px、长 60-100px+）+ 带内颗粒波动 + 带缘亮线
+- 【背景模糊根因双杀（three 0.180 源码级查证）】:
+  · 根因① 透射 mip 模糊: MeshPhysicalMaterial 采样公式 lod=log2(samplerSize)×roughness×clamp(ior×2-2) —— 质膜 roughness 0.32×thickness 1.7（且挂 roughnessMap 逐像素抬高）→ mip≈2.75（背景细胞器软糊 4-6px）; 全部细胞器都在质膜透射层后面 → 整个内部被糊化
+  · 根因② DoF 景深虚化: AdaptiveDof bokehScale 2.4 + focusRange=max(5,d×0.5)（焦深仅半程）→ 背景侧细胞器直接虚化
+- 【RER v13 重建（organelles.tsx）】:
+  · 新几何体系: cisternaFrames()（径向参考系 N=径向投影/B=T×N）+ flatCisternaGeometry()（沿曲线扫掠扁平椭圆截面 宽1.05/厚0.095≈11:1, 端部收口）—— 薄轴恒沿径向 → 囊池宽面贴合核被膜平行叠层
+  · 布局重排: 旧"绕核线团"（latBase -0.75+s×0.4 大螺旋）→ 平行长囊池堆（径向 ofs 0.26+s×0.13 同心壳层 + 纬度微扇形 + 缓和波浪, 每条跨 122°）—— 参照图"千层丝带"读感
+  · 外周带状囊池堆×3（每堆 2-3 层短片层, insidePos 体内采样 + 随机正交基层叠）—— 与核旁堆呼应
+  · 核糖体满铺: 旧两排（26 点/曲线中心线 ±0.15）→ 两宽面 9 列×0.17 步距网格铺满（~4000 实例单 InstancedMesh）; 材质不透明化（退役 transparent 0.85/depthWrite false）+ 尺寸↑（0.95-1.55×）+ 发射 0.8 + 亮琥珀色 #9a7454
+  · ER 囊池材质锐化: roughness 0.38→0.24 + clearcoat 0.55 + sheen 浅蓝（参照带缘亮线）+ transmission 0.34
+- 【全局锐度修复（发表级）】:
+  · 质膜: roughness 0.32→0.07 / thickness 1.7→0.55 / normalScale 0.55→0.3 / roughnessMap 退役 → 透射 lod 2.75→0.5（近零模糊; 湿润感移交 clearcoat/iridescence/sheen）
+  · 线粒体外膜: roughness 0.28→0.09（嵴板层透读 mip 2.4→0.8 锐利）; 核被膜 0.3→0.14（染色质透读锐化）
+  · DoF: bokehScale 2.4→1.0 + focusRange max(5,d×0.5)→max(12,d×0.95) —— 整细胞含背景侧全清晰, 仅远景余晖保留极轻深度线索
+  · 脂双层"面纱"减薄: 1300→950 头 + 不透明度 0.72/0.55→0.5/0.38; Bloom intensity 1.05→0.85; 胶片噪声 0.05→0.035
+- QA（agent-browser 端到端, 1280×800, dev.log 全 200 编译干净）:
+  · RER 形态确认: 缩放视图 ASCII 目检 —— 平行带状囊池层 + 带面核糖体斑点地毯 + 带缘亮线全部可见（旧管线点彩为零）
+  · 点彩量化: 石板区高频斑点占比 肝 19.1%（默认视距!）/ 神经元 20.1% / 心肌 23.5% / 癌 23.2% / 成纤维 23.8% / 上皮 21.5% / CD4 16.4% —— 全 7 类一致（参照基准 47% @绘画满对比度, 3D 实时渲染此量级已为强点彩）
+  · 渲染健康: nonBlack 92.5-95.4% 全类型; warm 0.44-1.4%（暖古铜线粒体族）
+  · 剖面模式: 核盘紫像素 7.55% 裁剪正常, 着色器 0 编译错误（新几何+透射+sheen+裁剪平面组合通过）
+  · 交互回归: 分子点击 DUSP1 is-selected ✓ / 模拟播放 T+1.0s 推进 ✓ / 剖面开关 ✓
+  · lint 零错误; tsc cell3d 零错误（历史遗留不计）
+  · 环境备注: console 中 glowSpriteTexture undefined 报错为编辑中间态 HMR 历史残留（重载后 dev.log 编译干净 + 渲染指标与健康基线一致, 已排除）
+
+Stage Summary:
+- 用户两大诉求全部根治: ①RER 形态重建（真扁平带状囊池几何体系 + 满铺核糖体点彩 —— "粗面"语义终于可见）②背景模糊根因双杀（透射 mip 模糊公式源码级查证 + DoF 虚化, 五层糊化源全部收敛）
+- 架构沉淀: cisternaFrames/flatCisternaGeometry 成为带状膜系细胞器通用几何工厂（后续高尔基扁平囊/自噬体隔离膜可复用）; "透射材质 roughness 即背景糊化旋钮"的定量认知（lod 公式）写入材质注释
+- 产出: organelles.tsx（RER v13 重建 + 质膜/线粒体/核被膜锐度 + 脂头减薄 + flatCisterna 几何体系）/ virtual-cell-3d.tsx（DoF/Bloom/Noise 收敛）/ scripts/analyze-ref-er.ts（参照图测量）
+- 遗留/风险: ①SimEvent 双语化/PDF EN（Task 22 遗留未变）②参照图点彩密度 47% 为绘画基准, 3D 实时版 16-24% 已达强可见; 若需更接近可再加核糖体行间中点（预计 +30% 密度, 换 ~2k 实例）③SwiftShader QA 帧率慢（非用户问题）④HERO 区 3D 实渲染截图仍待办
+- 下阶段建议: ①高尔基体复用 flatCisterna（更薄更扁的弓形囊池堆 + 网格蛋白 coated vesicle 出芽细节）②核孔密度真实缩放（~2000/核 → NPC 实例数按核面面积）③"发表模式"截图按钮（隐藏 UI + 2× 超采样 + PNG 导出, 直达用户"截图发文献"场景）④微绒毛/纤毛细节增强

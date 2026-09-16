@@ -367,7 +367,7 @@ function SceneCapture() {
 /** 自适应景深（高保真显微摄影质感）: 焦平面逐帧追踪「相机 → 控制目标」距离，
  *  焦深范围随拍摄距离自适应 —— 细胞整体保持清晰可检视，胞外远场与前景柔和虚化，
  *  空间层次感参考高保真科学插画。HD 模式专用（流畅模式跳过）。 */
-function AdaptiveDof({ controlsRef, bokehScale = 2.4 }: {
+function AdaptiveDof({ controlsRef, bokehScale = 1.0 }: {
   controlsRef: RefObject<OrbitControlsImpl | null>;
   bokehScale?: number;
 }) {
@@ -381,9 +381,10 @@ function AdaptiveDof({ controlsRef, bokehScale = 2.4 }: {
     else tgt.current.set(0, 0, 0);
     const d = camera.position.distanceTo(tgt.current);
     // target 自动对焦: effect.update() 每帧按相机距离计算 focusDistance（世界单位）;
-    // 焦深范围手动随拍摄距离自适应（细胞整体清晰, 远近场柔和虚化）
+    // v13 发表级锐度: 焦深范围放宽至整细胞清晰（d×0.95 + 下限 12）, bokehScale 2.4→1.0 ——
+    // 仅远景环境余晖保留极轻深度线索, 细胞体（含背景侧细胞器）全清晰（参照图全图锐利: Sobel 108.8/强边缘 26.2%）
     dof.target = tgt.current;
-    dof.cocMaterial.focusRange = Math.max(5, d * 0.5);
+    dof.cocMaterial.focusRange = Math.max(12, d * 0.95);
   });
   return <DepthOfField ref={ref} bokehScale={bokehScale} />;
 }
@@ -703,12 +704,12 @@ export function VirtualCell3D() {
                   screenSpaceRadius={false}
                 />
               )}
-              {!perfMode && <AdaptiveDof controlsRef={controlsRef} bokehScale={2.4} />}
-              <Bloom mipmapBlur intensity={1.05} luminanceThreshold={0.54} luminanceSmoothing={0.32} />
+              {!perfMode && <AdaptiveDof controlsRef={controlsRef} bokehScale={1.0} />}
+              <Bloom mipmapBlur intensity={0.85} luminanceThreshold={0.54} luminanceSmoothing={0.32} />
               {!perfMode && (
                 <ChromaticAberration offset={[0.00055, 0.0008]} radialModulation modulationOffset={0.38} />
               )}
-              {!perfMode && <Noise premultiply opacity={0.05} />}
+              {!perfMode && <Noise premultiply opacity={0.035} />}
               <Vignette offset={0.22} darkness={0.52} />
             </EffectComposer>
           )}

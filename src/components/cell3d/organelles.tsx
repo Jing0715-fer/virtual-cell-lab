@@ -41,7 +41,7 @@ import { Html } from '@react-three/drei';
 import type { CellBodySpec, Vec3 } from '@/lib/simulation/layout3d';
 import { NUCLEUS_FORM, SHAPE_NOISE, nucleusCenter, nucleusInstances, nucleusRadius, nucleusRayExit, shapeCrossRadius, shapeRadius, shapeXExtent, type ShapeKind } from '@/lib/simulation/cell-shape';
 import { displaceGeometry, fbm3, fibSphere, hash01, mergeGeoms, sph } from './procedural';
-import { glowSpriteTexture, organicNormalMap, roughnessMap, speckleNormalMap, stripeNormalMap } from './textures';
+import { glowSpriteTexture, organicNormalMap, speckleNormalMap, stripeNormalMap } from './textures';
 import { createTimeUniform, glowMaterial, organelleMaterial, volumeMaterial, REF, type TimeUniform } from './materials';
 import { autophagyLevel, AUTOPHAGY_VISIBLE_THRESHOLD } from '@/lib/simulation/autophagy';
 import { useLabStore } from '@/store/lab-store';
@@ -90,6 +90,94 @@ function cellSurf(dir: THREE.Vector3, R: number, shape: ShapeKind, offset = 0): 
   const d = dir.clone().normalize();
   const noise = (fbm3(d.x * freq, d.y * freq, d.z * freq, 3, 3) - 0.5) * 2 * amp;
   return shapeRadius(d, shape, R) + noise + offset;
+}
+
+/* ============ 带状扁平囊池几何（v13 —— 参照图逆向重建核心） ============
+ * 参照图实测（1228×841 像素分析）:
+ *   - ER 囊池 = 细长扁平带状（游程 p50=5px/p90=20px, 长 60-138px, 平行堆叠成组）
+ *   - 表面满铺核糖体点彩（高通斑点 47.3% 像素, 平均对比 46.8 —— "粗颗粒砂纸"质感）
+ * 旧实现（圆管 ×0.26 压扁）呈"线团"读感; 新实现沿曲线扫掠真扁平椭圆截面:
+ *   - 薄轴恒沿径向参考方向（自 center 指向曲线点）→ 囊池宽面贴合核被膜平行叠层
+ *   - 宽:厚 ≈ 11:1（参照带状比例）, 端部圆润收口
+ * 配套 cisternaFrames() 沿同一坐标系输出核糖体满铺采样帧。 */
+export interface CisternaFrame {
+  /** 曲线点 */
+  p: THREE.Vector3;
+  /** 宽面法向（径向, 薄轴方向） */
+  n: THREE.Vector3;
+  /** 宽度方向（切向正交） */
+  b: THREE.Vector3;
+}
+
+/** 沿曲线取帧（径向参考系: N=径向投影, B=T×N）——囊池几何与核糖体满铺共用 */
+function cisternaFrames(
+  curve: THREE.Curve<THREE.Vector3>,
+  count: number,
+  center: THREE.Vector3,
+): CisternaFrame[] {
+  const frames: CisternaFrame[] = [];
+  const T = new THREE.Vector3();
+  const N = new THREE.Vector3();
+  const B = new THREE.Vector3();
+  const ref = new THREE.Vector3();
+  for (let i = 0; i <= count; i++) {
+    const p = curve.getPoint(i / count);
+    T.copy(curve.getTangent(i / count)).normalize();
+    // 径向参考（自 center 指向曲线点）投影到垂直于 T 的平面 —— 囊池薄轴恒沿径向
+    ref.copy(p).sub(center);
+    if (ref.lengthSq() < 1e-8) ref.set(0, 1, 0);
+    ref.normalize();
+    N.copy(ref).addScaledVector(T, -ref.dot(T));
+    if (N.lengthSq() < 1e-6) N.set(0, 1, 0).addScaledVector(T, -T.y);
+    if (N.lengthSq() < 1e-6) N.crossVectors(T, new THREE.Vector3(1, 0, 0));
+    N.normalize();
+    B.crossVectors(T, N).normalize();
+    frames.push({ p: p.clone(), n: N.clone(), b: B.clone() });
+  }
+  return frames;
+}
+
+/** 带状扁平囊池几何: 沿曲线扫掠扁平椭圆截面（宽沿 B、薄沿 N 径向）, 端部极点收口 */
+function flatCisternaGeometry(
+  frames: CisternaFrame[],
+  width: number,
+  thickness: number,
+  radial = 12,
+): THREE.BufferGeometry {
+  const w = width / 2;
+  const h = thickness / 2;
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  const segs = frames.length - 1;
+  for (let i = 0; i <= segs; i++) {
+    const { p, n, b } = frames[i];
+    for (let j = 0; j <= radial; j++) {
+      const a = (j / radial) * Math.PI * 2;
+      // 端部收口: 首/末帧截面尺寸收敛（圆润囊池端头）
+      const cap = i === 0 || i === segs ? 0.18 : 1;
+      const ca = Math.cos(a) * h * cap;
+      const sa = Math.sin(a) * w * cap;
+      positions.push(p.x + n.x * ca + b.x * sa, p.y + n.y * ca + b.y * sa, p.z + n.z * ca + b.z * sa);
+      uvs.push(i / segs, j / radial);
+    }
+  }
+  const cols = radial + 1;
+  for (let i = 0; i < segs; i++) {
+    for (let j = 0; j < radial; j++) {
+      const a = i * cols + j;
+      const b2 = a + 1;
+      const c = a + cols;
+      const d = c + 1;
+      indices.push(a, c, b2, b2, c, d);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
 }
 
 /* ============ 位移球体（细胞器有机轮廓, 保持球状基底） ============ */
@@ -154,7 +242,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
 
   // 共享贴图（模块缓存, 不随 dispose 释放）
   const memNormal = organicNormalMap({ freq: 7, strength: 2.2, seed: 11, repeat: 4 });
-  const memRough = roughnessMap({ base: 0.38, variance: 0.3, seed: 21, repeat: 3 });
+  // v13: 质膜 roughnessMap 退役（透射 mip 模糊的放大器 —— 粗糙度贴图逐像素抬高 rough → 背景细胞器糊化加剧）
   const orgNormal = organicNormalMap({ freq: 5, strength: 2.6, seed: 47, repeat: 3 });
   const coatNormal = speckleNormalMap({ count: 260, radius: 0.018, strength: 2.1, seed: 31, repeat: 2 });
   const mtStripe = stripeNormalMap({ size: 64, stripes: 13, width: 0.3, strength: 2.2, dir: 'y', repeat: 1 });
@@ -170,13 +258,14 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   const membraneGeo = track(shapedCellGeometry(R, memDetail, SHAPE));
   const membraneMat = mat({
     color: tint,
-    // v11 图片级湿润透射: 透射↑（内部结构清晰透读）+ 清漆高光↑（湿生物膜油亮质感）+ 虹彩↑（脂质膜光泽）
-    transmission: transOn ? 0.72 : 0,
-    thickness: 1.7,
-    roughness: 0.32,
-    roughnessMap: memRough,
+    // v13 发表级锐度: 透射 mip 模糊公式 lod=log2(size)×roughness×clamp(ior×2-2) ——
+    // roughness 0.32×thickness 1.7 → mip~2.7（背景细胞器软糊 4-6px）; 降至 0.07×0.55 → lod~0.5（近零模糊）。
+    // 湿润感由 clearcoat/iridescence/sheen 承担（高光形体不受透射模糊影响）
+    transmission: transOn ? 0.7 : 0,
+    thickness: 0.55,
+    roughness: 0.07,
     normalMap: memNormal,
-    normalScale: 0.55,
+    normalScale: 0.3,
     clearcoat: 0.85,
     clearcoatRoughness: 0.18,
     iridescence: 0.45,
@@ -221,9 +310,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     membraneGroup.add(fill);
   }
 
-  // 脂双层脂头（外叶/内叶, 缓慢对流 = 膜流动性）—— v10: 1300 头加密（高保真插画的"磷脂分子镶嵌"读感）
+  // 脂双层脂头（外叶/内叶, 缓慢对流 = 膜流动性）—— v13: 950 头降密度 + 降不透明度（"面纱"减薄 —— 透射后景更锐）
   const headGeo = track(new THREE.SphereGeometry(0.066, 8, 6));
-  const headCount = Math.round(1300 * q);
+  const headCount = Math.round(950 * q);
   const makeLeaflet = (offset: number, opacity: number, emissive: string, tints: string[]) => {
     const m = track(new THREE.MeshStandardMaterial({
       color: '#ffffff',
@@ -252,8 +341,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     inst.renderOrder = 60;
     return inst;
   };
-  const outerLeaflet = makeLeaflet(0.05, 0.72, '#4a6a7e', ['#8498ac', '#6a8298', '#94a8bc', '#74889e']);
-  const innerLeaflet = makeLeaflet(-0.05, 0.55, '#3a4a5a', ['#5a6a7e', '#4a5a6a', '#64748a']);
+  const outerLeaflet = makeLeaflet(0.05, 0.5, '#4a6a7e', ['#8498ac', '#6a8298', '#94a8bc', '#74889e']);
+  const innerLeaflet = makeLeaflet(-0.05, 0.38, '#3a4a5a', ['#5a6a7e', '#4a5a6a', '#64748a']);
   membraneGroup.add(outerLeaflet, innerLeaflet);
 
   // 跨膜蛋白（多次跨膜 α-螺旋束 —— 3 螺旋三角排布, GPCR/转运体跨膜区剪影, 嵌于脂双层）
@@ -435,7 +524,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     color: REF.nucEnv,
     transmission: transOn ? 0.52 : 0,
     thickness: 0.75,
-    roughness: 0.3,
+    // v13 发表级锐度: 0.3→0.14 —— 染色质/核仁透过双层核被膜锐利透读
+    roughness: 0.14,
     normalMap: orgNormal,
     normalScale: 0.4,
     clearcoat: 0.35,
@@ -751,9 +841,10 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   const mitoOuterMat = mat({
     // v12 参照图: 线粒体暖古铜族（实测 100,74,69）—— 高饱和青绿退役
     color: REF.mitoOuter,
+    // v13 发表级锐度: transmission 0.58 + roughness 0.28 → 嵴透读 mip~2.4 糊化; 降至 0.09 → 嵴板层锐利透读
     transmission: transOn ? 0.58 : 0,
     thickness: 0.38,
-    roughness: 0.28,
+    roughness: 0.09,
     normalMap: orgNormal,
     normalScale: 0.5,
     clearcoat: 0.35,
@@ -883,44 +974,64 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     labels.push({ pos: { x: m0.x * 1.4, y: m0.y + 0.85, z: m0.z * 1.4 }, zh: '线粒体（板层嵴）', latin: 'Mitochondrion' });
   }
 
-  /* ================= 粗面内质网（核旁连续囊池 + 连接管 + 核糖体） ================= */
+  /* ================= 粗面内质网（v13 参照图逆向: 平行带状囊池堆 + 满铺核糖体点彩） ================= */
   // 核糖体: 大小亚基哑铃形（60S 大亚基 + 40S 小亚基 —— 电镜双亚基剪影）
   const ribosomeGeo = track(
     mergeGeoms([
-      { geo: track(new THREE.SphereGeometry(0.06, 7, 6)), matrix: new THREE.Matrix4().makeTranslation(0, 0.028, 0) },
-      { geo: track(new THREE.SphereGeometry(0.042, 6, 5)), matrix: new THREE.Matrix4().makeTranslation(0, -0.05, 0) },
+      { geo: track(new THREE.SphereGeometry(0.062, 6, 5)), matrix: new THREE.Matrix4().makeTranslation(0, 0.028, 0) },
+      { geo: track(new THREE.SphereGeometry(0.043, 5, 4)), matrix: new THREE.Matrix4().makeTranslation(0, -0.05, 0) },
     ]),
   );
-  const ribosomeMat = track(new THREE.MeshStandardMaterial({ color: REF.ribosome, emissive: '#6a4a30', emissiveIntensity: 0.42 * dim, transparent: true, opacity: 0.85 * dim, depthWrite: false }));
+  // v13: 不透明 + 高亮发射 —— 参照图核糖体是清晰可辨的点彩颗粒（半透明/depthWrite false 会"发虚"）
+  const ribosomeMat = track(new THREE.MeshStandardMaterial({ color: '#9a7454', emissive: '#7a5638', emissiveIntensity: 0.8 * dim, roughness: 0.5, metalness: 0.05 }));
   {
-    // 渲染层 +2 行（视觉行数增多, 更接近 2D 多行波浪线; 不改 layout3d 契约）; perf ×0.6 缩减
+    // 渲染层 +1（视觉行数增多; 不改 layout3d 契约）; perf ×0.6 缩减
     const sheets = Math.max(1, perf ? Math.round((spec.erSheets + 2) * 0.6) : spec.erSheets + 2);
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
     const sheetCurves: THREE.CatmullRomCurve3[] = [];
+    const allRiboPts: THREE.Vector3[] = [];
+    // v13 参照图布局: 平行长囊池堆（千层丝带 —— 径向逐层 + 纬度微扇形展开, 非旧"绕核线团"）
     for (let s = 0; s < sheets; s++) {
-      const latBase = -0.75 + s * 0.4;
-      const lon0 = s * 1.9;
+      const latBase = -0.52 + s * 0.135;
+      const lon0 = -0.55 + s * 0.075;
+      const lonSpan = Math.PI * 0.68;
+      const ofs = 0.26 + s * 0.13;
       const pts: THREE.Vector3[] = [];
-      for (let k = 0; k <= 14; k++) {
-        const t = k / 14;
-        const lat = latBase + Math.sin(t * Math.PI * 3.1) * 0.24;
-        const lon = lon0 + t * Math.PI * 1.55;
-        // v6: 囊池包绕成形核面（杆状核旁 rER 沿长轴延展 —— 与真实核旁 ER 一致）
+      for (let k = 0; k <= 13; k++) {
+        const t = k / 13;
+        const lat = latBase + Math.sin(t * Math.PI * 1.7 + s * 0.9) * 0.13;
+        const lon = lon0 + t * lonSpan;
+        // 囊池贴核被膜平行延展（径向 ofs 逐层 —— 同心壳层层叠）
         const dir = new THREE.Vector3(
           Math.cos(lat) * Math.cos(lon),
           Math.sin(lat),
           Math.cos(lat) * Math.sin(lon),
         ).normalize();
-        const p = nucPoint(dir, 0.62 + Math.sin(t * Math.PI * 2.3 + s) * 0.34);
+        const p = nucPoint(dir, ofs + Math.sin(t * Math.PI * 1.4 + s * 1.3) * 0.1);
         pts.push(new THREE.Vector3(p.x, p.y, p.z));
       }
       const curve = new THREE.CatmullRomCurve3(pts);
       sheetCurves.push(curve);
-      const sheet = track(new THREE.TubeGeometry(curve, 52, 0.32, 12));
-      const m = new THREE.Matrix4().makeScale(1, 0.26, 1); // 扁平囊池
-      parts.push({ geo: sheet, matrix: m });
+      // 带状扁平囊池几何（宽 1.05 / 厚 0.095 ≈ 11:1 —— 参照图带状比例）
+      const frames = cisternaFrames(curve, perf ? 26 : 40, nucC);
+      parts.push({ geo: track(flatCisternaGeometry(frames, 1.05, 0.095, 12)) });
+      // 满铺核糖体点彩（参照实测 47% 高频像素 —— 两宽面网格化铺满, 非旧"两排"; v13b: 7 列×0.17 步距加密）
+      const wFrac = perf ? [-0.6, 0, 0.6] : [-0.68, -0.51, -0.34, -0.17, 0, 0.17, 0.34, 0.51, 0.68];
+      for (let i = 1; i < frames.length - 1; i++) {
+        const { p, n, b } = frames[i];
+        for (const f of wFrac) {
+          for (const face of [1, -1]) {
+            const jitter = 0.013;
+            allRiboPts.push(new THREE.Vector3(
+              p.x + n.x * face * 0.075 + b.x * f * 0.5 + (hash01(`rj${s}${i}${f}${face}`) - 0.5) * jitter * 2,
+              p.y + n.y * face * 0.075 + b.y * f * 0.5 + (hash01(`rj${s}${i}${f}${face}`, 3) - 0.5) * jitter * 2,
+              p.z + n.z * face * 0.075 + b.z * f * 0.5 + (hash01(`rj${s}${i}${f}${face}`, 5) - 0.5) * jitter * 2,
+            ));
+          }
+        }
+      }
     }
-    // 池间连接小管
+    // 池间连接小管（动态管网三通语义保留）
     for (let c = 0; c < sheetCurves.length - 1; c++) {
       const a = sheetCurves[c].getPoint(0.35);
       const b = sheetCurves[c + 1].getPoint(0.5);
@@ -928,39 +1039,83 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       const conn = new THREE.QuadraticBezierCurve3(a, mid, b);
       parts.push({ geo: track(new THREE.TubeGeometry(conn, 16, 0.07, 6)) });
     }
+    // 外周带状囊池堆（v13: 与核旁堆呼应的平行短片层 —— 参照图 ER 迷宫的"层叠丝带"读感）
+    const stackN = perf ? 1 : 3;
+    for (let st = 0; st < stackN; st++) {
+      const stDir = new THREE.Vector3(
+        Math.cos((hash01(`st${st}`, 3) - 0.5) * 2.0) * Math.cos(hash01(`st${st}`, 5) * Math.PI * 2),
+        Math.sin((hash01(`st${st}`, 3) - 0.5) * 2.0),
+        Math.cos((hash01(`st${st}`, 3) - 0.5) * 2.0) * Math.sin(hash01(`st${st}`, 5) * Math.PI * 2),
+      ).normalize();
+      const anchor = insidePos(stDir, 0.4 + hash01(`stq${st}`) * 0.24, 0.95, 0.6);
+      // 堆内正交基: u = 囊池长轴走向, m = 层叠法向
+      const az = hash01(`sta${st}`) * Math.PI * 2;
+      const el = (hash01(`ste${st}`) - 0.5) * 1.5;
+      const u = new THREE.Vector3(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az));
+      const m = new THREE.Vector3().crossVectors(u, new THREE.Vector3(0, 1, 0));
+      if (m.lengthSq() < 1e-4) m.set(1, 0, 0);
+      m.normalize().multiplyScalar(0.145);
+      const layerN = perf ? 2 : 3;
+      for (let L = 0; L < layerN; L++) {
+        const center = new THREE.Vector3(anchor.x + m.x * L, anchor.y + m.y * L, anchor.z + m.z * L);
+        const pts: THREE.Vector3[] = [];
+        const len = 2.3 + hash01(`stl${st}${L}`) * 0.7;
+        for (let k = 0; k <= 8; k++) {
+          const t = k / 8;
+          const bend = Math.sin(t * Math.PI * 1.35 + L * 1.1 + st) * 0.2;
+          const side = new THREE.Vector3().crossVectors(u, m).normalize().multiplyScalar(bend);
+          pts.push(new THREE.Vector3(
+            center.x + u.x * (t - 0.5) * len + side.x,
+            center.y + u.y * (t - 0.5) * len + side.y,
+            center.z + u.z * (t - 0.5) * len + side.z,
+          ));
+        }
+        const curve = new THREE.CatmullRomCurve3(pts);
+        const frames = cisternaFrames(curve, perf ? 12 : 18, new THREE.Vector3(anchor.x, anchor.y, anchor.z));
+        parts.push({ geo: track(flatCisternaGeometry(frames, 0.72, 0.08, 10)) });
+        // 外周堆核糖体满铺（密度略低于核旁堆）
+        const wFrac2 = [-0.55, 0, 0.55];
+        for (let i = 1; i < frames.length - 1; i += perf ? 2 : 1) {
+          const { p, n, b } = frames[i];
+          for (const f of wFrac2) {
+            for (const face of [1, -1]) {
+              allRiboPts.push(new THREE.Vector3(
+                p.x + n.x * face * 0.062 + b.x * f * 0.34,
+                p.y + n.y * face * 0.062 + b.y * f * 0.34,
+                p.z + n.z * face * 0.062 + b.z * f * 0.34,
+              ));
+            }
+          }
+        }
+      }
+    }
     const er = new THREE.Mesh(track(mergeGeoms(parts)), mat({
-      // v12 参照图: rER 石板蓝族（实测 93,99,104）
+      // v12 参照图: rER 石板蓝族（实测 93,99,104）; v13: 更锐高光（发表级囊池边缘亮线）
       color: REF.erSheet,
-      transmission: transOn ? 0.3 : 0,
-      thickness: 0.5,
-      roughness: 0.38,
+      transmission: transOn ? 0.34 : 0,
+      thickness: 0.42,
+      roughness: 0.24,
       normalMap: orgNormal,
-      normalScale: 0.35,
-      opacity: transOn ? 1 : 0.5,
+      normalScale: 0.4,
+      opacity: transOn ? 1 : 0.72,
       emissive: '#3a4a5c',
-      emissiveIntensity: 0.14,
-      clearcoat: 0.3,
+      emissiveIntensity: 0.16,
+      clearcoat: 0.55,
+      clearcoatRoughness: 0.16,
+      sheen: 0.42,
+      sheenColor: REF.sheen,
       flow: { color: '#74869c', strength: 0.16, scale: 0.8, speed: 0.07, rim: 0.18 },
     }));
     er.renderOrder = 46;
     group.add(er);
-    // 膜旁核糖体（胞质面两排）
-    const riboPts: THREE.Vector3[] = [];
-    for (const curve of sheetCurves) {
-      const n = Math.round(26 * q) + 6; // 两排密度提高（k % 2 偶数排分支保留）
-      for (let k = 0; k <= n; k++) {
-        const p = curve.getPoint(k / n);
-        riboPts.push(new THREE.Vector3(p.x, p.y + 0.15, p.z));
-        if (k % 2 === 0) riboPts.push(new THREE.Vector3(p.x, p.y - 0.13, p.z));
-      }
-    }
-    const ribos = new THREE.InstancedMesh(ribosomeGeo, ribosomeMat, riboPts.length);
+    // 满铺膜旁核糖体（单 InstancedMesh —— 核旁堆 + 外周堆全部点彩）
+    const ribos = new THREE.InstancedMesh(ribosomeGeo, ribosomeMat, allRiboPts.length);
     {
       const mm = new THREE.Matrix4();
       const qq = new THREE.Quaternion();
       const eu = new THREE.Euler();
-      riboPts.forEach((p, i) => {
-        const s = 0.75 + hash01(`rb${i}`) * 0.5;
+      allRiboPts.forEach((p, i) => {
+        const s = 0.95 + hash01(`rb${i}`) * 0.6;
         // 亚基分裂面随机朝向（哑铃形核糖体取向自然化）
         eu.set(hash01(`rbe${i}`) * Math.PI, hash01(`rbe${i}`, 3) * Math.PI * 2, (hash01(`rbe${i}`, 5) - 0.5) * 0.8);
         qq.setFromEuler(eu);
@@ -972,7 +1127,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     }
     group.add(ribos);
     if (sheets) {
-      const p = nucPoint(new THREE.Vector3(Math.cos(-0.62) * Math.cos(1.4), Math.sin(-0.62), Math.cos(-0.62) * Math.sin(1.4)), 1.1);
+      const p = nucPoint(new THREE.Vector3(Math.cos(-0.62) * Math.cos(1.4), Math.sin(-0.62), Math.cos(-0.62) * Math.sin(1.4)), 1.15);
       labels.push({ pos: { x: p.x, y: p.y + 0.75, z: p.z }, zh: '粗面内质网（核糖体）', latin: 'Rough ER' });
     }
   }
