@@ -378,6 +378,20 @@ export function step(ctx: StepContext): void {
       const drive = Math.max(0, INTRINSIC_DRIVE - neg);
       if (drive > 0) da += ON_RATE * drive * (1 - st.activity) * 0.1;
     }
+    /* 自噬闸门基序（ULK1 特化）: mTORC1 组成性抑制 ULK1（Ser758）—— 静息态氨基酸
+     * 感知维持基础抑制（0.5 基线, 生长因子激活时全量抑制）; ULK1 内在自磷酸化能力
+     * （0.85）被闸门压制。抑制解除（雷帕霉素阻断 MTOR 输出 / AMPK 压制）→ 去抑制
+     * 驱动显现 → 自噬启动（3D 自噬流演示信号源）。AMPK 通路另经支架边直接磷酸化 ULK1。 */
+    if (n.id.split('#')[0].toUpperCase() === 'ULK1') {
+      const mtorNode = nodeById.get('MTOR') ?? [...nodeById.values()].find((m) => m.id.split('#')[0].toUpperCase() === 'MTOR');
+      if (mtorNode) {
+        const mtorSt = states[mtorNode.id];
+        const mtorInh = ctx.inhibition?.[mtorNode.id] ?? 0;
+        const mtorGate = Math.max(mtorSt?.activity ?? 0, 0.5) * 1.7 * (1 - mtorInh);
+        const drive = Math.max(0, 0.85 - mtorGate);
+        if (drive > 0) da += ON_RATE * drive * (1 - st.activity) * 0.1;
+      }
+    }
     // 基础泄漏（突变表型：即使无输入也缓慢自发活化）
     st.activity = clamp(st.activity + da, 0, 1);
 

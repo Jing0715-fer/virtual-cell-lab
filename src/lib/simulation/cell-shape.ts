@@ -201,24 +201,58 @@ export const NUCLEUS_EXTENT: Record<ShapeKind, readonly [number, number, number]
   amoeboid: [1.14, 1.05, 1.1],
 };
 
-/** 射线-核椭球占用边界：从细胞中心沿单位方向 dir 的核占据远交点距离（未命中返回 0）。
+/** 射线-核占用边界：从细胞中心沿单位方向 dir 的核占据远交点距离（未命中返回 0）。
+ *  v8: 多核并集 —— 双核肝细胞的射线取两核远交点最大值（体内采样同时避开双核）。
  *  体内采样的"避开细胞核"基准（分叶幅度小, 近似平滑椭球 + 消费方加 pad） */
 export function nucleusRayExit(d: Dir3, kind: ShapeKind, N: number, R: number): number {
   const l = Math.hypot(d.x, d.y, d.z) || 1;
   const dx = d.x / l, dy = d.y / l, dz = d.z / l;
   const f = NUCLEUS_FORM[kind];
-  const cx = f.offset[0] * R, cy = f.offset[1] * R, cz = f.offset[2] * R;
-  const ax = f.axes[0] * N, ay = f.axes[1] * N, az = f.axes[2] * N;
-  const A = (dx / ax) ** 2 + (dy / ay) ** 2 + (dz / az) ** 2;
-  if (A <= 0) return 0;
-  const B = -2 * (dx * cx / (ax * ax) + dy * cy / (ay * ay) + dz * cz / (az * az));
-  const C = (cx / ax) ** 2 + (cy / ay) ** 2 + (cz / az) ** 2 - 1;
-  const D = B * B - 4 * A * C;
-  if (D < 0) return 0;
-  return Math.max(0, (-B + Math.sqrt(D)) / (2 * A));
+  let farthest = 0;
+  for (const inst of nucleusInstances(kind, R)) {
+    const cx = inst.center.x, cy = inst.center.y, cz = inst.center.z;
+    const ax = f.axes[0] * N * inst.scale, ay = f.axes[1] * N * inst.scale, az = f.axes[2] * N * inst.scale;
+    const A = (dx / ax) ** 2 + (dy / ay) ** 2 + (dz / az) ** 2;
+    if (A <= 0) continue;
+    const B = -2 * (dx * cx / (ax * ax) + dy * cy / (ay * ay) + dz * cz / (az * az));
+    const C = (cx / ax) ** 2 + (cy / ay) ** 2 + (cz / az) ** 2 - 1;
+    const D = B * B - 4 * A * C;
+    if (D < 0) continue;
+    farthest = Math.max(farthest, Math.max(0, (-B + Math.sqrt(D)) / (2 * A)));
+  }
+  return farthest;
 }
 
-/* ============ 形状查询工具（特化结构精确贴膜布局用） ============ */
+/* ============ 多核布局体系（v8 —— 肝细胞双核等真实多核表型的唯一真源） ============ */
+
+/** 核实例：中心（细胞局部系）+ 缩放（相对 nucleusR） */
+export interface NucleusInstance {
+  center: Dir3;
+  scale: number;
+  /** 实例标签（染色质/核仁种子用, 双核各自形态独立） */
+  tag: string;
+}
+
+/** 多核实例列表（1–2 个）。
+ *  肝细胞（polyhedral）: 双核 —— 真实肝板 ~25% 肝细胞为双核（Ross Histology）,
+ *    两核沿长轴对置、等大略缩（0.82×）, 各含 1 个明显核仁 —— 与 nucleusNote 数据一致。
+ *  其余类型单核（NUCLEUS_FORM.offset 偏移不变）。 */
+export function nucleusInstances(kind: ShapeKind, R: number): NucleusInstance[] {
+  if (kind === 'polyhedral') {
+    const o = NUCLEUS_FORM[kind].offset;
+    return [
+      { center: { x: (o[0] - 0.36) * R, y: o[1] * R, z: o[2] * R }, scale: 0.82, tag: 'A' },
+      { center: { x: (o[0] + 0.36) * R, y: o[1] * R, z: o[2] * R }, scale: 0.82, tag: 'B' },
+    ];
+  }
+  const c = nucleusCenter(kind, R);
+  return [{ center: c, scale: 1, tag: 'A' }];
+}
+
+/** 单核实例快捷入口（向后兼容: 主核 = 实例列表首项） */
+export function primaryNucleus(kind: ShapeKind, R: number): NucleusInstance {
+  return nucleusInstances(kind, R)[0];
+}
 
 /** 点是否在基础形状体内（不含 FBM 噪声; 消费方各自留内缩裕量 ≥ 噪声幅度） */
 export function insideShape(p: Dir3, kind: ShapeKind, R: number): boolean {

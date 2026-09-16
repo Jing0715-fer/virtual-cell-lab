@@ -29,7 +29,7 @@ import { EdgeLayer } from './signal-edges';
 import { MrnaFlow } from './mrna-flow';
 import { EventPulses } from './event-pulses';
 import { SectionClipController, SECTION_ORIENTS, AXIS_N, type SectionAxis } from './section-view';
-import { NUCLEUS_EXTENT, SHAPE_EXTENT, nucleusCenter, type ShapeKind } from '@/lib/simulation/cell-shape';
+import { NUCLEUS_EXTENT, SHAPE_EXTENT, nucleusInstances, type ShapeKind } from '@/lib/simulation/cell-shape';
 import { useLang } from '@/lib/i18n';
 
 type CamMode = 'free' | 'overview' | 'membrane' | 'nucleus' | 'follow' | 'tour';
@@ -138,12 +138,23 @@ function CameraRig({ mode, layout, spec, controlsRef, tourTarget }: {
     modeSince.current = performance.now();
     if (mode === 'overview') desired.current = { target: new THREE.Vector3(0, 0, 0), dist: spec.viewDist, dir: new THREE.Vector3(0, 0.33, 0.94) };
     else if (mode === 'nucleus') {
-      // v6: 核机位对准成形核中心（上皮基底核等偏移核不再脱靶）; 距离随核最大半轴自适应
-      const nc = nucleusCenter(spec.shape, spec.membraneR);
-      const nucMax = spec.nucleusR * Math.max(...(NUCLEUS_EXTENT[spec.shape] ?? NUCLEUS_EXTENT.sphere));
+      // v8: 核机位覆盖全部核实例（肝细胞双核取中点, 距离含两核外延）; 单核行为不变
+      const insts = nucleusInstances(spec.shape, spec.membraneR);
+      const ext = NUCLEUS_EXTENT[spec.shape] ?? NUCLEUS_EXTENT.sphere;
+      const mid = { x: 0, y: 0, z: 0 };
+      let nucReach = 0;
+      for (const nu of insts) {
+        mid.x += nu.center.x / insts.length;
+        mid.y += nu.center.y / insts.length;
+        mid.z += nu.center.z / insts.length;
+        nucReach = Math.max(
+          nucReach,
+          Math.hypot(nu.center.x, nu.center.y, nu.center.z) + spec.nucleusR * nu.scale * Math.max(...ext),
+        );
+      }
       desired.current = {
-        target: new THREE.Vector3(nc.x, nc.y, nc.z),
-        dist: Math.max(3.4, nucMax * 2.35),
+        target: new THREE.Vector3(mid.x, mid.y, mid.z),
+        dist: Math.max(3.4, nucReach * 2.35),
         dir: new THREE.Vector3(0.35, 0.25, 0.9),
       };
     }
@@ -264,7 +275,8 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, sim, snapPlane }:
 
   return (
     <group>
-      <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} />
+      {/* 剖面贴附模式: 核内部标注让位（核盘自带剖面标注）—— 消除核区标签互叠 */}
+      <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} compactNucleusLabels={!!snapPlane} />
       <EdgeLayer edges={layout.edges} sim={sim} />
       <MoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />
       {/* 激酶抑制剂 3D 药物分子（球棍模型，结合靶点） */}

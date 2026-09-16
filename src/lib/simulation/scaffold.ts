@@ -65,6 +65,15 @@ export const SCAFFOLD_EDGES: Record<string, ScaffoldSpec[]> = {
     { source: 'SMPD1', target: 'cpd:C00195', kind: 'activation' },
     { source: 'SMPD2', target: 'cpd:C00195', kind: 'activation' },
   ],
+  hsa04150: [
+    // AMPK 直接磷酸化 ULK1 Ser317/Ser777 启动自噬（Alberts MBoC 教科书级直接调控;
+    // KEGG 仅绘制 PRKAA ⊣ MTOR ⊣ ULK1 双负链，缺直接边 —— 3D 自噬流演示与策划注释依赖此边）
+    { source: 'PRKAA1', target: 'ULK1', kind: 'phosphorylation' },
+  ],
+  hsa04152: [
+    // 同 hsa04150: AMPK → ULK1 Ser317/Ser777 直接磷酸化（能量匮乏 → 自噬启动的正向相量）
+    { source: 'PRKAA1', target: 'ULK1', kind: 'phosphorylation' },
+  ],
 };
 
 /** 为核心子图附加支架边（返回新数组，不修改原图） */

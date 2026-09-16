@@ -1154,3 +1154,42 @@ Stage Summary:
 - 产出: section-view.tsx(v3 重写 ~850 行) / cell-shape.ts(形状 v7 + 3 求解器 + extent 重标) / organelles.tsx(5 处特化结构贴膜化) / scripts/verify-section-contour.ts + verify-cell-shape.ts + qa-silhouette.ts(新 QA 工具)
 - 遗留/风险: ①贴面模式核区标签互叠（Task 25 遗留）②SimEvent 双语化/PDF EN（Task 22 遗留）③掠射薄月牙(<1.4 单位)轮廓豁免——亚像素级不可感知 ④SwiftShader 环境 GPU 帧率无法实测（新增几何均为一次性构建, 帧内零成本）
 - 下阶段建议: ①肝细胞双核 ②贴面核区标签 force-simulate 防重叠 ③溶酶体自噬演示（mTOR 抑制→自噬体融合）④hero 图换 3D 视图截图
+
+---
+Task ID: 32
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户需求——"沙箱又被重置了，从GitHub拉取最新代码，并继续打磨整个项目，尤其是3d演示部分"——环境恢复 + 3D 演示三项精进（肝细胞双核 / ULK1 驱动自噬流 / 贴面模式标签防重叠）
+
+Work Log:
+- 【环境恢复】git fetch + reset --hard origin/main（本地与远端源码逐字节一致仅 hash 漂移）; dev server 后台重启; 基线 QA（页面/Hero/实验台/全屏 3D/肝细胞 18 标签）全绿
+- 【3D 精进 A：肝细胞双核（binucleation）】
+  · cell-shape.ts v8: 新增 NucleusInstance 体系 —— nucleusInstances() 返回多核实例列表（polyhedral 双核 ±0.36R 对置, scale 0.82, 各含独立 tag/FBM 种子）; nucleusRayExit() 重写为多核并集语义（射线远交点 = max over 实例）—— organelles 的 insidePos 与 layout3d 分子避核自动同时避开双核（零消费方改动）
+  · organelles.tsx: 核渲染重构为多核循环 —— 每核独立包膜三层（外膜/内膜/核质）+ NPC 四部件 + 胞质丝 + 异染色质 + 常染色质 + 核仁（r0 × nucInst.scale）; 双核各自 FBM 种子（7/23）与 hash 标签后缀（形态互异）; 主核承载全部既有标注 + 新增"双核 ×2（约 25% 肝细胞）"教学标注（双核中点上方）
+  · section-view.tsx: 剖面核盘多核化 —— nucleiList 稳定元组 + 每核独立 fan 几何/求交/渐入渐出; 标注锚点取最大可见盘
+  · virtual-cell-3d.tsx: 核机位 v8 —— 目标 = 多核中点, 距离覆盖 max(|center| + N×scale×extent)（双核全景不裁边）
+  · mrna-flow.tsx: 核孔穿越点取离基因最近核实例（双核各自出核）
+- 【3D 精进 B：自噬流（ULK1 驱动 —— mTOR/AMPK 通路教学核心动态）】
+  · 根因发现: KEGG hsa04150/04152 子图中 ULK1 唯一入边是 MTOR ⊣ ULK1, PRKAA1→ULK1 直接磷酸化边缺失（KGML 仅绘制双负链）→ ULK1 无正向输入永不激活
+  · scaffold.ts: hsa04150 + hsa04152 各补 PRKAA1→ULK1 phosphorylation 支架边（AMPK 磷酸化 ULK1 Ser317/Ser777 —— Alberts MBoC 教科书级直接调控, 策划注释本已存在）
+  · engine.ts: 自噬闸门基序（ULK1 特化）—— mTORC1 组成性抑制（静息氨基酸感知 0.5 基线 + 实际活性取大 × inhibition 权重）; ULK1 内在自磷酸化驱动力 0.85 被闸门压制; 雷帕霉素阻断 MTOR 输出（药物门控 1-inh）→ 闸门解除 → 去抑制驱动 → 自噬启动
+  · organelles.tsx: 自噬流粒子系统 —— 5 粒子池（perf 3）× 四相生命周期: ①隔离膜碗（开口球几何 phiLength 1.42π 旋转延伸）②封闭双膜自噬体 + LC3-II 鲜绿斑点（14 实例贴外膜）③贝塞尔弧线运输至溶酶体（布朗晃动）④融合（琥珀闪光膨胀 + 货物降解淡出）; 货物交替受损线粒体（线粒体自噬 mtStripe 嵌纹）/蛋白聚集体（6 球簇）; update(t, ulk1) 签名扩展, CellBody useFrame 帧读 store 快照传驱动水平; 孵化节拍 2.3 level·s, 阈值 0.45
+  · autophagy.ts 新文件: autophagyLevel()（ULK1 家族 # 合并后缀前缀匹配最大活性）+ 可见阈值常量; CellBody 布尔选择器（仅阈值跨越时重渲染）
+  · AnatomyLabel.when='autophagy' 条件标注: "自噬体（ULK1 启动）"仅激活时显示
+- 【3D 精进 C：贴面模式标签防重叠（Task 25 遗留）】CellBody 新增 compactNucleusLabels prop —— 剖面贴附模式（sectionSnap 默认 true）下隐藏核内部三标注（核仁/异染色质/核孔复合体; 核盘自带"细胞核（剖面）"标注）, 贴面核区标签密度最高的互叠直接消除
+- 【数值验证】scripts/verify-binucleate.ts 新增: 双核实例数=2 / 全部轴探针（含 FBM 裕量）体内 / 双核间隙 0.476 单位 / nucleusRayExit +x = 远核远交点（含 y 偏移椭球斜距解析对拍 6.956）/ +y 双未命中清零 / 其余 6 类型单核不变 / +x 胞质采样带 1.79 单位 —— 全绿
+- QA（agent-browser 端到端, 1280×800）:
+  · 双核: 肝细胞 19 标签含"双核 ×2（约 25% 肝细胞）"; readPixels 玫瑰色核像素双簇完美对称（左 94/右 95, 质心 485/726 相距 241px, 跨度 478px）
+  · 剖面双核盘: 贴面模式紫像素 512 双簇（左 253/右 259, 质心 506/731 相距 225px）—— 冠状剖面两个独立核盘
+  · 自噬流场景 1（AMPK 通路 + ADRA1A 注射 + 4×）: PRKAA1 激活 → ULK1 激活+磷酸化 → 自噬体标注出现 + LC3 鲜绿斑点 34px 簇 + 琥珀融合闪光 15px
+  · 自噬流场景 2（mTOR 通路 + IGF1）: MTOR+S6K 磷酸化激活, ULK1 正确静默（营养充足自噬抑制）→ 加雷帕霉素 → MTOR 输出被阻（活性留存 ✓ 药物门控语义）→ ULK1 去抑制升起 → LC3 223px + 闪光 53px（大量自噬体活跃）
+  · 回归: 贴面关→19 标签全恢复（核仁/异染色质/核孔回归）/ 分子点击选中 DUSP1 + 档案面板 ✓ / 播放级联 阶段 3/4 ✓ / 神经元 15 标签（贴面默认 -3 内部）含突触扣结+髓鞘, 无双核 ✓ / 无 ULK1 通路自噬标签恒隐 ✓ / console 零新错误（HMR Context Lost 瞬时自愈）/ 画布 nonBlack 0.471 渲染正常
+  · lint 零错误; tsc 项目文件零错误（历史遗留不计）
+- 环境备注: dev server 一次 OOM 崩溃（tsc+eslint+browser 并发）→ 后台重启恢复; agent-browser viewport 命令为 `set viewport w h`
+
+Stage Summary:
+- 3D 演示三项精进全部落地并端到端验证: ①肝细胞双核（多核实例体系 v8 —— 从球形单核到真实肝板双核表型, 数值验证+像素双簇双重确认）②自噬流（引擎自噬闸门 + 支架边 + 3D 四相粒子系统 —— 雷帕霉素/AMPK 双触发路径均验证, mTOR 通路经典"抑制 mTOR → 诱导自噬"故事完整可演示）③贴面核区标签防重叠（Task 25 遗留清偿）
+- 科学性: 双核 ~25% 肝细胞（Ross Histology）/ AMPK→ULK1 Ser317/Ser777 直接磷酸化（Alberts MBoC）/ mTORC1 Ser758 组成性抑制闸门 / LC3-II 膜标志 / 线粒体自噬 vs 大自噬货物分型 —— 全部有教材与策划注释支撑
+- 架构沉淀: nucleusInstances() 成为多核真源（organelles/section-view/virtual-cell-3d/mrna-flow 四处消费）; nucleusRayExit 多核并集语义让所有避核采样零改动升级; AnatomyLabel.when 条件标注机制可扩展其他事件驱动标注; build.update(t, ulk1) 帧驱动参数化打开引擎状态→3D 动画直通管道
+- 产出: cell-shape.ts(多核体系+并集射线) / organelles.tsx(双核循环重构+自噬流粒子系统+条件标注+贴面防叠) / section-view.tsx(多核核盘) / virtual-cell-3d.tsx(核机位+贴面传参) / mrna-flow.tsx(最近核出核) / engine.ts(自噬闸门基序) / scaffold.ts(2 条 AMPK→ULK1 支架边) / autophagy.ts(新) / scripts/verify-binucleate.ts(新)
+- 遗留/风险: ①SimEvent 双语化/PDF EN（Task 22 遗留未变）②贴面模式下核区"分子标签"仍可能与核盘标注轻叠（本次消除的是解剖标注侧; 分子标签 force-simulate 仍为可选增强）③SwiftShader GPU 帧率无法实测（自噬几何一次性构建, 帧内仅变换更新）④390px 真机断点未复测
+- 下阶段建议: ①mTOR 教学引导增加"雷帕霉素→自噬"站点（引导用户投药观察自噬流）②过氧化物酶体自噬（pexophagy）与线粒体自噬（mitophagy, PINK1/Parkin）特化货物叙事 ③肝细胞核多倍体（4N/8N 多倍体核型）④TFEB 自噬-溶酶体转录正反馈（核内 TFEB 激活时自噬体/溶酶体增量生成）

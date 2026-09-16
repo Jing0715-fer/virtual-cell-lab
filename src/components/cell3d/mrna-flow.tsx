@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import type { Node3D, CellBodySpec } from '@/lib/simulation/layout3d';
-import { nucleusCenter, nucleusRadius } from '@/lib/simulation/cell-shape';
+import { nucleusInstances, nucleusRadius } from '@/lib/simulation/cell-shape';
 import { useLabStore } from '@/store/lab-store';
 
 interface MrnaParticle {
@@ -65,10 +65,17 @@ export function MrnaFlow({ nodes, spec }: { nodes: Node3D[]; spec: CellBodySpec 
         const p = particles.find((x) => !x.active);
         if (!p) continue;
         const from = new THREE.Vector3(gene.pos.x, gene.pos.y, gene.pos.z);
-        // v6: 核孔穿越点按成形核面（含核中心偏移; 杆状核沿长轴外推更远）
-        const nucC = nucleusCenter(spec.shape, spec.membraneR);
-        const outDir = from.clone().sub(new THREE.Vector3(nucC.x, nucC.y, nucC.z)).normalize();
-        const poreR = nucleusRadius(outDir, spec.shape, spec.nucleusR) + 0.3;
+        // v8: 核孔穿越点取离基因最近的核实例（肝细胞双核各自出核; 单核行为不变）
+        const insts = nucleusInstances(spec.shape, spec.membraneR);
+        let bestN = insts[0];
+        let bestD = Infinity;
+        for (const nu of insts) {
+          const dd = (gene.pos.x - nu.center.x) ** 2 + (gene.pos.y - nu.center.y) ** 2 + (gene.pos.z - nu.center.z) ** 2;
+          if (dd < bestD) { bestD = dd; bestN = nu; }
+        }
+        const nucC = new THREE.Vector3(bestN.center.x, bestN.center.y, bestN.center.z);
+        const outDir = from.clone().sub(nucC).normalize();
+        const poreR = nucleusRadius(outDir, spec.shape, spec.nucleusR * bestN.scale) + 0.3;
         const pore = new THREE.Vector3(nucC.x, nucC.y, nucC.z).addScaledVector(outDir, poreR);
         // 胞质终点: 沿同方向推至 ER 区带（核被膜外 ~0.6 单位）, 加确定性偏移
         const to = new THREE.Vector3(nucC.x, nucC.y, nucC.z)

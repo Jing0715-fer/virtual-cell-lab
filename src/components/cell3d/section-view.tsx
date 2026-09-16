@@ -31,7 +31,7 @@ import type { CellBodySpec } from '@/lib/simulation/layout3d';
 import {
   SHAPE_EXTENT,
   SHAPE_NOISE,
-  nucleusCenter,
+  nucleusInstances,
   nucleusRadius,
   shapeRadius,
 } from '@/lib/simulation/cell-shape';
@@ -553,11 +553,11 @@ export function SectionClipController({
   // 类型化形状轴向延伸（法向轴有效半径 Rn = 剖切扫描范围）
   const extent = SHAPE_EXTENT[shape] ?? SHAPE_EXTENT.sphere;
   const Rn = R * extent[AXIS_N[axis]];
-  // 核中心偏移（稳定元组 —— 避免 effect 依赖每渲染变身份引发重算循环）
-  const nucC = useMemo(() => {
-    const c = nucleusCenter(shape, R);
-    return [c.x, c.y, c.z] as const;
-  }, [shape, R]);
+  // 核实例（v8: 肝细胞双核 —— 每核独立剖面核盘; 稳定元组避免 effect 依赖身份漂移）
+  const nucleiList = useMemo(
+    () => nucleusInstances(shape, R).map((nu) => ({ cx: nu.center.x, cy: nu.center.y, cz: nu.center.z, scale: nu.scale }) as const),
+    [shape, R],
+  );
 
   const plane = useMemo(() => new THREE.Plane(SECTION_ORIENTS.front.normal.clone(), R * 0.35), []);
   const targetNormal = useRef(plane.normal.clone());
@@ -566,7 +566,7 @@ export function SectionClipController({
   const discGroupRef = useRef<THREE.Group | null>(null);
   const cytoDiscRef = useRef<THREE.Mesh | null>(null);
   const cytoRingRef = useRef<THREE.Mesh | null>(null);
-  const nucDiscRef = useRef<THREE.Mesh | null>(null);
+  const nucDiscRefs = useRef<(THREE.Mesh | null)[]>([]);
   const [ready, setReady] = useState(false);
   /** 剖面结构标注锚点（真实轮廓驱动; null = 未计算/盘隐藏） */
   const [annoState, setAnnoState] = useState<{
@@ -589,14 +589,14 @@ export function SectionClipController({
   /* v3 动态轮廓几何（预分配, 顶点原地改写 —— 深度/方位/细胞变化时重算, 无 GC churn） */
   const cytoFan = useMemo(() => makeFanGeometry(CYTO_S, 0), []);
   const cytoRibbon = useMemo(() => makeRibbonGeometry(CYTO_S, 0.001), []);
-  const nucFan = useMemo(() => makeFanGeometry(NUC_S, 0.008), []);
+  const nucFans = useMemo(() => nucleiList.map(() => makeFanGeometry(NUC_S, 0.008)), [nucleiList]);
   useEffect(
     () => () => {
       cytoFan.dispose();
       cytoRibbon.dispose();
-      nucFan.dispose();
+      for (const f of nucFans) f.dispose();
     },
-    [cytoFan, cytoRibbon, nucFan],
+    [cytoFan, cytoRibbon, nucFans],
   );
 
   /* 方位变化 → 目标法向（平滑过渡在 useFrame 中完成） */
@@ -661,37 +661,46 @@ export function SectionClipController({
     if (cytoDiscRef.current) cytoDiscRef.current.visible = discVisible;
     if (cytoRingRef.current) cytoRingRef.current.visible = discVisible;
 
-    // ---- 核轮廓（核径向 = nucleusFactor × N + 分叶 + FBM, 与 shapedNucleusGeometry 同源; 中心含偏移） ----
+    // ---- 核轮廓（核径向 = nucleusFactor × Nn + 分叶 + FBM, 与 shapedNucleusGeometry 同源; v8 多核每盘独立求交） ----
     const nucAmp = nucBumpy ? 0.24 : 0.07;
-    const nucCenter = new THREE.Vector3(nucC[0], nucC[1], nucC[2]);
-    const nucRadial = (ux: number, uy: number, uz: number): number =>
-      nucleusRadius({ x: ux, y: uy, z: uz }, shape, N) +
-      (fbm3(ux * 1.5, uy * 1.5, uz * 1.5, 3, 7) - 0.5) * 2 * nucAmp;
-    const rhosN = new Float64Array(NUC_S);
-    const maxRhoN = sampleSectionContour(
-      n, constant, nucCenter, nucRadial, N * 2.4, NUC_S, e1, e2, rhosN,
-    );
-    // 核中心在切平面内的投影 → 盘 local 坐标（e1/e2 分量; 与盘组四元数一致无镜像歧义）
-    const nFoot = nucCenter.clone().addScaledVector(
-      n, -(nucCenter.dot(n) + constant),
-    );
-    const nx = nFoot.x * e1.x + nFoot.y * e1.y + nFoot.z * e1.z;
-    const ny = nFoot.x * e2.x + nFoot.y * e2.y + nFoot.z * e2.z;
-    const npos = nucFan.attributes.position as THREE.BufferAttribute;
-    npos.setXYZ(0, nx, ny, 0.008);
-    for (let i = 0; i < NUC_S; i++) {
-      const a = (i / NUC_S) * Math.PI * 2;
-      const r = rhosN[i];
-      npos.setXYZ(i + 1, nx + r * Math.cos(a), ny + r * Math.sin(a), 0.008);
-    }
-    npos.needsUpdate = true;
-    nucFan.computeBoundingSphere();
+    let bestNuc: { nx: number; ny: number; maxRho: number } | null = null;
+    for (let ni = 0; ni < nucleiList.length; ni++) {
+      const nu = nucleiList[ni];
+      const nucCenter = new THREE.Vector3(nu.cx, nu.cy, nu.cz);
+      const Nn = N * nu.scale;
+      const nucRadial = (ux: number, uy: number, uz: number): number =>
+        nucleusRadius({ x: ux, y: uy, z: uz }, shape, Nn) +
+        (fbm3(ux * 1.5, uy * 1.5, uz * 1.5, 3, 7) - 0.5) * 2 * nucAmp;
+      const rhosN = new Float64Array(NUC_S);
+      const maxRhoN = sampleSectionContour(
+        n, constant, nucCenter, nucRadial, Nn * 2.4, NUC_S, e1, e2, rhosN,
+      );
+      // 核中心在切平面内的投影 → 盘 local 坐标（e1/e2 分量; 与盘组四元数一致无镜像歧义）
+      const nFoot = nucCenter.clone().addScaledVector(
+        n, -(nucCenter.dot(n) + constant),
+      );
+      const nx = nFoot.x * e1.x + nFoot.y * e1.y + nFoot.z * e1.z;
+      const ny = nFoot.x * e2.x + nFoot.y * e2.y + nFoot.z * e2.z;
+      const fan = nucFans[ni];
+      if (!fan) return;
+      const npos = fan.attributes.position as THREE.BufferAttribute;
+      npos.setXYZ(0, nx, ny, 0.008);
+      for (let i = 0; i < NUC_S; i++) {
+        const a = (i / NUC_S) * Math.PI * 2;
+        const r = rhosN[i];
+        npos.setXYZ(i + 1, nx + r * Math.cos(a), ny + r * Math.sin(a), 0.008);
+      }
+      npos.needsUpdate = true;
+      fan.computeBoundingSphere();
 
-    const nucVisible = maxRhoN > N * 0.1;
-    if (nucDiscRef.current) {
-      nucDiscRef.current.visible = nucVisible;
-      const m = nucDiscRef.current.material as THREE.MeshBasicMaterial;
-      m.opacity = Math.min(0.97, (maxRhoN / (N * 0.34)) * 0.97); // 切面掠核渐入
+      const nucVisible = maxRhoN > Nn * 0.1;
+      const disc = nucDiscRefs.current[ni];
+      if (disc) {
+        disc.visible = nucVisible;
+        const m = disc.material as THREE.MeshBasicMaterial;
+        m.opacity = Math.min(0.97, (maxRhoN / (Nn * 0.34)) * 0.97); // 切面掠核渐入
+      }
+      if (nucVisible && (!bestNuc || maxRhoN > bestNuc.maxRho)) bestNuc = { nx, ny, maxRho: maxRhoN };
     }
 
     // ---- 标注锚点（真实轮廓驱动） ----
@@ -706,12 +715,12 @@ export function SectionClipController({
       setAnnoState({
         mem: [mBase * Math.cos(mAng), mBase * Math.sin(mAng)],
         cyto: [rc * 0.55 * Math.cos(thC), rc * 0.55 * Math.sin(thC)],
-        nuc: nucVisible ? [nx, ny + maxRhoN * 0.55 + 0.1] : null,
+        nuc: bestNuc ? [bestNuc.nx, bestNuc.ny + bestNuc.maxRho * 0.55 + 0.1] : null,
       });
     } else {
       setAnnoState(null);
     }
-  }, [enabled, ready, depth, axis, Rn, R, N, shape, nucBumpy, nucC, cytoFan, cytoRibbon, nucFan]);
+  }, [enabled, ready, depth, axis, Rn, R, N, shape, nucBumpy, nucleiList, cytoFan, cytoRibbon, nucFans]);
 
   /* 开/关剖切: 全局裁剪平面挂载 + 结构材质临时双面化（记忆原 side 以还原） */
   useEffect(() => {
@@ -814,19 +823,28 @@ export function SectionClipController({
           <mesh ref={cytoRingRef} geometry={cytoRibbon} renderOrder={97} raycast={() => null} dispose={null}>
             <meshBasicMaterial color="#5eead4" transparent opacity={0.65} side={THREE.DoubleSide} depthWrite={false} fog={false} />
           </mesh>
-          {/* 核剖面盘（真实核相交轮廓; 纯视觉 —— 不参与拾取） */}
-          <mesh ref={nucDiscRef} geometry={nucFan} renderOrder={98} raycast={() => null} dispose={null}>
-            <meshBasicMaterial
-              map={nucTex}
-              transparent
-              opacity={0.97}
-              side={THREE.DoubleSide}
-              depthWrite={false}
-              fog={false}
-              polygonOffset
-              polygonOffsetFactor={-6}
-            />
-          </mesh>
+          {/* 核剖面盘（真实核相交轮廓; v8 多核每盘独立 —— 肝细胞双核切面双核盘; 纯视觉 —— 不参与拾取） */}
+          {nucleiList.map((_, ni) => (
+            <mesh
+              key={ni}
+              ref={(m) => { nucDiscRefs.current[ni] = m; }}
+              geometry={nucFans[ni]}
+              renderOrder={98}
+              raycast={() => null}
+              dispose={null}
+            >
+              <meshBasicMaterial
+                map={nucTex}
+                transparent
+                opacity={0.97}
+                side={THREE.DoubleSide}
+                depthWrite={false}
+                fog={false}
+                polygonOffset
+                polygonOffsetFactor={-6}
+              />
+            </mesh>
+          ))}
           {/* 剖面结构标注（锚定真实轮廓; 联动解剖标注开关） */}
           {showAnatomy &&
             annoState &&

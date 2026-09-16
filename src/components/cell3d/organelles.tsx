@@ -33,21 +33,26 @@ import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import type { CellBodySpec, Vec3 } from '@/lib/simulation/layout3d';
-import { NUCLEUS_FORM, SHAPE_NOISE, nucleusCenter, nucleusRadius, nucleusRayExit, shapeCrossRadius, shapeRadius, shapeXExtent, type ShapeKind } from '@/lib/simulation/cell-shape';
+import { NUCLEUS_FORM, SHAPE_NOISE, nucleusCenter, nucleusInstances, nucleusRadius, nucleusRayExit, shapeCrossRadius, shapeRadius, shapeXExtent, type ShapeKind } from '@/lib/simulation/cell-shape';
 import { displaceGeometry, fbm3, fibSphere, hash01, mergeGeoms, sph } from './procedural';
 import { glowSpriteTexture, organicNormalMap, roughnessMap, speckleNormalMap, stripeNormalMap } from './textures';
 import { createTimeUniform, glowMaterial, organelleMaterial, type TimeUniform } from './materials';
+import { autophagyLevel, AUTOPHAGY_VISIBLE_THRESHOLD } from '@/lib/simulation/autophagy';
+import { useLabStore } from '@/store/lab-store';
 import { useLang } from '@/lib/i18n';
 
 export interface AnatomyLabel {
   pos: Vec3;
   zh: string;
   latin: string;
+  /** 条件可见: 'autophagy' = 仅自噬流激活（ULK1 > 阈值）时显示 */
+  when?: 'autophagy';
 }
 
 export interface CellBodyBuild {
   group: THREE.Group;
-  update: (t: number) => void;
+  /** 帧驱动; ulk1 = 自噬驱动水平（0-1, 缺省 0 —— 无 ULK1 通路自噬系统静默） */
+  update: (t: number, ulk1?: number) => void;
   labels: AnatomyLabel[];
   dispose: () => void;
 }
@@ -399,229 +404,267 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     opacity: transOn ? 1 : 0.4,
     flow: { color: '#fb7185', strength: 0.12, scale: 0.5, speed: 0.04, rim: 0.3 },
   });
-  const nucOuterGeo = track(shapedNucleusGeometry(N, detail, SHAPE, NUC_FREQ, nucAmp, 7));
-  const nucOuter = new THREE.Mesh(nucOuterGeo, nucMat);
-  nucOuter.position.copy(nucC);
-  nucOuter.renderOrder = 50;
-  const nucInner = new THREE.Mesh(track(shapedNucleusGeometry(N, detail - 1, SHAPE, NUC_FREQ, nucAmp, 7, -0.22)), nucMat);
-  nucInner.position.copy(nucC);
-  nucInner.renderOrder = 50;
-  group.add(nucOuter, nucInner);
-
-  const nucleoplasm = new THREE.Mesh(
-    track(shapedNucleusGeometry(N, 3, SHAPE, NUC_FREQ, nucAmp, 7, -0.26)),
-    track(new THREE.MeshBasicMaterial({ color: '#881337', transparent: true, opacity: 0.12 * dim, depthWrite: false })),
-  );
-  nucleoplasm.position.copy(nucC);
-  nucleoplasm.renderOrder = 40;
-  group.add(nucleoplasm);
-
-  // 核孔复合体: 胞质环 + 核质环 + 中央栓 + 核篮（四部件共享实例矩阵）
-  const npcParts: THREE.InstancedMesh[] = [];
-  {
-    const npcMat = mat({
-      color: '#e2e8f0',
-      emissive: '#94a3b8',
-      emissiveIntensity: 0.32,
-      roughness: 0.35,
-      metalness: 0.1,
-      opacity: 0.92,
-    });
-    const cytoRing = track(new THREE.TorusGeometry(0.165, 0.05, 10, 24));
-    cytoRing.translate(0, 0, 0.13);
-    const nucRing = track(new THREE.TorusGeometry(0.15, 0.046, 10, 24));
-    nucRing.translate(0, 0, -0.13);
-    const plug = track(new THREE.CylinderGeometry(0.082, 0.082, 0.44, 12));
-    plug.rotateX(Math.PI / 2);
-    const basket = track(new THREE.ConeGeometry(0.1, 0.15, 12, 1, true));
-    basket.rotateX(Math.PI / 2);
-    basket.translate(0, 0, -0.24);
-    const geos = perf ? [cytoRing, nucRing, plug] : [cytoRing, nucRing, plug, basket];
-    const count = Math.round(60 * q) + 4;
-    const mm = new THREE.Matrix4();
-    const qq = new THREE.Quaternion();
-    const zAxis = new THREE.Vector3(0, 0, 1);
-    const dir = new THREE.Vector3();
-    const mats: THREE.Matrix4[] = [];
-    fibSphere(count, 1).forEach((p, i) => {
-      dir.set(p.x, p.y, p.z).normalize();
-      const r = nucSurf(dir, 0.02);
-      qq.setFromUnitVectors(zAxis, dir);
-      const s = (0.95 + hash01(`npc${i}`) * 0.25) * 1.15;
-      const m = new THREE.Matrix4().compose(new THREE.Vector3(nucC.x + dir.x * r, nucC.y + dir.y * r, nucC.z + dir.z * r), qq, new THREE.Vector3(s, s, s));
-      mats.push(m);
-    });
-    for (const g of geos) {
-      const inst = new THREE.InstancedMesh(g, npcMat, mats.length);
-      mats.forEach((m, i) => inst.setMatrixAt(i, m));
-      inst.instanceMatrix.needsUpdate = true;
-      inst.renderOrder = 55;
-      group.add(inst);
-      npcParts.push(inst);
-    }
-    // 胞质丝（NPC 胞质面 8 根柔性丝 —— 出核 mRNA/货物对接轨; 低端设备省略）
-    if (!perf) {
-      const filGeo = track(new THREE.CapsuleGeometry(0.011, 0.26, 3, 5));
-      const filMat = track(new THREE.MeshStandardMaterial({
-        color: '#cbd5e1',
-        emissive: '#64748b',
-        emissiveIntensity: 0.22 * dim,
-        transparent: true,
-        opacity: 0.5 * dim,
-        depthWrite: false,
-      }));
-      const filN = 8;
-      const fil = new THREE.InstancedMesh(filGeo, filMat, mats.length * filN);
-      const fm = new THREE.Matrix4();
-      const up = new THREE.Vector3(0, 1, 0);
-      let fi = 0;
-      mats.forEach((npcM, i) => {
-        for (let f = 0; f < filN; f++) {
-          const ang = (f / filN) * Math.PI * 2 + hash01(`nf${i}${f}`) * 0.6;
-          const tilt = 0.6 + hash01(`nft${i}${f}`) * 0.3; // ~34°-51° 外倾
-          const localDir = new THREE.Vector3(
-            Math.sin(tilt) * Math.cos(ang),
-            Math.sin(tilt) * Math.sin(ang),
-            Math.cos(tilt),
-          );
-          const fq = new THREE.Quaternion().setFromUnitVectors(up, localDir);
-          const local = new THREE.Matrix4().compose(
-            localDir.clone().multiplyScalar(0.3).add(new THREE.Vector3(0, 0, 0.12)),
-            fq,
-            new THREE.Vector3(1, 1, 1),
-          );
-          fm.multiplyMatrices(npcM, local);
-          fil.setMatrixAt(fi, fm);
-          fi++;
-        }
-      });
-      fil.instanceMatrix.needsUpdate = true;
-      fil.renderOrder = 54;
-      group.add(fil);
-    }
-  }
-  labels.push({ pos: nucPoint(new THREE.Vector3(Math.cos(0.35) * Math.cos(1.9), Math.sin(0.35), Math.cos(0.35) * Math.sin(1.9)), 0.42), zh: '核孔复合体', latin: 'Nuclear pore complex' });
-  {
-    const topP = nucPoint(new THREE.Vector3(0, 1, 0), 0.2);
-    labels.push({ pos: { x: topP.x, y: topP.y + 0.55, z: topP.z }, zh: '核被膜（双层）', latin: 'Nuclear envelope' });
-  }
-
-  /* ================= 染色质 + 核仁 ================= */
-  // 外周异染色质（致密, 贴内层核膜 —— 真实核型边集化）
-  const heteroGeo = track(new THREE.SphereGeometry(0.068, 7, 6));
-  const heteroMat = mat({ color: '#be3f68', emissive: '#9d174d', emissiveIntensity: 0.5, roughness: 0.6, opacity: 0.72 });
-  {
-    const clumps = Math.round(24 * q) + 6;
-    const beads: THREE.Matrix4[] = [];
-    const mm = new THREE.Matrix4();
-    const off = new THREE.Vector3();
-    for (let c = 0; c < clumps; c++) {
-      const lat = (hash01(`hc${c}`) - 0.5) * 2.6;
-      const lon = hash01(`hc${c}`, 3) * Math.PI * 2;
-      const cp = nucPoint(new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)), -0.34);
-      const beadsPer = 6 + Math.floor(hash01(`hc${c}`, 7) * 4);
-      for (let b = 0; b < beadsPer; b++) {
-        off.set(hash01(`hb${c}${b}`) - 0.5, hash01(`hb${c}${b}`, 3) - 0.5, hash01(`hb${c}${b}`, 5) - 0.5).normalize().multiplyScalar(0.09 + hash01(`hb${c}${b}`, 9) * 0.13);
-        const s = 0.7 + hash01(`hb${c}${b}`, 11) * 0.8;
-        mm.makeScale(s, s, s);
-        mm.setPosition(cp.x + off.x, cp.y + off.y, cp.z + off.z);
-        beads.push(mm.clone());
-      }
-    }
-    const inst = new THREE.InstancedMesh(heteroGeo, heteroMat, beads.length);
-    beads.forEach((m, i) => inst.setMatrixAt(i, m));
-    inst.instanceMatrix.needsUpdate = true;
-    inst.renderOrder = 48;
-    group.add(inst);
-  }
-
-  // 常染色质纤维（伸展活跃区）
-  {
-    const fibers = Math.round(16 * q) + 4;
-    const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
-    for (let i = 0; i < fibers; i++) {
-      const pts: THREE.Vector3[] = [];
-      const startDir = new THREE.Vector3(
-        Math.cos((hash01(`ec${i}`) - 0.5) * 2.4) * Math.cos(hash01(`ec${i}`, 3) * Math.PI * 2),
-        Math.sin((hash01(`ec${i}`) - 0.5) * 2.4),
-        Math.cos((hash01(`ec${i}`) - 0.5) * 2.4) * Math.sin(hash01(`ec${i}`, 3) * Math.PI * 2),
-      ).normalize();
-      const start = nucInnerPoint(startDir, 0.72);
-      for (let k = 0; k < 5; k++) {
-        const wDir = new THREE.Vector3(
-          Math.cos((hash01(`ec${i}${k}`, 3) - 0.5) * 2.6) * Math.cos(hash01(`ec${i}${k}`, 7) * Math.PI * 2),
-          Math.sin((hash01(`ec${i}${k}`, 3) - 0.5) * 2.6),
-          Math.cos((hash01(`ec${i}${k}`, 3) - 0.5) * 2.6) * Math.sin(hash01(`ec${i}${k}`, 7) * Math.PI * 2),
-        ).normalize();
-        const p = nucInnerPoint(wDir, 0.2 + hash01(`ec${i}${k}`) * 0.68);
-        pts.push(new THREE.Vector3(p.x, p.y, p.z));
-      }
-      pts[0].set(start.x, start.y, start.z);
-      const r = 0.03 + hash01(`ecr${i}`) * 0.022;
-      parts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 28, r, 6)) });
-    }
-    const euch = new THREE.Mesh(track(mergeGeoms(parts)), mat({
-      color: '#f9a8d4',
-      emissive: '#be185d',
-      emissiveIntensity: 0.28,
-      opacity: 0.34,
-      sheen: 0.5,
-      sheenColor: '#fbcfe8',
-    }));
-    euch.renderOrder = 42;
-    group.add(euch);
-  }
-
-  // 核仁: 纤维中心核心 + 颗粒组分外壳
+  /* ---- v8 多核循环: 肝细胞双核（每核独立包膜/核孔/染色质/核仁; 主核承载标注） ---- */
+  const nucleiInst = nucleusInstances(SHAPE, R);
   const nucleoli: THREE.Mesh[] = [];
   const nucleolusSpeckles: THREE.InstancedMesh[] = [];
-  for (let i = 0; i < spec.nucleolus.count; i++) {
-    const r0 = spec.nucleolus.r * (1 - i * 0.22);
-    // 核仁置于核内（v6: 随核形状/偏移; 杆状核内沿长轴展开）
-    const center = nucInnerPoint(
-      new THREE.Vector3(
-        Math.cos(i * 0.7 - 0.3) * Math.cos(i * 2.4 + 0.8),
-        Math.sin(i * 0.7 - 0.3),
-        Math.cos(i * 0.7 - 0.3) * Math.sin(i * 2.4 + 0.8),
-      ).normalize(),
-      0.34,
+  // 共享染色质资源（双核同材质/几何, 形态由各自种子决定）
+  const heteroGeo = track(new THREE.SphereGeometry(0.068, 7, 6));
+  const heteroMat = mat({ color: '#be3f68', emissive: '#9d174d', emissiveIntensity: 0.5, roughness: 0.6, opacity: 0.72 });
+  for (const nucInst of nucleiInst) {
+    const primary = nucInst.tag === 'A';
+    const tag = nucInst.tag;
+    const seed = primary ? 7 : 23; // 双核各自独立 FBM 形态
+    const nucCK = new THREE.Vector3(nucInst.center.x, nucInst.center.y, nucInst.center.z);
+    const Nn = N * nucInst.scale;
+    /** 该核面半径（含 FBM 局部起伏; ofs 正外负内） */
+    const nucSurfK = (dir: THREE.Vector3, ofs = 0): number => {
+      const d = dir.clone().normalize();
+      return nucleusRadius(d, SHAPE, Nn) + (fbm3(d.x * NUC_FREQ, d.y * NUC_FREQ, d.z * NUC_FREQ, 3, seed) - 0.5) * 2 * nucAmp + ofs;
+    };
+    /** 该核面上世界坐标点 */
+    const nucPointK = (dir: THREE.Vector3, ofs = 0): THREE.Vector3 => {
+      const d = dir.clone().normalize();
+      const r = Math.max(0.1, nucSurfK(d, ofs));
+      return new THREE.Vector3(nucCK.x + d.x * r, nucCK.y + d.y * r, nucCK.z + d.z * r);
+    };
+    /** 该核内世界坐标点（frac ∈ 0..核面, 沿 dir 自核中心） */
+    const nucInnerK = (dir: THREE.Vector3, frac: number): THREE.Vector3 => {
+      const d = dir.clone().normalize();
+      const r = Math.max(0.1, nucleusRadius(d, SHAPE, Nn) * Math.min(1, Math.max(0, frac)) - 0.25);
+      return new THREE.Vector3(nucCK.x + d.x * r, nucCK.y + d.y * r, nucCK.z + d.z * r);
+    };
+
+    const nucOuterGeo = track(shapedNucleusGeometry(Nn, detail, SHAPE, NUC_FREQ, nucAmp, seed));
+    const nucOuter = new THREE.Mesh(nucOuterGeo, nucMat);
+    nucOuter.position.copy(nucCK);
+    nucOuter.renderOrder = 50;
+    const nucInner = new THREE.Mesh(track(shapedNucleusGeometry(Nn, detail - 1, SHAPE, NUC_FREQ, nucAmp, seed, -0.22)), nucMat);
+    nucInner.position.copy(nucCK);
+    nucInner.renderOrder = 50;
+    group.add(nucOuter, nucInner);
+
+    const nucleoplasm = new THREE.Mesh(
+      track(shapedNucleusGeometry(Nn, 3, SHAPE, NUC_FREQ, nucAmp, seed, -0.26)),
+      track(new THREE.MeshBasicMaterial({ color: '#881337', transparent: true, opacity: 0.12 * dim, depthWrite: false })),
     );
-    const coreGeo = track(displacedSphere(r0, 3, 2.4, r0 * 0.09, 13));
-    const core = new THREE.Mesh(coreGeo, mat({
-      color: '#fb7185',
-      emissive: '#be123c',
-      emissiveIntensity: 0.55,
-      roughness: 0.55,
-      opacity: 0.9,
-      clearcoat: 0.25,
-    }));
-    core.position.set(center.x, center.y, center.z);
-    core.renderOrder = 45;
-    group.add(core);
-    nucleoli.push(core);
-    // 颗粒组分: 表面 RNA 颗粒
-    const spkGeo = track(new THREE.SphereGeometry(0.032, 5, 5));
-    const spkCount = Math.round(56 * q) + 8;
-    const spk = new THREE.InstancedMesh(spkGeo, mat({ color: '#fda4af', emissive: '#e11d48', emissiveIntensity: 0.4, opacity: 0.8 }), spkCount);
+    nucleoplasm.position.copy(nucCK);
+    nucleoplasm.renderOrder = 40;
+    group.add(nucleoplasm);
+
+    // 核孔复合体: 胞质环 + 核质环 + 中央栓 + 核篮（四部件共享实例矩阵）
     {
-      const mm = new THREE.Matrix4();
-      const dir = new THREE.Vector3();
-      fibSphere(spkCount, 1).forEach((p, k) => {
-        dir.set(p.x, p.y, p.z).normalize();
-        const rr = r0 * 1.22;
-        mm.makeScale(0.7 + hash01(`ns${i}${k}`) * 0.7, 0.7 + hash01(`ns${i}${k}`) * 0.7, 0.7 + hash01(`ns${i}${k}`) * 0.7);
-        mm.setPosition(center.x + dir.x * rr, center.y + dir.y * rr, center.z + dir.z * rr);
-        spk.setMatrixAt(k, mm);
+      const npcMat = mat({
+        color: '#e2e8f0',
+        emissive: '#94a3b8',
+        emissiveIntensity: 0.32,
+        roughness: 0.35,
+        metalness: 0.1,
+        opacity: 0.92,
       });
-      spk.instanceMatrix.needsUpdate = true;
-      spk.renderOrder = 46;
+      const cytoRing = track(new THREE.TorusGeometry(0.165, 0.05, 10, 24));
+      cytoRing.translate(0, 0, 0.13);
+      const nucRing = track(new THREE.TorusGeometry(0.15, 0.046, 10, 24));
+      nucRing.translate(0, 0, -0.13);
+      const plug = track(new THREE.CylinderGeometry(0.082, 0.082, 0.44, 12));
+      plug.rotateX(Math.PI / 2);
+      const basket = track(new THREE.ConeGeometry(0.1, 0.15, 12, 1, true));
+      basket.rotateX(Math.PI / 2);
+      basket.translate(0, 0, -0.24);
+      const geos = perf ? [cytoRing, nucRing, plug] : [cytoRing, nucRing, plug, basket];
+      const count = Math.round(60 * q) + 4;
+      const mm = new THREE.Matrix4();
+      const qq = new THREE.Quaternion();
+      const zAxis = new THREE.Vector3(0, 0, 1);
+      const dir = new THREE.Vector3();
+      const mats: THREE.Matrix4[] = [];
+      fibSphere(count, 1).forEach((p, i) => {
+        dir.set(p.x, p.y, p.z).normalize();
+        const r = nucSurfK(dir, 0.02);
+        qq.setFromUnitVectors(zAxis, dir);
+        const s = (0.95 + hash01(`npc${tag}${i}`) * 0.25) * 1.15;
+        const m = new THREE.Matrix4().compose(new THREE.Vector3(nucCK.x + dir.x * r, nucCK.y + dir.y * r, nucCK.z + dir.z * r), qq, new THREE.Vector3(s, s, s));
+        mats.push(m);
+      });
+      for (const g of geos) {
+        const inst = new THREE.InstancedMesh(g, npcMat, mats.length);
+        mats.forEach((m, i) => inst.setMatrixAt(i, m));
+        inst.instanceMatrix.needsUpdate = true;
+        inst.renderOrder = 55;
+        group.add(inst);
+      }
+      // 胞质丝（NPC 胞质面 8 根柔性丝 —— 出核 mRNA/货物对接轨; 低端设备省略）
+      if (!perf) {
+        const filGeo = track(new THREE.CapsuleGeometry(0.011, 0.26, 3, 5));
+        const filMat = track(new THREE.MeshStandardMaterial({
+          color: '#cbd5e1',
+          emissive: '#64748b',
+          emissiveIntensity: 0.22 * dim,
+          transparent: true,
+          opacity: 0.5 * dim,
+          depthWrite: false,
+        }));
+        const filN = 8;
+        const fil = new THREE.InstancedMesh(filGeo, filMat, mats.length * filN);
+        const fm = new THREE.Matrix4();
+        const up = new THREE.Vector3(0, 1, 0);
+        let fi = 0;
+        mats.forEach((npcM, i) => {
+          for (let f = 0; f < filN; f++) {
+            const ang = (f / filN) * Math.PI * 2 + hash01(`nf${tag}${i}${f}`) * 0.6;
+            const tilt = 0.6 + hash01(`nft${tag}${i}${f}`) * 0.3; // ~34°-51° 外倾
+            const localDir = new THREE.Vector3(
+              Math.sin(tilt) * Math.cos(ang),
+              Math.sin(tilt) * Math.sin(ang),
+              Math.cos(tilt),
+            );
+            const fq = new THREE.Quaternion().setFromUnitVectors(up, localDir);
+            const local = new THREE.Matrix4().compose(
+              localDir.clone().multiplyScalar(0.3).add(new THREE.Vector3(0, 0, 0.12)),
+              fq,
+              new THREE.Vector3(1, 1, 1),
+            );
+            fm.multiplyMatrices(npcM, local);
+            fil.setMatrixAt(fi, fm);
+            fi++;
+          }
+        });
+        fil.instanceMatrix.needsUpdate = true;
+        fil.renderOrder = 54;
+        group.add(fil);
+      }
     }
-    group.add(spk);
-    nucleolusSpeckles.push(spk);
+    if (primary) {
+      labels.push({ pos: nucPointK(new THREE.Vector3(Math.cos(0.35) * Math.cos(1.9), Math.sin(0.35), Math.cos(0.35) * Math.sin(1.9)), 0.42), zh: '核孔复合体', latin: 'Nuclear pore complex' });
+      const topP = nucPointK(new THREE.Vector3(0, 1, 0), 0.2);
+      labels.push({ pos: { x: topP.x, y: topP.y + 0.55, z: topP.z }, zh: '核被膜（双层）', latin: 'Nuclear envelope' });
+    }
+
+    // 外周异染色质（致密, 贴内层核膜 —— 真实核型边集化）
+    {
+      const clumps = Math.round(24 * q) + 6;
+      const beads: THREE.Matrix4[] = [];
+      const mm = new THREE.Matrix4();
+      const off = new THREE.Vector3();
+      for (let c = 0; c < clumps; c++) {
+        const lat = (hash01(`hc${tag}${c}`) - 0.5) * 2.6;
+        const lon = hash01(`hc${tag}${c}`, 3) * Math.PI * 2;
+        const cp = nucPointK(new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)), -0.34);
+        const beadsPer = 6 + Math.floor(hash01(`hc${tag}${c}`, 7) * 4);
+        for (let b = 0; b < beadsPer; b++) {
+          off.set(hash01(`hb${tag}${c}${b}`) - 0.5, hash01(`hb${tag}${c}${b}`, 3) - 0.5, hash01(`hb${tag}${c}${b}`, 5) - 0.5).normalize().multiplyScalar(0.09 + hash01(`hb${tag}${c}${b}`, 9) * 0.13);
+          const s = 0.7 + hash01(`hb${tag}${c}${b}`, 11) * 0.8;
+          mm.makeScale(s, s, s);
+          mm.setPosition(cp.x + off.x, cp.y + off.y, cp.z + off.z);
+          beads.push(mm.clone());
+        }
+      }
+      const inst = new THREE.InstancedMesh(heteroGeo, heteroMat, beads.length);
+      beads.forEach((m, i) => inst.setMatrixAt(i, m));
+      inst.instanceMatrix.needsUpdate = true;
+      inst.renderOrder = 48;
+      group.add(inst);
+    }
+
+    // 常染色质纤维（伸展活跃区）
+    {
+      const fibers = Math.round(16 * q) + 4;
+      const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
+      for (let i = 0; i < fibers; i++) {
+        const pts: THREE.Vector3[] = [];
+        const startDir = new THREE.Vector3(
+          Math.cos((hash01(`ec${tag}${i}`) - 0.5) * 2.4) * Math.cos(hash01(`ec${tag}${i}`, 3) * Math.PI * 2),
+          Math.sin((hash01(`ec${tag}${i}`) - 0.5) * 2.4),
+          Math.cos((hash01(`ec${tag}${i}`) - 0.5) * 2.4) * Math.sin(hash01(`ec${tag}${i}`, 3) * Math.PI * 2),
+        ).normalize();
+        const start = nucInnerK(startDir, 0.72);
+        for (let k = 0; k < 5; k++) {
+          const wDir = new THREE.Vector3(
+            Math.cos((hash01(`ec${tag}${i}${k}`, 3) - 0.5) * 2.6) * Math.cos(hash01(`ec${tag}${i}${k}`, 7) * Math.PI * 2),
+            Math.sin((hash01(`ec${tag}${i}${k}`, 3) - 0.5) * 2.6),
+            Math.cos((hash01(`ec${tag}${i}${k}`, 3) - 0.5) * 2.6) * Math.sin(hash01(`ec${tag}${i}${k}`, 7) * Math.PI * 2),
+          ).normalize();
+          const p = nucInnerK(wDir, 0.2 + hash01(`ec${tag}${i}${k}`) * 0.68);
+          pts.push(new THREE.Vector3(p.x, p.y, p.z));
+        }
+        pts[0].set(start.x, start.y, start.z);
+        const r = 0.03 + hash01(`ecr${tag}${i}`) * 0.022;
+        parts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 28, r, 6)) });
+      }
+      const euch = new THREE.Mesh(track(mergeGeoms(parts)), mat({
+        color: '#f9a8d4',
+        emissive: '#be185d',
+        emissiveIntensity: 0.28,
+        opacity: 0.34,
+        sheen: 0.5,
+        sheenColor: '#fbcfe8',
+      }));
+      euch.renderOrder = 42;
+      group.add(euch);
+    }
+
+    // 核仁: 纤维中心核心 + 颗粒组分外壳（v8: 每核独立 —— 肝细胞双核各含 1 个明显核仁）
+    const instNucleoli: THREE.Mesh[] = [];
+    for (let i = 0; i < spec.nucleolus.count; i++) {
+      const r0 = spec.nucleolus.r * nucInst.scale * (1 - i * 0.22);
+      // 核仁置于核内（v6: 随核形状/偏移; 杆状核内沿长轴展开）
+      const center = nucInnerK(
+        new THREE.Vector3(
+          Math.cos(i * 0.7 - 0.3) * Math.cos(i * 2.4 + 0.8),
+          Math.sin(i * 0.7 - 0.3),
+          Math.cos(i * 0.7 - 0.3) * Math.sin(i * 2.4 + 0.8),
+        ).normalize(),
+        0.34,
+      );
+      const coreGeo = track(displacedSphere(r0, 3, 2.4, r0 * 0.09, 13));
+      const core = new THREE.Mesh(coreGeo, mat({
+        color: '#fb7185',
+        emissive: '#be123c',
+        emissiveIntensity: 0.55,
+        roughness: 0.55,
+        opacity: 0.9,
+        clearcoat: 0.25,
+      }));
+      core.position.set(center.x, center.y, center.z);
+      core.renderOrder = 45;
+      group.add(core);
+      instNucleoli.push(core);
+      // 颗粒组分: 表面 RNA 颗粒
+      const spkGeo = track(new THREE.SphereGeometry(0.032, 5, 5));
+      const spkCount = Math.round(56 * q) + 8;
+      const spk = new THREE.InstancedMesh(spkGeo, mat({ color: '#fda4af', emissive: '#e11d48', emissiveIntensity: 0.4, opacity: 0.8 }), spkCount);
+      {
+        const mm = new THREE.Matrix4();
+        const dir = new THREE.Vector3();
+        fibSphere(spkCount, 1).forEach((p, k) => {
+          dir.set(p.x, p.y, p.z).normalize();
+          const rr = r0 * 1.22;
+          mm.makeScale(0.7 + hash01(`ns${tag}${i}${k}`) * 0.7, 0.7 + hash01(`ns${tag}${i}${k}`) * 0.7, 0.7 + hash01(`ns${tag}${i}${k}`) * 0.7);
+          mm.setPosition(center.x + dir.x * rr, center.y + dir.y * rr, center.z + dir.z * rr);
+          spk.setMatrixAt(k, mm);
+        });
+        spk.instanceMatrix.needsUpdate = true;
+        spk.renderOrder = 46;
+      }
+      group.add(spk);
+      nucleolusSpeckles.push(spk);
+    }
+    nucleoli.push(...instNucleoli);
+    if (primary && instNucleoli.length > 0) {
+      const n0 = instNucleoli[0].position;
+      labels.push({ pos: { x: n0.x + (n0.x - nucCK.x) * 0.7, y: n0.y + 0.62, z: n0.z }, zh: '核仁', latin: 'Nucleolus' });
+      labels.push({ pos: nucPointK(new THREE.Vector3(Math.cos(-1.0) * Math.cos(2.2), Math.sin(-1.0), Math.cos(-1.0) * Math.sin(2.2)), -0.1), zh: '异染色质（边集）', latin: 'Heterochromatin' });
+    }
   }
-  const n0 = nucleoli[0].position;
-  labels.push({ pos: { x: n0.x + (n0.x - nucC.x) * 0.7, y: n0.y + 0.62, z: n0.z }, zh: '核仁', latin: 'Nucleolus' });
-  labels.push({ pos: nucPoint(new THREE.Vector3(Math.cos(-1.0) * Math.cos(2.2), Math.sin(-1.0), Math.cos(-1.0) * Math.sin(2.2)), -0.1), zh: '异染色质（边集）', latin: 'Heterochromatin' });
+  // v8 双核教学标注（仅多核时添加 —— 真实肝板约 25% 肝细胞为双核）
+  if (nucleiInst.length > 1) {
+    const mid = {
+      x: (nucleiInst[0].center.x + nucleiInst[1].center.x) / 2,
+      y: (nucleiInst[0].center.y + nucleiInst[1].center.y) / 2,
+      z: (nucleiInst[0].center.z + nucleiInst[1].center.z) / 2,
+    };
+    labels.push({ pos: { x: mid.x, y: mid.y + N * 0.95, z: mid.z }, zh: '双核 ×2（约 25% 肝细胞）', latin: 'Binucleate (~25%)' });
+  }
 
   /* ================= 线粒体（双膜 + 板层嵴 + ATP 合酶） ================= */
   const mitos: { obj: THREE.Group; baseY: number; phase: number }[] = [];
@@ -1096,6 +1139,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   }
 
   /* ================= 溶酶体（酸性水解酶细胞器, pH≈4.5-5） ================= */
+  // 溶酶体中心锚点（自噬体融合目标; 提升作用域供自噬流消费）
+  const lysoCenters: THREE.Vector3[] = [];
   {
     const lysoN = perf ? Math.max(2, Math.round(spec.lysosomeCount * 0.6)) : spec.lysosomeCount;
     if (lysoN > 0) {
@@ -1124,7 +1169,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       }));
       const perLyso = perf ? 10 : 18;
       const spks = new THREE.InstancedMesh(spkGeo, spkMat, lysoN * perLyso);
-      const centers: THREE.Vector3[] = [];
+      const centers = lysoCenters;
       const scales: number[] = [];
       {
         const mm = new THREE.Matrix4();
@@ -1167,6 +1212,140 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       group.add(bodies, spks);
       const l0 = centers[0];
       labels.push({ pos: { x: l0.x * 1.45, y: l0.y + 0.55, z: l0.z * 1.45 }, zh: '溶酶体（pH≈4.5）', latin: 'Lysosome' });
+    }
+  }
+
+  /* ================= 自噬流（ULK1 激活驱动 —— mTOR/AMPK 通路教学核心动态） ================= */
+  // 科学过程: mTORC1 抑制 / AMPK 活化 → ULK1 复合体去抑制 → 核周隔离膜（phagophore）延伸
+  //          → 包裹受损线粒体（线粒体自噬）/ 蛋白聚集体 → 封闭成双膜自噬体（LC3-II 阳性）
+  //          → 弧线运输 → 与溶酶体融合（自溶酶体 + 降解闪光）→ 氨基酸回收
+  // 驱动: update(t, ulk1) 的 ulk1 > 0.45 时按速率孵化; 无 ULK1 节点的通路恒静默（零渲染成本）
+  interface AutoParticle {
+    active: boolean;
+    t0: number;
+    dur: number;
+    spawn: THREE.Vector3;
+    target: THREE.Vector3;
+    mid: THREE.Vector3;
+    g: THREE.Group;
+    bowl: THREE.Mesh;
+    bowlMat: THREE.MeshPhysicalMaterial;
+    body: THREE.Mesh;
+    inner: THREE.Mesh;
+    bodyMat: THREE.MeshPhysicalMaterial;
+    lc3Mat: THREE.MeshStandardMaterial;
+    cargo: THREE.Mesh;
+    cargoMat: THREE.MeshStandardMaterial;
+    flash: THREE.Mesh;
+    flashMat: THREE.MeshBasicMaterial;
+    phase: number;
+  }
+  const AUTO_N = perf ? 3 : 5;
+  const autoParticles: AutoParticle[] = [];
+  {
+    // 共享几何: 开口隔离膜碗 / 双膜自噬体 / 货物（受损线粒体 / 聚集体）/ 融合闪光壳
+    const bowlGeo = track(new THREE.SphereGeometry(0.62, 22, 16, 0, Math.PI * 1.42, 0, Math.PI * 0.94));
+    const bodyGeo = track(displacedSphere(0.56, 2, 2.6, 0.03, 57));
+    const innerGeo = track(displacedSphere(0.47, 2, 2.6, 0.03, 59));
+    const mitoCargoGeo = track(displaceGeometry(new THREE.CapsuleGeometry(0.15, 0.32, 6, 12), 2.2, 0.02, 61));
+    const aggParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
+    for (let k = 0; k < 6; k++) {
+      const off = new THREE.Vector3(hash01(`ag${k}`) - 0.5, hash01(`ag${k}`, 3) - 0.5, hash01(`ag${k}`, 5) - 0.5).multiplyScalar(0.17);
+      aggParts.push({ geo: new THREE.SphereGeometry(0.085 + hash01(`agr${k}`) * 0.05, 7, 6), matrix: new THREE.Matrix4().makeTranslation(off.x, off.y, off.z) });
+    }
+    const aggCargoGeo = track(mergeGeoms(aggParts));
+    const flashGeo = track(new THREE.SphereGeometry(1, 20, 14));
+    const lc3Geo = track(new THREE.SphereGeometry(0.035, 6, 5));
+
+    for (let i = 0; i < AUTO_N; i++) {
+      const g = new THREE.Group();
+      g.visible = false;
+      // 隔离膜碗（开口态; DoubleSide 显内叶）
+      const bowlMat = track(new THREE.MeshPhysicalMaterial({
+        color: '#5eead4',
+        emissive: '#0d9488',
+        emissiveIntensity: 0.5 * dim,
+        roughness: 0.4,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }));
+      const bowl = new THREE.Mesh(bowlGeo, bowlMat);
+      bowl.renderOrder = 47;
+      g.add(bowl);
+      // 自噬体双膜（封闭态: 外膜 + 内膜两层）
+      const bodyMat = track(new THREE.MeshPhysicalMaterial({
+        color: '#99f6e4',
+        emissive: '#14b8a6',
+        emissiveIntensity: 0.4 * dim,
+        roughness: 0.38,
+        transmission: transOn ? 0.3 : 0,
+        thickness: 0.5,
+        transparent: true,
+        opacity: 0,
+      }));
+      const body = new THREE.Mesh(bodyGeo, bodyMat);
+      const inner = new THREE.Mesh(innerGeo, bodyMat);
+      body.renderOrder = inner.renderOrder = 48;
+      body.visible = inner.visible = false;
+      g.add(body, inner);
+      // LC3-II 阳性斑点（自噬体膜标志分子, 磷脂酰乙醇胺偶联形式贴外膜）
+      const lc3Mat = track(new THREE.MeshStandardMaterial({
+        color: '#bbf7d0',
+        emissive: '#22c55e',
+        emissiveIntensity: 0.8 * dim,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      }));
+      const lc3 = new THREE.InstancedMesh(lc3Geo, lc3Mat, 14);
+      {
+        const mm = new THREE.Matrix4();
+        const d = new THREE.Vector3();
+        fibSphere(14, 1).forEach((p, k) => {
+          d.set(p.x, p.y, p.z).normalize();
+          const s = 0.8 + hash01(`lc${i}${k}`) * 0.6;
+          mm.makeScale(s, s, s);
+          mm.setPosition(d.x * 0.585, d.y * 0.585, d.z * 0.585);
+          lc3.setMatrixAt(k, mm);
+        });
+        lc3.instanceMatrix.needsUpdate = true;
+        lc3.renderOrder = 49;
+      }
+      g.add(lc3);
+      // 货物: 偶数粒子 = 受损线粒体（线粒体自噬）; 奇数 = 蛋白聚集体（大自噬）
+      const isMito = i % 2 === 0;
+      const cargoMat = track(new THREE.MeshStandardMaterial({
+        color: isMito ? '#0f766e' : '#a16207',
+        emissive: isMito ? '#065f46' : '#854d0e',
+        emissiveIntensity: 0.5 * dim,
+        roughness: 0.55,
+        normalMap: isMito ? mtStripe : coatNormal,
+        normalScale: new THREE.Vector2(0.6, 0.6),
+      }));
+      const cargo = new THREE.Mesh(isMito ? mitoCargoGeo : aggCargoGeo, cargoMat);
+      cargo.renderOrder = 46;
+      g.add(cargo);
+      // 融合闪光（自溶酶体形成瞬间: 溶酶体位琥珀色膨胀壳）
+      const flashMat = track(new THREE.MeshBasicMaterial({ color: '#fbbf24', transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+      const flash = new THREE.Mesh(flashGeo, flashMat);
+      flash.renderOrder = 52;
+      flash.visible = false;
+      g.add(flash);
+      group.add(g);
+      autoParticles.push({
+        active: false, t0: 0, dur: 7,
+        spawn: new THREE.Vector3(), target: new THREE.Vector3(), mid: new THREE.Vector3(),
+        g, bowl, bowlMat, body, inner, bodyMat, lc3Mat, cargo, cargoMat, flash, flashMat,
+        phase: i * 1.7,
+      });
+    }
+    // 自噬体标注（when: 'autophagy' —— 仅 ULK1 激活时由 CellBody 过滤显示; 锚定核周孵化带）
+    if (lysoCenters.length > 0) {
+      const auDir = new THREE.Vector3(Math.cos(-0.5) * Math.cos(2.2), Math.sin(-0.5), Math.cos(-0.5) * Math.sin(2.2));
+      const auPos = insidePos(auDir, 0.42, 0.8, 0.55);
+      labels.push({ pos: { x: auPos.x * 1.26, y: auPos.y + 0.6, z: auPos.z * 1.26 }, zh: '自噬体（ULK1 启动）', latin: 'Autophagosome', when: 'autophagy' });
     }
   }
 
@@ -2208,7 +2387,22 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   const suspB = makeCloud(Math.round(90 * q) + 16, 0.2, R * 1.2, R * 2.9, 9);
 
   /* ================= 帧驱动动画 ================= */
-  const update = (t: number) => {
+  // 自噬流驱动状态（ULK1 水平 → 孵化节拍; 帧内只读 store 快照, 零订阅成本）
+  let autoAcc = 0;
+  let autoLastT = -1;
+  let autoSpawnCount = 0;
+  const AUTO_SPAWN_THRESHOLD = 2.3; // level·s —— 满活性约 2.3s 孵化一个自噬体
+  const AUTO_ACTIVE_LEVEL = 0.45; // ULK1 活性孵化阈值
+  // 二次贝塞尔（隔离膜出生点 → 运输弧中点 → 溶酶体融合位）
+  const autoBezier = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, k: number, out: THREE.Vector3) => {
+    const q = 1 - k;
+    out.set(
+      q * q * a.x + 2 * q * k * b.x + k * k * c.x,
+      q * q * a.y + 2 * q * k * b.y + k * k * c.y,
+      q * q * a.z + 2 * q * k * b.z + k * k * c.z,
+    );
+  };
+  const update = (t: number, ulk1 = 0) => {
     uTime.value = t;
     for (const m of mitos) {
       m.obj.position.y = m.baseY + Math.sin(t * 0.55 + m.phase) * 0.16;
@@ -2230,6 +2424,117 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     // 细胞呼吸（整体极微幅胀缩）
     const breathe = 1 + Math.sin(t * 0.42) * 0.004;
     group.scale.setScalar(breathe);
+
+    /* ---- 自噬流生命周期（ULK1 > 阈值时孵化; 四相: 隔离膜→封闭→运输→融合） ---- */
+    if (autoLastT < 0) autoLastT = t;
+    const dt = Math.max(0, Math.min(0.25, t - autoLastT));
+    autoLastT = t;
+    if (ulk1 > AUTO_ACTIVE_LEVEL) autoAcc += dt * ulk1;
+    if (autoAcc >= AUTO_SPAWN_THRESHOLD) {
+      autoAcc = 0;
+      const p = autoParticles.find((x) => !x.active);
+      if (p && lysoCenters.length > 0) {
+        autoSpawnCount++;
+        const seed = autoSpawnCount;
+        const lat = (hash01(`au${seed}`) - 0.5) * 2.2;
+        const lon = hash01(`au${seed}`, 3) * Math.PI * 2;
+        const dir = new THREE.Vector3(
+          Math.cos(lat) * Math.cos(lon),
+          Math.sin(lat),
+          Math.cos(lat) * Math.sin(lon),
+        ).normalize();
+        const spawn = insidePos(dir, 0.28 + hash01(`au${seed}`, 5) * 0.4, 0.78, 0.5);
+        const target = lysoCenters[seed % lysoCenters.length];
+        const mid = spawn
+          .clone()
+          .lerp(target, 0.5)
+          .add(new THREE.Vector3(
+            (hash01(`au${seed}`, 7) - 0.5) * 2.4,
+            0.6 + hash01(`au${seed}`, 9) * 0.8,
+            (hash01(`au${seed}`, 11) - 0.5) * 2.4,
+          ));
+        p.active = true;
+        p.t0 = t;
+        p.dur = 6.2 + hash01(`au${seed}`, 13) * 1.4;
+        p.spawn.copy(spawn);
+        p.target.copy(target);
+        p.mid.copy(mid);
+        p.g.position.copy(spawn);
+        p.g.visible = true;
+        p.bowl.visible = true;
+        p.body.visible = p.inner.visible = false;
+        p.cargo.visible = true;
+        p.cargo.scale.setScalar(1);
+        p.flash.visible = false;
+        p.cargo.rotation.set(hash01(`au${seed}`, 15) * Math.PI, hash01(`au${seed}`, 17) * Math.PI, 0);
+      }
+    }
+    for (const p of autoParticles) {
+      if (!p.active) continue;
+      const u = (t - p.t0) / p.dur;
+      if (u >= 1 || u < 0) {
+        p.active = false;
+        p.g.visible = false;
+        continue;
+      }
+      const P1 = 0.26; // 隔离膜延伸相终点
+      const P2 = 0.36; // 封闭相终点
+      const P3 = 0.84; // 运输相终点（融合开始）
+      const smooth = (x: number) => x * x * (3 - 2 * x);
+      // 货物慢翻转（被包裹读感）
+      p.cargo.rotation.x += 0.006;
+      p.cargo.rotation.y += 0.004;
+      if (u < P1) {
+        // 相 1 隔离膜（phagophore）: 开口碗自 0.2 长大 + 绕货物旋转延伸（膜延伸读感）
+        const k = smooth(u / P1);
+        p.bowl.scale.setScalar(0.2 + k * 0.8);
+        p.bowl.rotation.y = t * 1.35 + p.phase;
+        p.bowlMat.opacity = k * 0.72;
+        p.bodyMat.opacity = 0;
+        p.lc3Mat.opacity = 0;
+        p.cargo.scale.setScalar(0.45 + k * 0.55);
+        p.g.position.copy(p.spawn);
+      } else if (u < P2) {
+        // 相 2 封闭: 碗淡出收口, 双膜自噬体 + LC3-II 斑点亮起
+        const k = smooth((u - P1) / (P2 - P1));
+        p.bowl.scale.setScalar(1 + k * 0.08);
+        p.bowl.rotation.y = t * 0.8 + p.phase;
+        p.bowlMat.opacity = 0.72 * (1 - k);
+        p.body.visible = p.inner.visible = true;
+        p.body.scale.setScalar(0.55 + k * 0.45);
+        p.bodyMat.opacity = k * 0.82;
+        p.lc3Mat.opacity = k * 0.85;
+        p.cargo.scale.setScalar(1);
+        p.g.position.copy(p.spawn);
+      } else if (u < P3) {
+        // 相 3 运输: 自噬体沿弧线向溶酶体运输（微管定向 + 布朗晃动）
+        const k = smooth((u - P2) / (P3 - P2));
+        autoBezier(p.spawn, p.mid, p.target, k, p.g.position);
+        const wob = 0.07;
+        p.g.position.x += Math.sin(t * 3.1 + p.phase) * wob;
+        p.g.position.y += Math.cos(t * 2.6 + p.phase * 1.3) * wob * 0.8;
+        p.g.position.z += Math.sin(t * 3.7 + p.phase * 0.7) * wob * 0.7;
+        p.bowlMat.opacity = 0;
+        p.bowl.visible = false;
+        p.body.scale.setScalar(1 + Math.sin(t * 2.2 + p.phase) * 0.03);
+        p.bodyMat.opacity = 0.82;
+        p.lc3Mat.opacity = 0.85;
+      } else {
+        // 相 4 融合: 贴溶酶体位收拢 → 琥珀闪光膨胀（自溶酶体形成）→ 货物降解淡出
+        const k = (u - P3) / (1 - P3);
+        p.g.position.copy(p.target);
+        p.body.scale.setScalar(Math.max(0.05, 1 - k * 0.55));
+        p.bodyMat.opacity = 0.82 * (1 - k) ** 1.5;
+        p.lc3Mat.opacity = 0.85 * (1 - k);
+        p.cargo.scale.setScalar(Math.max(0.02, 1 - k * 1.6)); // 降解
+        if (k > 0.12) {
+          p.flash.visible = true;
+          const fk = (k - 0.12) / 0.88;
+          p.flash.scale.setScalar(0.55 + fk * 1.5);
+          p.flashMat.opacity = Math.sin(Math.min(1, fk * 1.6) * Math.PI) * 0.5;
+        }
+      }
+    }
   };
 
   const dispose = () => {
@@ -2244,33 +2549,53 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
 const MAJOR_ORGANELLE_ZH = ['质膜', '核被膜', '核仁', '线粒体', '高尔基体', '溶酶体'];
 const MAJOR_ORGANELLE_LATIN = ['Plasma membrane', 'Nuclear envelope', 'Nucleolus', 'Mitochondrion', 'Golgi apparatus', 'Lysosome'];
 
+/** 贴面模式下让位的核内部标注（核盘自带剖面标注; 前缀匹配 zh/latin） */
+const NUCLEUS_INTERIOR_ZH = ['核仁', '异染色质', '核孔复合体'];
+const NUCLEUS_INTERIOR_LATIN = ['Nucleolus', 'Heterochromatin', 'Nuclear pore complex'];
+
 /** 细胞体组件（仅 dim/规格/画质变化时重建, 动画走 imperative 帧驱动） */
-export const CellBody = ({ spec, tint, dim, showAnatomy, perf }: {
+export const CellBody = ({ spec, tint, dim, showAnatomy, perf, compactNucleusLabels }: {
   spec: CellBodySpec;
   tint: string;
   dim: number;
   showAnatomy: boolean;
   /** 低端设备流畅模式（禁用折射/减实例） */
   perf?: boolean;
+  /** 剖面贴附模式: 隐藏核内部标注（核盘自带标注, 消除核区标签互叠） */
+  compactNucleusLabels?: boolean;
 }) => {
   const { lang } = useLang();
   const build = useMemo(() => buildCellBody(spec, tint, dim, perf ?? false), [spec, tint, dim, perf]);
   useEffect(() => () => build.dispose(), [build]);
   // 窄视口（<640px）: 解剖标注仅保留主要细胞器, 避免移动端标签互相遮挡（zh/latin 前缀各自匹配）
   const isNarrow = useThree((s) => s.size.width) < 640;
+  // 自噬流可见性（布尔选择器 —— 仅阈值跨越时重渲染, 逐 tick 零成本）
+  const autoActive = useLabStore((s) => autophagyLevel(s.nodeStates) > AUTOPHAGY_VISIBLE_THRESHOLD);
   const visibleLabels = useMemo(
-    () =>
-      isNarrow
+    () => {
+      let base = isNarrow
         ? build.labels.filter((l) =>
             lang === 'zh'
               ? MAJOR_ORGANELLE_ZH.some((m) => l.zh.startsWith(m))
               : MAJOR_ORGANELLE_LATIN.some((m) => l.latin.startsWith(m)),
           )
-        : build.labels,
-    [isNarrow, build, lang],
+        : build.labels;
+      // 剖面贴附模式: 核内部标注让位（核盘自带剖面标注, 且分子投影到切面后核区标签密度最高）
+      if (compactNucleusLabels) {
+        base = base.filter((l) =>
+          lang === 'zh'
+            ? !NUCLEUS_INTERIOR_ZH.some((m) => l.zh.startsWith(m))
+            : !NUCLEUS_INTERIOR_LATIN.some((m) => l.latin.startsWith(m)),
+        );
+      }
+      // 条件标签: 自噬体标注仅在 ULK1 激活（mTOR 抑制/AMPK 活化语境）时显示
+      return autoActive ? base : base.filter((l) => l.when !== 'autophagy');
+    },
+    [isNarrow, build, lang, autoActive, compactNucleusLabels],
   );
 
-  useFrame((state) => build.update(state.clock.elapsedTime));
+  // 帧驱动: 传入 ULK1 自噬驱动水平（无 ULK1 通路 → 0 → 自噬系统静默）
+  useFrame((state) => build.update(state.clock.elapsedTime, autophagyLevel(useLabStore.getState().nodeStates)));
 
   return (
     <>
