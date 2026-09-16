@@ -253,6 +253,187 @@ export function golgiCisternaGeometry(
   return geo;
 }
 
+/* ============ 核周层叠囊冠几何（v17 —— 参照图「千层饼」核心形态） ============
+ * 参照图 VLM+像素双重核实:
+ *   - RER = 4-6 层连续大面积平滑弧形膜, 同心圆式层叠包裹核 180°-270°
+ *   - 层间紧密平行, 严格顺核被膜球形轮廓弯曲, 局部细微皱褶+分支 → 迷宫读感
+ *   - 核糖体如「黄沙」随机满铺胞质面（高密度点彩, 不成行）
+ * 旧「窄环带 CatmullRom 扫掠」读感为分散碎片/小椭球（用户反馈根因）——
+ * 本工厂改为「贴核球冠壳层」: 每层 = 顺核面轮廓的等距偏移壳（radiusAt 回调注入核面函数,
+ * 自动适配各核型椭球/FBM 起伏）:
+ *   - 边缘谐波花边逐层错落（4-6 主瓣 + 7 瓣副调制 → 层叠迷宫边缘）
+ *   - 径向微皱褶（sin 复合, 幅度 ~0.03 —— 「局部细微皱褶」）
+ *   - 高尔基扇区让位（vault: 扇区内层半径外跃至囊堆上空, 平滑过渡）
+ *   - 膜面硬钳（clampAt: 任何细胞形态下冠层永不穿质膜）
+ *   - 顶/底双面 + 缘带缝合闭合壳（透射材质无背面穿帮）; 冠极自然收口（球冠极点） */
+export interface ErLamellaLayer {
+  /** 距核面径向偏移（层号 × 层距） */
+  offset: number;
+  /** 覆盖锥角（自冠轴, rad; 参照 180°-270° ≈ 2.0-2.36） */
+  cone: number;
+  /** 冠轴（覆盖中心方向, 世界向量; 开口朝向其反方向） */
+  axis: THREE.Vector3;
+  /** 花边种子（逐层不同 → 层叠错落） */
+  seed: number;
+}
+export interface ErLamellaOpts {
+  /** 核面半径函数（dir → 半径, 含核 FBM 起伏; 勿加偏移） */
+  radiusAt: (dir: THREE.Vector3) => number;
+  /** 核中心（世界坐标） */
+  center: THREE.Vector3;
+  /** 膜面钳制（dir → 最大允许半径; 返回 null 不钳） */
+  clampAt?: (dir: THREE.Vector3) => number | null;
+  /** 高尔基让位扇区: 扇区内层半径外跃至囊堆上空 */
+  vault?: { dir: THREE.Vector3; ang: number; to: number } | null;
+  /** 膜厚 */
+  thickness?: number;
+  /** 极向分段 × 环向分段 */
+  latSeg?: number;
+  lonSeg?: number;
+}
+/** 层半径解算（几何与核糖体采样共用同一真源） */
+function erLayerRadius(
+  d: THREE.Vector3,
+  layer: ErLamellaLayer,
+  opts: ErLamellaOpts,
+  e1: THREE.Vector3,
+  e2: THREE.Vector3,
+): number {
+  const polar = Math.acos(THREE.MathUtils.clamp(d.dot(layer.axis), -1, 1));
+  const lon = Math.atan2(d.dot(e2), d.dot(e1));
+  // 基础: 核面 + 层偏移
+  let eff = layer.offset;
+  // 径向微皱褶（sin 复合 —— 参照图「局部细微皱褶」）
+  eff += 0.026 * Math.sin(polar * (5 + (layer.seed % 4)) + lon * 3 + layer.seed * 1.7);
+  // 高尔基扇区让位（k² 平滑: 扇心完全外跃, 扇缘归位）
+  if (opts.vault) {
+    const ang = d.angleTo(opts.vault.dir);
+    if (ang < opts.vault.ang) {
+      const k = 1 - ang / opts.vault.ang;
+      eff = eff + (Math.max(eff, opts.vault.to) - eff) * k * k;
+    }
+  }
+  let r = opts.radiusAt(d) + eff;
+  // 膜面硬钳
+  if (opts.clampAt) {
+    const lim = opts.clampAt(d);
+    if (lim !== null && r > lim) r = lim;
+  }
+  return r;
+}
+/** 核周层叠囊冠单层几何（球冠壳: 外/内双面 + 缘带缝合） */
+export function erLamellaGeometry(opts: ErLamellaOpts & { layer: ErLamellaLayer }): THREE.BufferGeometry {
+  const thickness = opts.thickness ?? 0.085;
+  const latSeg = opts.latSeg ?? 24;
+  const lonSeg = opts.lonSeg ?? 52;
+  const U = opts.layer.axis.clone().normalize();
+  let e1 = new THREE.Vector3(0, 1, 0).cross(U);
+  if (e1.lengthSq() < 1e-4) e1 = new THREE.Vector3(1, 0, 0).cross(U);
+  e1.normalize();
+  const e2 = new THREE.Vector3().crossVectors(U, e1).normalize();
+  const seed = opts.layer.seed;
+  // 边缘花边参数（4-6 主瓣 + 7 瓣副调制, 逐层种子 → 层叠错落迷宫边缘）
+  const lobes = 4 + Math.floor(hash01(`erl${seed}`) * 3);
+  const lobeAmp = 0.085 + hash01(`era${seed}`) * 0.06;
+  const p1 = hash01(`erp${seed}`) * Math.PI * 2;
+  const lobes2 = 7;
+  const lobe2Amp = lobeAmp * 0.42;
+  const p2 = hash01(`erq${seed}`) * Math.PI * 2;
+  const band = 0.3; // 花边带宽度（自锥缘向内）
+  /** 环向 lon 处的边缘极角轮廓（中心圆整 → 边缘波浪） */
+  const rimAt = (lon: number): number =>
+    opts.layer.cone - band + lobeAmp * (0.58 * Math.sin(lobes * lon + p1) + 0.42 * Math.sin(lobes2 * lon + p2));
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  const d = new THREE.Vector3();
+  const cols = lonSeg + 1;
+  for (let i = 0; i <= latSeg; i++) {
+    const t = i / latSeg;
+    // 厚度包络: 内部饱满、缘部收薄（圆润囊缘）
+    const th = thickness * (0.55 + 0.45 * Math.sin(Math.PI * Math.min(1, t * 1.15)));
+    for (let j = 0; j <= lonSeg; j++) {
+      const lon = (j / lonSeg) * Math.PI * 2;
+      const polar = rimAt(lon) * t;
+      d.copy(U).multiplyScalar(Math.cos(polar))
+        .addScaledVector(e1, Math.cos(lon) * Math.sin(polar))
+        .addScaledVector(e2, Math.sin(lon) * Math.sin(polar))
+        .normalize();
+      const r = erLayerRadius(d, opts.layer, opts, e1, e2);
+      positions.push(
+        opts.center.x + d.x * r, opts.center.y + d.y * r, opts.center.z + d.z * r,
+        opts.center.x + d.x * (r - th), opts.center.y + d.y * (r - th), opts.center.z + d.z * (r - th),
+      );
+      uvs.push(t, j / lonSeg, t, j / lonSeg);
+    }
+  }
+  const idx = (i: number, j: number, outer: boolean) => 2 * (i * cols + j) + (outer ? 0 : 1);
+  for (let i = 0; i < latSeg; i++) {
+    for (let j = 0; j < lonSeg; j++) {
+      const aO = idx(i, j, true), bO = idx(i, j + 1, true), cO = idx(i + 1, j, true), dO = idx(i + 1, j + 1, true);
+      const aI = idx(i, j, false), bI = idx(i, j + 1, false), cI = idx(i + 1, j, false), dI = idx(i + 1, j + 1, false);
+      // 外面（法向朝外）
+      indices.push(aO, bO, cO, bO, dO, cO);
+      // 内面（法向朝内, 反绕）
+      indices.push(aI, cI, bI, bI, cI, dI);
+    }
+  }
+  // 缘带（最外环内/外面缝合）
+  for (let j = 0; j < lonSeg; j++) {
+    const tO = idx(latSeg, j, true), tO2 = idx(latSeg, j + 1, true);
+    const tI = idx(latSeg, j, false), tI2 = idx(latSeg, j + 1, false);
+    indices.push(tO, tO2, tI, tO2, tI2, tI);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+/** 层叠囊冠核糖体采样（帽面均匀点 × 花边内缘; 与几何共用 erLayerRadius 真源）
+ *  参照图: 高密度随机散布（「黄沙」满铺胞质面） */
+export function erLamellaRibosomes(
+  opts: ErLamellaOpts & { layer: ErLamellaLayer },
+  count: number,
+  seedTag: string,
+): THREE.Vector3[] {
+  const U = opts.layer.axis.clone().normalize();
+  let e1 = new THREE.Vector3(0, 1, 0).cross(U);
+  if (e1.lengthSq() < 1e-4) e1 = new THREE.Vector3(1, 0, 0).cross(U);
+  e1.normalize();
+  const e2 = new THREE.Vector3().crossVectors(U, e1).normalize();
+  const lobes = 4 + Math.floor(hash01(`erl${opts.layer.seed}`) * 3);
+  const lobeAmp = 0.085 + hash01(`era${opts.layer.seed}`) * 0.06;
+  const p1 = hash01(`erp${opts.layer.seed}`) * Math.PI * 2;
+  const lobes2 = 7;
+  const lobe2Amp = lobeAmp * 0.42;
+  const p2 = hash01(`erq${opts.layer.seed}`) * Math.PI * 2;
+  const band = 0.3;
+  const rimAt = (lon: number): number =>
+    opts.layer.cone - band + lobeAmp * (0.58 * Math.sin(lobes * lon + p1) + 0.42 * Math.sin(lobes2 * lon + p2));
+  const pts: THREE.Vector3[] = [];
+  const d = new THREE.Vector3();
+  for (let k = 0; k < count; k++) {
+    const lon = hash01(`${seedTag}lo${k}`) * Math.PI * 2;
+    const rim = rimAt(lon) * 0.965;
+    // 帽面均匀采样: cos(polar) ∈ [cos(rim), 1] 均匀
+    const cosP = 1 - (1 - Math.cos(rim)) * hash01(`${seedTag}cp${k}`);
+    const polar = Math.acos(THREE.MathUtils.clamp(cosP, -1, 1));
+    d.copy(U).multiplyScalar(cosP)
+      .addScaledVector(e1, Math.cos(lon) * Math.sin(polar))
+      .addScaledVector(e2, Math.sin(lon) * Math.sin(polar))
+      .normalize();
+    const r = erLayerRadius(d, opts.layer, opts, e1, e2) + 0.018;
+    pts.push(new THREE.Vector3(
+      opts.center.x + d.x * r + (hash01(`${seedTag}jx${k}`) - 0.5) * 0.02,
+      opts.center.y + d.y * r + (hash01(`${seedTag}jy${k}`) - 0.5) * 0.02,
+      opts.center.z + d.z * r + (hash01(`${seedTag}jz${k}`) - 0.5) * 0.02,
+    ));
+  }
+  return pts;
+}
+
 /* ============ 位移球体（细胞器有机轮廓, 保持球状基底） ============ */
 
 function displacedSphere(R: number, detail: number, freq: number, amp: number, seed: number): THREE.BufferGeometry {
@@ -615,9 +796,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     Math.cos(golgiLat) * Math.sin(golgiLon),
   ).normalize();
   const GOLGI_SCALE = (SHAPE === 'columnar' ? 1.05 : N / 4.1) * (R < 9.2 ? 0.92 : 1); // 盘径随核径缩放, 小细胞再收敛
-  const GOLGI_CIST_N = 8; // 扁平囊层数（cis→trans; v16: 7→8 —— 囊堆层次读感更密实）
+  const GOLGI_CIST_N = 5; // 扁平囊层数（v17 参照图严格还原: VLM 实测 4-5 层; v16 的 8 层过于密实 → 5 层舒展可辨）
   const GOLGI_DISK_R = 2.02 * GOLGI_SCALE; // cis 盘半径（直径≈核半径 100%; v16: 1.92→2.02 更醒目）
-  const GOLGI_STEP = 0.165 * GOLGI_SCALE; // 囊层距（v16: 0.148→0.165 —— 层间隙更可辨, 「叠杯」剪影更利落）
+  const GOLGI_STEP = 0.28 * GOLGI_SCALE; // 囊层距（v17: → 0.28 —— 层间隙投影 ~10px 可辨, 叠杯层次直读）
   const GOLGI_STACK_H = GOLGI_CIST_N * GOLGI_STEP; // 囊堆总高
   const GOLGI_RADIAL = 1.02 * GOLGI_SCALE; // 堆中心距核被膜径向距离
   /** 囊堆径向外包络（RER 让位目标高度: 扇区内囊池外跃至囊堆上空 —— 背侧象限外跃 = 远离相机, 不遮挡） */
@@ -1085,7 +1266,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     labels.push({ pos: { x: m0.x * 1.4, y: m0.y + 0.85, z: m0.z * 1.4 }, zh: '线粒体（板层嵴）', latin: 'Mitochondrion' });
   }
 
-  /* ================= 粗面内质网（v13 参照图逆向: 平行带状囊池堆 + 满铺核糖体点彩） ================= */
+  /* ================= 粗面内质网（v17 参照图严格还原: 千层饼核周层叠囊冠 + 「黄沙」核糖体） ================= */
   // 核糖体: 大小亚基哑铃形（60S 大亚基 + 40S 小亚基 —— 电镜双亚基剪影）
   const ribosomeGeo = track(
     mergeGeoms([
@@ -1093,142 +1274,68 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       { geo: track(new THREE.SphereGeometry(0.043, 5, 4)), matrix: new THREE.Matrix4().makeTranslation(0, -0.05, 0) },
     ]),
   );
-  // v13: 不透明 + 高亮发射 —— 参照图核糖体是清晰可辨的点彩颗粒（半透明/depthWrite false 会"发虚"）
-  // v14: 发射 1.0 + 更亮琥珀（核周冠远景点彩可读性）
-  const ribosomeMat = track(new THREE.MeshStandardMaterial({ color: '#a07a54', emissive: '#8a6240', emissiveIntensity: 1.0 * dim, roughness: 0.5, metalness: 0.05 }));
+  // v17 参照图「黄沙」: 亮金琥珀（实测 207,189,164 族）—— 大颗粒高发射, 点彩远读清晰
+  const ribosomeMat = track(new THREE.MeshStandardMaterial({ color: '#c9a54e', emissive: '#a8842e', emissiveIntensity: 1.0 * dim, roughness: 0.5, metalness: 0.05 }));
   {
-    // v14 用户反馈「RER 应在核周且相当大」: 囊池层 6→erSheets+6, 包裹经度 122°→195°, 径向壳层
-    // 0.26-0.91→0.42-1.9（多层同心冠冕 —— 核旁大体积 rER 冠, 参照图读感的核心）
-    const sheets = Math.max(1, perf ? Math.round((spec.erSheets + 6) * 0.55) : spec.erSheets + 6);
-    const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
-    const sheetCurves: THREE.CatmullRomCurve3[] = [];
+    // v17 参照图严格还原（用户反馈「RER 不应像小椭球, 应是围绕核的膜结构」—— VLM+像素双重核实）:
+    // RER = 4-7 层连续大面积平滑弧形膜「千层饼」同心层叠包裹核 180°-270°, 层间紧密平行,
+    // 顺核轮廓弯曲 + 局部细微皱褶; 核糖体「黄沙」随机满铺胞质面。
+    // 旧「窄环带扫掠 + 外周囊池堆」读感为分散碎片/小椭球 —— 整体退役, 换 erLamellaGeometry 球冠壳层体系。
+    // 层数随分泌活性类型化: 肝细胞(分泌之王) 7 层 → 淋巴/神经元 4-5 层。
+    const layers = Math.max(3, perf ? 3 : Math.min(7, spec.erSheets + 3));
+    const parts: { geo: THREE.BufferGeometry }[] = [];
     const allRiboPts: THREE.Vector3[] = [];
-    // v13 参照图布局: 平行长囊池堆（千层丝带 —— 径向逐层 + 纬度微扇形展开, 非旧"绕核线团"）
-    // v16 用户反馈「还是不太形象」: 每壳层改双平行囊池（经度错开 0.55π + 纬度相位差）——
-    // 参照图 ER 的「片层迷宫」读感 = 同层多条平行丝带并列, 非单丝带绕核; 囊池加宽 1.38→1.5
-    const ribbons = perf ? 1 : 2;
-    for (let s = 0; s < sheets; s++) {
-      for (let rb = 0; rb < ribbons; rb++) {
-        // v14 大冠: 纬度自核下 (-0.78) 扫到核上 (+0.75), 每层纬度步进加大 → 冠罩整个核被膜
-        const latBase = -0.78 + s * 0.17 + rb * 0.09;
-        const lon0 = -0.95 + s * 0.07 + rb * 0.55 * Math.PI;
-        const lonSpan = Math.PI * (perf ? 1.08 : 1.18);
-        const ofs = 0.42 + s * 0.165;
-        const pts: THREE.Vector3[] = [];
-        for (let k = 0; k <= 13; k++) {
-          const t = k / 13;
-          const lat = latBase + Math.sin(t * Math.PI * 1.7 + s * 0.9 + rb * 1.6) * 0.16;
-          const lon = lon0 + t * lonSpan;
-          // 囊池贴核被膜平行延展（径向 ofs 逐层 —— 同心壳层层叠）
-          const dir = new THREE.Vector3(
-            Math.cos(lat) * Math.cos(lon),
-            Math.sin(lat),
-            Math.cos(lat) * Math.sin(lon),
-          ).normalize();
-          // v15 高尔基让位窗: 囊池带经过高尔基扇区时径向外跃至囊堆上空（GOLGI_OUTER）——
-          // 高尔基在后上背侧象限(z<0), 外跃的 ER 囊池恒在囊堆「后方」（远离默认相机, 不遮挡;
-          // v15b 曾试内潜 —— 侧视角下与囊堆深度重合, 视觉互叠, 外跃才是正解）
-          let vofs = ofs + Math.sin(t * Math.PI * 1.4 + s * 1.3 + rb * 0.8) * 0.12;
-          const angNear = dir.angleTo(GOLGI_DIR);
-          if (angNear < 0.62) {
-            const kSmooth = 1 - angNear / 0.62; // 扇区中心 1 → 边缘 0
-            let vault = vofs + (GOLGI_OUTER - vofs) * kSmooth;
-            const probe = nucPoint(dir, vault);
-            const pl = probe.length();
-            if (pl > 1e-6) {
-              const lim = cellSurf(probe.clone().normalize(), R, SHAPE, -0.95);
-              if (pl > lim) vault -= pl - lim; // 紧细胞硬钳: 让位高度受限但不穿膜（带半宽余量 0.95）
-            }
-            vofs = Math.max(vofs, vault);
-          }
-          const p = nucPoint(dir, vofs);
-          pts.push(new THREE.Vector3(p.x, p.y, p.z));
-        }
-        const curve = new THREE.CatmullRomCurve3(pts);
-        sheetCurves.push(curve);
-        // 带状扁平囊池几何（v16 宽 1.5 / 厚 0.11 ≈ 13.6:1 —— 更宽阔的带面, 双丝带并列迷宫感）
-        const frames = cisternaFrames(curve, perf ? 26 : 40, nucC);
-        parts.push({ geo: track(flatCisternaGeometry(frames, 1.5, 0.11, 12)) });
-        // 满铺核糖体点彩（参照实测 47% 高频像素 —— 两宽面网格化铺满; v16: 10 列加宽覆盖 ±0.75）
-        const wFrac = perf ? [-0.6, 0, 0.6] : [-0.75, -0.585, -0.42, -0.25, -0.085, 0.085, 0.25, 0.42, 0.585, 0.75];
-        for (let i = 1; i < frames.length - 1; i++) {
-          const { p, n, b } = frames[i];
-          for (const f of wFrac) {
-            for (const face of [1, -1]) {
-              const jitter = 0.013;
-              allRiboPts.push(new THREE.Vector3(
-                p.x + n.x * face * 0.08 + b.x * f * 0.5 + (hash01(`rj${s}${rb}${i}${f}${face}`) - 0.5) * jitter * 2,
-                p.y + n.y * face * 0.08 + b.y * f * 0.5 + (hash01(`rj${s}${rb}${i}${f}${face}`, 3) - 0.5) * jitter * 2,
-                p.z + n.z * face * 0.08 + b.z * f * 0.5 + (hash01(`rj${s}${rb}${i}${f}${face}`, 5) - 0.5) * jitter * 2,
-              ));
-            }
-          }
-        }
-      }
+    const layerDefs: ErLamellaLayer[] = [];
+    // 冠轴: 朝后上（开口朝前下 —— 默认相机正对核面裸区 + 冠缘层层错落可读, 参照图构图）
+    const crownAxis = new THREE.Vector3(0.16, 0.3, -0.94).normalize();
+    const erOpts: ErLamellaOpts = {
+      radiusAt: (d) => nucSurf(d),
+      center: nucC,
+      clampAt: (d) => cellSurf(d, R, SHAPE, -0.6),
+      vault: { dir: GOLGI_DIR, ang: 0.72, to: GOLGI_OUTER },
+    };
+    for (let L = 0; L < layers; L++) {
+      // 逐层冠轴微错位（±0.1 rad —— 层缘不齐 = 参照图「层叠迷宫」边缘读感）
+      const axis = crownAxis.clone();
+      axis.applyAxisAngle(new THREE.Vector3(0, 1, 0), (hash01(`erax${L}`) - 0.5) * 0.22);
+      axis.applyAxisAngle(new THREE.Vector3(1, 0, 0), (hash01(`eray${L}`) - 0.5) * 0.14);
+      const layer: ErLamellaLayer = {
+        offset: 0.16 + L * 0.155,
+        cone: 2.02 + L * 0.055, // 外层覆盖更广（向细胞质深处延伸）
+        axis: axis.normalize(),
+        seed: 5 + L * 13,
+      };
+      layerDefs.push(layer);
+      parts.push({ geo: track(erLamellaGeometry({ ...erOpts, layer, thickness: 0.085, latSeg: perf ? 14 : 24, lonSeg: perf ? 30 : 52 })) });
+      // 「黄沙」核糖体: 每层 ~300 随机满铺（perf 减半; 旧带状体系 ~14k 实例 → 现 ~1.8k 大颗粒点彩）
+      const riboN = perf ? 110 : 300;
+      allRiboPts.push(...erLamellaRibosomes({ ...erOpts, layer }, riboN, `erL${L}`));
     }
-    // 池间连接小管（动态管网三通语义保留）
-    for (let c = 0; c < sheetCurves.length - 1; c++) {
-      const a = sheetCurves[c].getPoint(0.35);
-      const b = sheetCurves[c + 1].getPoint(0.5);
-      const mid = a.clone().lerp(b, 0.5).multiplyScalar(0.96);
-      const conn = new THREE.QuadraticBezierCurve3(a, mid, b);
-      parts.push({ geo: track(new THREE.TubeGeometry(conn, 16, 0.07, 6)) });
-    }
-    // 外周带状囊池堆（v13: 与核旁堆呼应的平行短片层 —— 参照图 ER 迷宫的"层叠丝带"读感; v16: 4→5 堆）
-    const stackN = perf ? 1 : 5;
-    const stackAnchors: THREE.Vector3[] = [];
-    for (let st = 0; st < stackN; st++) {
-      const stDir = new THREE.Vector3(
-        Math.cos((hash01(`st${st}`, 3) - 0.5) * 2.0) * Math.cos(hash01(`st${st}`, 5) * Math.PI * 2),
-        Math.sin((hash01(`st${st}`, 3) - 0.5) * 2.0),
-        Math.cos((hash01(`st${st}`, 3) - 0.5) * 2.0) * Math.sin(hash01(`st${st}`, 5) * Math.PI * 2),
-      ).normalize();
-      const anchor = insidePos(stDir, 0.4 + hash01(`stq${st}`) * 0.24, 0.95, 0.6);
-      stackAnchors.push(anchor);
-      // 堆内正交基: u = 囊池长轴走向, m = 层叠法向
-      const az = hash01(`sta${st}`) * Math.PI * 2;
-      const el = (hash01(`ste${st}`) - 0.5) * 1.5;
-      const u = new THREE.Vector3(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az));
-      const m = new THREE.Vector3().crossVectors(u, new THREE.Vector3(0, 1, 0));
-      if (m.lengthSq() < 1e-4) m.set(1, 0, 0);
-      m.normalize().multiplyScalar(0.145);
-      const layerN = perf ? 2 : 3;
-      for (let L = 0; L < layerN; L++) {
-        const center = new THREE.Vector3(anchor.x + m.x * L, anchor.y + m.y * L, anchor.z + m.z * L);
-        const pts: THREE.Vector3[] = [];
-        const len = 2.3 + hash01(`stl${st}${L}`) * 0.7;
-        for (let k = 0; k <= 8; k++) {
-          const t = k / 8;
-          const bend = Math.sin(t * Math.PI * 1.35 + L * 1.1 + st) * 0.2;
-          const side = new THREE.Vector3().crossVectors(u, m).normalize().multiplyScalar(bend);
-          pts.push(new THREE.Vector3(
-            center.x + u.x * (t - 0.5) * len + side.x,
-            center.y + u.y * (t - 0.5) * len + side.y,
-            center.z + u.z * (t - 0.5) * len + side.z,
-          ));
-        }
-        const curve = new THREE.CatmullRomCurve3(pts);
-        const frames = cisternaFrames(curve, perf ? 12 : 18, new THREE.Vector3(anchor.x, anchor.y, anchor.z));
-        parts.push({ geo: track(flatCisternaGeometry(frames, 0.9, 0.08, 10)) });
-        // 外周堆核糖体满铺（密度略低于核旁堆; v16: 3→4 列）
-        const wFrac2 = [-0.6, -0.2, 0.2, 0.6];
-        for (let i = 1; i < frames.length - 1; i += perf ? 2 : 1) {
-          const { p, n, b } = frames[i];
-          for (const f of wFrac2) {
-            for (const face of [1, -1]) {
-              allRiboPts.push(new THREE.Vector3(
-                p.x + n.x * face * 0.062 + b.x * f * 0.34,
-                p.y + n.y * face * 0.062 + b.y * f * 0.34,
-                p.z + n.z * face * 0.062 + b.z * f * 0.34,
-              ));
-            }
-          }
-        }
-      }
+    // 层间连接小管（ER 是单一连续膜系统 —— 少量可见「分支」连接卖连续性语义）
+    for (let c = 0; c < (perf ? 3 : 7); c++) {
+      const L = c % (layers - 1);
+      const layerA = layerDefs[L];
+      const layerB = layerDefs[L + 1];
+      const axis = layerA.axis;
+      const e1 = new THREE.Vector3(0, 1, 0).cross(axis).normalize();
+      const e2 = new THREE.Vector3().crossVectors(axis, e1).normalize();
+      const lon = hash01(`ercl${c}`) * Math.PI * 2;
+      const polar = 0.5 + hash01(`ercp${c}`) * 1.0;
+      const d = axis.clone().multiplyScalar(Math.cos(polar))
+        .addScaledVector(e1, Math.cos(lon) * Math.sin(polar))
+        .addScaledVector(e2, Math.sin(lon) * Math.sin(polar))
+        .normalize();
+      const rA = erLayerRadius(d, layerA, erOpts, e1, e2);
+      const rB = erLayerRadius(d, layerB, erOpts, e1, e2);
+      const a = nucC.clone().addScaledVector(d, rA - 0.04);
+      const b = nucC.clone().addScaledVector(d, rB - 0.04);
+      const mid = a.clone().lerp(b, 0.5).add(
+        new THREE.Vector3(hash01(`ercm${c}`) - 0.5, hash01(`ercm${c}`, 3) - 0.5, hash01(`ercm${c}`, 5) - 0.5).normalize().multiplyScalar(0.12),
+      );
+      parts.push({ geo: track(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(a, mid, b), 8, 0.055, 6)) });
     }
     const er = new THREE.Mesh(track(mergeGeoms(parts)), mat({
-      // v12 参照图: rER 石板蓝族（实测 93,99,104）; v13: 更锐高光（发表级囊池边缘亮线）
-      // v14 大冠可读性: 发射 0.16→0.3 + sheen 0.5（核周大体积下远读不"隐身"）
+      // v17 参照图严格还原: 薰衣草紫膜系（像素实测 199,189,218 亮带族）—— 与核同色系 = 内膜系统同源科学叙事
       color: REF.erSheet,
       transmission: transOn ? 0.34 : 0,
       thickness: 0.42,
@@ -1236,25 +1343,28 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       normalMap: orgNormal,
       normalScale: 0.4,
       opacity: transOn ? 1 : 0.72,
-      emissive: '#4a5a70',
-      // v16: 发射 0.3→0.36 + sheen 0.5→0.58 —— 双丝带迷宫的层间阴影更可辨（用户反馈「不太形象」）
-      emissiveIntensity: 0.36,
+      emissive: '#76709a',
+      emissiveIntensity: 0.5,
       clearcoat: 0.55,
       clearcoatRoughness: 0.16,
       sheen: 0.58,
-      sheenColor: REF.sheen,
-      flow: { color: '#74869c', strength: 0.18, scale: 0.8, speed: 0.07, rim: 0.2 },
+      sheenColor: '#d4cce8',
+      flow: { color: '#9c96b8', strength: 0.18, scale: 0.8, speed: 0.07, rim: 0.2 },
     }));
-    er.renderOrder = 46;
+    /* v17 剖面窗口: 千层饼冠是本场景可见性的主角 —— 剖切视图下后侧冠层以真实 3D 层叠形态呈现于
+     * 细胞质剖面窗口（renderOrder 97.4 > cytoDisc 96/cytoRing 97, 深度测试开启）;
+     * 直接位于核后方之冠层被核剖面盘（98, 97% 不透明）遮挡 = 教科书式正确遮挡关系。
+     * 完整视图恢复常规 46/47 序列（透膜观察）。 */
+    er.renderOrder = cutaway ? 97.4 : 46;
     group.add(er);
-    // 满铺膜旁核糖体（单 InstancedMesh —— 核旁堆 + 外周堆全部点彩）
+    // 「黄沙」核糖体（单 InstancedMesh, 大颗粒高发射 —— 参照图点彩远读不「发虚」）
     const ribos = new THREE.InstancedMesh(ribosomeGeo, ribosomeMat, allRiboPts.length);
     {
       const mm = new THREE.Matrix4();
       const qq = new THREE.Quaternion();
       const eu = new THREE.Euler();
       allRiboPts.forEach((p, i) => {
-        const s = 1.1 + hash01(`rb${i}`) * 0.65;
+        const s = 1.15 + hash01(`rb${i}`) * 0.6;
         // 亚基分裂面随机朝向（哑铃形核糖体取向自然化）
         eu.set(hash01(`rbe${i}`) * Math.PI, hash01(`rbe${i}`, 3) * Math.PI * 2, (hash01(`rbe${i}`, 5) - 0.5) * 0.8);
         qq.setFromEuler(eu);
@@ -1262,22 +1372,20 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         ribos.setMatrixAt(i, mm);
       });
       ribos.instanceMatrix.needsUpdate = true;
-      ribos.renderOrder = 47;
+      ribos.renderOrder = cutaway ? 97.6 : 47;
     }
     group.add(ribos);
-    if (sheets) {
-      const p = nucPoint(new THREE.Vector3(Math.cos(-0.62) * Math.cos(1.4), Math.sin(-0.62), Math.cos(-0.62) * Math.sin(1.4)), 1.15);
-      labels.push({ pos: { x: p.x, y: p.y + 0.75, z: p.z }, zh: '粗面内质网（核糖体）', latin: 'Rough ER' });
-      // v16 悬停精度: 锚点半径收敛 2.6→2.1 / 2.4→1.9 + 外周堆各自锚点 ——
-      // 配合 hover 层相对评分, 悬停线粒体时不再被 ER 大感应域错标（用户反馈修复）
-      hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: 2.1, zh: '粗面内质网（核糖体）', latin: 'Rough ER', group: 'endomembrane' });
-      for (let s = 1; s < sheetCurves.length; s += 2) {
-        const a = sheetCurves[s].getPoint(0.45);
-        hover.push({ pos: { x: a.x, y: a.y, z: a.z }, r: 1.9, zh: '粗面内质网（核糖体）', latin: 'Rough ER', group: 'endomembrane' });
-      }
-      for (const sa of stackAnchors) {
-        hover.push({ pos: { x: sa.x, y: sa.y, z: sa.z }, r: 1.7, zh: '粗面内质网（外周囊池堆）', latin: 'Rough ER', group: 'endomembrane' });
-      }
+    if (layers) {
+      // 标注/悬停锚点布在冠的后左/顶/后右可见缘（剖面视图恒可见象限）
+      const anchorAt = (lat: number, lon: number, ofs: number) =>
+        nucPoint(new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)), ofs);
+      const pTop = anchorAt(0.62, 3.6, 0.72);
+      labels.push({ pos: { x: pTop.x, y: pTop.y + 0.75, z: pTop.z }, zh: '粗面内质网（核糖体）', latin: 'Rough ER' });
+      hover.push({ pos: { x: pTop.x, y: pTop.y, z: pTop.z }, r: 2.1, zh: '粗面内质网（核糖体）', latin: 'Rough ER', group: 'endomembrane' });
+      const pL = anchorAt(0.05, 4.1, 0.62);
+      hover.push({ pos: { x: pL.x, y: pL.y, z: pL.z }, r: 1.9, zh: '粗面内质网（核糖体）', latin: 'Rough ER', group: 'endomembrane' });
+      const pR = anchorAt(-0.3, 2.6, 0.62);
+      hover.push({ pos: { x: pR.x, y: pR.y, z: pR.z }, r: 1.9, zh: '粗面内质网（核糖体）', latin: 'Rough ER', group: 'endomembrane' });
     }
   }
 
@@ -1423,9 +1531,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       parts.push({ geo: jGeo, matrix: new THREE.Matrix4().setPosition(jp.x, jp.y, jp.z) });
     }
     const ser = new THREE.Mesh(track(mergeGeoms(parts)), mat({
-      // v12 参照图: SER 石板蓝族亮调
+      // v17 参照图: SER 薰衣草亮族（erSheetHi）
       color: REF.erSheetHi,
-      emissive: '#4a5a6e',
+      emissive: '#5c5878',
       emissiveIntensity: 0.18,
       opacity: 0.45,
       roughness: 0.4,
@@ -1441,18 +1549,21 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const cisCol = new THREE.Color(REF.golgiCis);
     const transCol = new THREE.Color(REF.golgiTrans);
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4; color?: THREE.Color }[] = [];
-    // 非线性极性插值: 暖棕金(cis) → 赭石(trans) —— 顶点色逐层梯度（v16: 8 层梯度更细腻）
-    const POLARITY_MIX = [0, 0.06, 0.14, 0.26, 0.41, 0.58, 0.78, 1];
+    // 非线性极性插值: 饱和藕荷(cis) → 亮粉紫(trans) —— 顶点色逐层梯度（v17 参照图淡藕荷紫族）
+    const POLARITY_MIX = [0, 0.18, 0.42, 0.7, 1];
+    /* v17 弓形新月: 参照图「整体呈弓形/新月形弯曲」—— 层中心沿堆轴推进的同时横向偏移
+     * （二次曲线 cis 原点 → trans 最大偏移）, 叠杯剪影由直堆变为新月; 与 ER 同心壳层形态语言彻底区分 */
+    const bow = 0.34 * GOLGI_SCALE;
     for (let i = 0; i < GOLGI_CIST_N; i++) {
+      const t = i / (GOLGI_CIST_N - 1);
       const col = cisCol.clone().lerp(transCol, POLARITY_MIX[i] ?? 1);
-      // 盘径逐层收窄(cis 最宽) + 杯曲逐层加深(trans 最弯) → 经典「叠杯/漏斗」剪影 —— 与 ER 带状囊池彻底区分
-      // v16: 锥度 0.055→0.062 / 杯梯度 0.035→0.045 —— cis→trans 形态对比更强烈（参照图叠杯读感）
+      // 盘径逐层收窄(cis 最宽) + 杯曲逐层加深(trans 最弯) → 经典「叠杯/漏斗」剪影
       const rad = GOLGI_DISK_R * (1 - i * 0.062);
-      const cup = (0.12 + i * 0.045) * GOLGI_SCALE;
+      const cup = (0.1 + i * 0.055) * GOLGI_SCALE;
       const geo = track(golgiCisternaGeometry(rad, 0.085 * GOLGI_SCALE, cup, i * 7 + 3, perf ? 7 : 9, perf ? 32 : 48));
       const m = new THREE.Matrix4()
         .makeRotationY(i * 0.16)
-        .setPosition(0, i * GOLGI_STEP - GOLGI_STACK_H * 0.5, 0); // 堆中心置于局部原点（cis 底/trans 顶）
+        .setPosition(bow * t * t, i * GOLGI_STEP - GOLGI_STACK_H * 0.5, 0); // 弓形偏移 + 堆中心置于局部原点（cis 底/trans 顶）
       parts.push({ geo, matrix: m, color: col });
     }
     // 池间小管（相邻囊缘的细连接 —— 高尔基「梯骨」结构; 随层梯度同步收窄）
@@ -1462,27 +1573,31 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       const ang = (c / tubN) * Math.PI * 2 + hash01(`gt${c}`) * 0.8;
       const rA = GOLGI_DISK_R * (1 - i * 0.062) * 0.96;
       const rB = GOLGI_DISK_R * (1 - (i + 1) * 0.062) * 0.96;
-      const cupA = (0.12 + i * 0.045) * GOLGI_SCALE;
-      const cupB = (0.12 + (i + 1) * 0.045) * GOLGI_SCALE;
-      const a = new THREE.Vector3(Math.cos(ang) * rA, i * GOLGI_STEP - GOLGI_STACK_H * 0.5 + cupA, Math.sin(ang) * rA);
-      const b = new THREE.Vector3(Math.cos(ang) * rB, (i + 1) * GOLGI_STEP - GOLGI_STACK_H * 0.5 + cupB, Math.sin(ang) * rB);
+      const cupA = (0.1 + i * 0.055) * GOLGI_SCALE;
+      const cupB = (0.1 + (i + 1) * 0.055) * GOLGI_SCALE;
+      const tA = i / (GOLGI_CIST_N - 1);
+      const tB = (i + 1) / (GOLGI_CIST_N - 1);
+      const bowA = 0.34 * GOLGI_SCALE * tA * tA;
+      const bowB = 0.34 * GOLGI_SCALE * tB * tB;
+      const a = new THREE.Vector3(Math.cos(ang) * rA + bowA, i * GOLGI_STEP - GOLGI_STACK_H * 0.5 + cupA, Math.sin(ang) * rA);
+      const b = new THREE.Vector3(Math.cos(ang) * rB + bowB, (i + 1) * GOLGI_STEP - GOLGI_STACK_H * 0.5 + cupB, Math.sin(ang) * rB);
       const mid = a.clone().add(b).multiplyScalar(0.5).multiplyScalar(1.08); // 微外凸弧
       parts.push({ geo: track(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(a, mid, b), 8, 0.028 * GOLGI_SCALE, 6)), color: new THREE.Color(REF.golgiVesicle) });
     }
     const golgi = new THREE.Mesh(track(mergeGeoms(parts)), mat({
       color: '#ffffff',
       vertexColors: true,
-      transmission: transOn ? 0.26 : 0,
+      transmission: transOn ? 0.12 : 0,
       thickness: 0.4,
-      // v15 扁平囊: 更亮清晰的囊面读感（与 ER 的带状囊池形成「盘栈 vs 丝带」形态对比）
-      // v16: 发射 0.5→0.62 + 透膜/剖面双视图下金色恒醒目（用户反馈「不太形象」—— 对比度提升）
+      // v17 参照图严格还原: 淡藕荷紫半透明（VLM 实测 #D8BFD8 族）—— 与 ER 蓝紫同系不同调的内膜家族
+      // 透射 0.26→0.12: 层间不糊化（叠杯层次直读）; 发射 0.55→0.68 亮带恒可辨
       roughness: 0.26,
       opacity: transOn ? 1 : 0.66,
       clearcoat: 0.6,
-      emissive: '#6a5638',
-      emissiveIntensity: 0.62,
+      emissive: '#7a7296',
+      emissiveIntensity: 0.68,
       sheen: 0.6,
-      sheenColor: '#a8906a',
+      sheenColor: '#c8c0dc',
     }));
     /* v15 剖面窗口可见性核心: 默认剖切视图下, 切平面后方的 3D 结构会被 94% 不透明的剖面盘
      * （section-view cytoDisc/nucDisc, renderOrder 96/98, 不写深度）覆盖 —— 后半侧细胞器仅余 ~6% 透读。
@@ -1494,7 +1609,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const budGeo = track(new THREE.SphereGeometry(1, 12, 10));
     const budMat = mat({
       color: REF.golgiTrans,
-      emissive: '#6a543a',
+      emissive: '#8078a0',
       emissiveIntensity: 0.45,
       opacity: 0.72,
       roughness: 0.35,
@@ -1527,7 +1642,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const cisBudGeo = track(new THREE.SphereGeometry(1, 10, 8));
     const cisBudMat = mat({
       color: REF.golgiCis,
-      emissive: '#4a3f2a',
+      emissive: '#645e80',
       emissiveIntensity: 0.42,
       opacity: 0.72,
       roughness: 0.35,

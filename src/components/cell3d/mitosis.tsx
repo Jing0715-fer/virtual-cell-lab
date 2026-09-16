@@ -8,8 +8,8 @@
  *   - REF 参照图配色系统（染色体熏衣草族/微管石板族/线粒体暖古铜/膜 tint 同源）
  *   - organelleMaterial 有机流光材质工厂 + 程序化法线贴图
  *   - 程序化几何工具（mergeGeoms/displaceGeometry/hash01）
- *   - v16: flatCisternaGeometry/golgiCisternaGeometry 直接复用主细胞几何工厂 ——
- *     分裂细胞（「干细胞」）的 RER 核周囊池冠 + 高尔基扁平囊堆与主细胞同一建模标准
+ *   - v17: erLamellaGeometry/golgiCisternaGeometry 直接复用主细胞几何工厂 ——
+ *     分裂细胞（「干细胞」）的 RER 千层饼核周冠 + 高尔基弓形叠杯堆与主细胞同一建模标准
  *
  * v16 用户反馈修复:
  *   - 质膜: 透射管线 → 普适 alpha 薄纱（0.42/0.5 恒透明 —— 任何 GPU 上内部主角直读）
@@ -20,8 +20,8 @@
  *   - 纺锤体: 动粒微管（逐染色体双极连接, 逐帧跟随）/ 极微管（中央重叠区）/ 星体微管（逐帧膜面钳制）
  *   - 核被膜: 间期完整 → 前中期崩解为膜泡碎片（lamins 磷酸化解体语义）→ 末期双子核重组
  *   - 质膜: 逐帧轮廓形态学（球 → 拉长 → 哑铃 → 中间体连接的两个子细胞）
- *   - 粗面内质网: 核周双丝带囊池冠 + 满铺核糖体（间期 → 前期管网化回缩 → 末期双子核重建）
- *   - 高尔基体: 5 层叠杯囊堆 + trans 出芽（间期核旁 → 前中期碎片化 → 末期双子细胞各一栈）
+ *   - 粗面内质网: 千层饼核周层叠囊冠 + 「黄沙」核糖体（间期 → 前期管网化回缩 → 末期双子核重建）
+ *   - 高尔基体: 5 层弓形叠杯囊堆 + trans 出芽（间期核旁 → 前中期碎片化 → 末期双子细胞各一栈）
  *   - 细胞器分配: 线粒体/运输囊泡/外周 ER 管网/核糖体 —— 双子细胞不均等分配
  *   - 收缩环（actomyosin）→ 中间体（致密胞质桥）
  *   - 全程悬停标记（复用 OrganelleHoverLayer —— 相位感知动态目标）
@@ -32,7 +32,7 @@ import { useFrame } from '@react-three/fiber';
 import { organelleMaterial, REF, createTimeUniform, type TimeUniform } from './materials';
 import { mergeGeoms, hash01 } from './procedural';
 import { organicNormalMap, stripeNormalMap } from './textures';
-import { cisternaFrames, flatCisternaGeometry, golgiCisternaGeometry } from './organelles';
+import { erLamellaGeometry, erLamellaRibosomes, golgiCisternaGeometry, type ErLamellaOpts, type ErLamellaLayer } from './organelles';
 import { OrganelleHoverLayer, type HoverTarget } from './hover-labels';
 import { useLang } from '@/lib/i18n';
 
@@ -558,9 +558,9 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     r: 0.14 + hash01(`vs${i}`) * 0.12,
   }));
   group.add(vesicles);
-  /* ---------- 高尔基体（v16: 复用 golgiCisternaGeometry —— 扁平囊堆「叠杯」, 主细胞同款形态标准） ----------
+  /* ---------- 高尔基体（v17: 复用 golgiCisternaGeometry —— 5 层弓形叠杯堆, 主细胞同款形态标准） ----------
    * 旧 golgiMini = TorusGeometry 弧堆 —— 与 ER 管系视觉语言混同（用户反馈「更像内质网」）;
-   *  v16: 5 层弯透镜盘叠杯栈（cis 宽 → trans 窄弯, 顶点色梯度）+ trans 出芽囊泡;
+   *  v17: 5 层舒展弓形叠杯栈（cis 宽 → trans 窄弯 + 新月偏移, 顶点色淡藕荷紫梯度）+ trans 出芽囊泡;
    *  间期核旁一栈 → 前中期碎片化淡出 → 末期双子细胞各重建一栈（核旁位） */
   const golgiStackMat = mat({
     color: '#ffffff',
@@ -570,11 +570,11 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     roughness: 0.28,
     opacity: 0,
     clearcoat: 0.5,
-    // v16: 发射 0.55 —— 透纱质膜下金色囊堆恒可辨
-    emissive: '#6a5638',
+    // v17 参照图淡藕荷紫 —— 透纱质膜下囊堆恒可辨
+    emissive: '#7a7296',
     emissiveIntensity: 0.55,
     sheen: 0.55,
-    sheenColor: '#a8906a',
+    sheenColor: '#c8c0dc',
   });
   const GOLGI_STACK_SEED = 31;
   const buildGolgiStack = (scale: number, seed: number): THREE.Group => {
@@ -583,25 +583,27 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     const cisCol = new THREE.Color(REF.golgiCis);
     const transCol = new THREE.Color(REF.golgiTrans);
     const CIST_N = 5;
-    const step = 0.165 * scale;
+    const step = 0.28 * scale;
     const diskR = 1.15 * scale;
     const stackH = CIST_N * step;
-    const MIX = [0, 0.12, 0.3, 0.55, 1];
+    const MIX = [0, 0.18, 0.42, 0.7, 1];
+    const bow = 0.24 * scale; // v17 弓形新月偏移（主细胞同款语义）
     for (let i = 0; i < CIST_N; i++) {
+      const t = i / (CIST_N - 1);
       const col = cisCol.clone().lerp(transCol, MIX[i]);
       const rad = diskR * (1 - i * 0.062);
-      const cup = (0.12 + i * 0.045) * scale;
+      const cup = (0.1 + i * 0.055) * scale;
       const geo = track(golgiCisternaGeometry(rad, 0.082 * scale, cup, seed + i * 7, perf ? 6 : 8, perf ? 26 : 40));
-      const m = new THREE.Matrix4().makeRotationY(i * 0.16).setPosition(0, i * step - stackH * 0.5, 0);
+      const m = new THREE.Matrix4().makeRotationY(i * 0.16).setPosition(bow * t * t, i * step - stackH * 0.5, 0);
       parts.push({ geo, matrix: m, color: col });
     }
-    // trans 面出芽囊泡 ×5（顶点色并入同一网格 —— 单 draw call）
+    // trans 面出芽囊泡 ×5（顶点色并入同一网格 —— 单 draw call; 跟随弓形偏移）
     for (let v = 0; v < 5; v++) {
       const r = (0.1 + hash01(`gb${seed}${v}`) * 0.05) * scale;
       const ang = v * (Math.PI * 2 / 5) + hash01(`gba${seed}${v}`) * 0.6;
       const rr = diskR * (0.5 + hash01(`gbr${seed}${v}`) * 0.42);
       const sph = track(new THREE.SphereGeometry(r, 8, 6));
-      sph.translate(Math.cos(ang) * rr, stackH * 0.5 + 0.14 * scale, Math.sin(ang) * rr);
+      sph.translate(Math.cos(ang) * rr + bow, stackH * 0.5 + 0.14 * scale, Math.sin(ang) * rr);
       parts.push({ geo: sph, color: new THREE.Color(REF.golgiTrans) });
     }
     const mesh = new THREE.Mesh(track(mergeGeoms(parts)), golgiStackMat);
@@ -630,25 +632,26 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   }
   group.add(golgiDauA, golgiDauB);
 
-  /* ---------- 粗面内质网（v16: 复用 flatCisternaGeometry —— 核周双丝带囊池冠 + 满铺核糖体） ----------
+  /* ---------- 粗面内质网（v17: 复用 erLamellaGeometry —— 千层饼核周层叠囊冠 + 「黄沙」核糖体） ----------
    *  用户反馈「分裂演示的细胞（干细胞）没有粗面内质网」—— 间期细胞器全套补齐;
-   *  间期核周冠 → 前期 ER 重构管网化回缩（NEBD 语义）→ 末期围绕双子核重建双冠 */
+   *  间期核周冠 → 前期 ER 重构管网化回缩（NEBD 语义）→ 末期围绕双子核重建双冠
+   *  v17: 与主细胞同一「千层饼」形态标准（连续大面积弧形膜层层包裹核, 非旧带状碎片） */
   const rerMat = mat({
     color: REF.erSheet,
-    emissive: '#4a5a70',
-    emissiveIntensity: 0.34,
+    emissive: '#66608a',
+    emissiveIntensity: 0.4,
     roughness: 0.24,
     normalMap: orgNormal,
     normalScale: 0.4,
     opacity: 0,
     clearcoat: 0.5,
     sheen: 0.55,
-    sheenColor: REF.sheen,
-    flow: { color: '#74869c', strength: 0.16, scale: 0.8, speed: 0.07, rim: 0.2 },
+    sheenColor: '#cdc4e2',
+    flow: { color: '#9c96b8', strength: 0.16, scale: 0.8, speed: 0.07, rim: 0.2 },
   });
   const rerRibMat = track(new THREE.MeshStandardMaterial({
-    color: '#a07a54',
-    emissive: '#8a6240',
+    color: '#c9a54e',
+    emissive: '#a8842e',
     emissiveIntensity: 1.0,
     roughness: 0.5,
     transparent: true,
@@ -656,46 +659,33 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   const rerRiboGeo = track(new THREE.SphereGeometry(0.058, 5, 4));
   const ORIGIN = new THREE.Vector3(0, 0, 0);
   const buildRerCrown = (scale: number, seedTag: string): { mesh: THREE.Mesh; ribos: THREE.InstancedMesh } => {
-    const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
+    const parts: { geo: THREE.BufferGeometry }[] = [];
     const riboPts: THREE.Vector3[] = [];
-    const sheets = perf ? 3 : 5;
-    const ribbons = perf ? 1 : 2;
+    const layers = perf ? 2 : 4;
     const nR = NUC_R * scale;
-    for (let s = 0; s < sheets; s++) {
-      for (let rb = 0; rb < ribbons; rb++) {
-        // 双丝带/壳层（主细胞 v16 同款「片层迷宫」生成参数的迷你版）
-        const latBase = -0.7 + s * 0.3 + rb * 0.08;
-        const lon0 = -0.9 + s * 0.3 + rb * 0.55 * Math.PI;
-        const lonSpan = Math.PI * 1.15;
-        const ofs = (0.45 + s * 0.14) * scale;
-        const pts: THREE.Vector3[] = [];
-        for (let k = 0; k <= 10; k++) {
-          const t = k / 10;
-          const lat = latBase + Math.sin(t * Math.PI * 1.6 + s * 0.9 + rb * 1.5) * 0.15;
-          const lon = lon0 + t * lonSpan;
-          const dir = new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)).normalize();
-          const vofs = ofs + Math.sin(t * Math.PI * 1.3 + s * 1.1 + rb * 0.7) * 0.1 * scale;
-          pts.push(dir.clone().multiplyScalar(nR + vofs));
-        }
-        const curve = new THREE.CatmullRomCurve3(pts);
-        const frames = cisternaFrames(curve, perf ? 18 : 26, ORIGIN);
-        parts.push({ geo: track(flatCisternaGeometry(frames, 1.02 * scale, 0.09 * scale, 10)) });
-        // 满铺核糖体点彩（两宽面 × 5 列）
-        const wFrac = perf ? [-0.5, 0, 0.5] : [-0.65, -0.32, 0, 0.32, 0.65];
-        for (let i = 1; i < frames.length - 1; i++) {
-          const { p, n, b } = frames[i];
-          for (const f of wFrac) {
-            for (const face of [1, -1]) {
-              const jit = (hash01(`${seedTag}rj${s}${rb}${i}${f}${face}`) - 0.5) * 0.02;
-              riboPts.push(new THREE.Vector3(
-                p.x + n.x * face * 0.075 * scale + b.x * f * 0.5 + jit,
-                p.y + n.y * face * 0.075 * scale + b.y * f * 0.5 + jit,
-                p.z + n.z * face * 0.075 * scale + b.z * f * 0.5 + jit,
-              ));
-            }
-          }
-        }
-      }
+    // 冠轴朝后上偏左（开口朝前下右 —— 主细胞 v17 构图语义 + 高尔基主栈(前右侧)方向间隙 ~20°:
+    // v17a 教训: 让位外跃层会挡在高尔基与相机之间（先写深度 → 高尔基后半被深度剔除「消失」）,
+    // 方向性让位（轴倾斜）才是分裂舞台正确解 —— 冠层与囊堆零几何交集）
+    const crownAxis = new THREE.Vector3(-0.2, 0.42, -0.88).normalize();
+    // 子细胞迷你冠收窄覆盖（子核侧向的高尔基子栈 ~117° 处无冠覆盖）
+    const coneCap = scale < 0.9 ? 1.72 : 2.3;
+    const erOpts: ErLamellaOpts = {
+      radiusAt: () => nR,
+      center: ORIGIN,
+    };
+    for (let L = 0; L < layers; L++) {
+      const axis = crownAxis.clone();
+      axis.applyAxisAngle(new THREE.Vector3(0, 1, 0), (hash01(`${seedTag}ax${L}`) - 0.5) * 0.22);
+      axis.applyAxisAngle(new THREE.Vector3(1, 0, 0), (hash01(`${seedTag}ay${L}`) - 0.5) * 0.14);
+      const layer: ErLamellaLayer = {
+        offset: (0.14 + L * 0.15) * scale,
+        cone: Math.min(2.02 + L * 0.055, coneCap),
+        axis: axis.normalize(),
+        seed: 5 + L * 13,
+      };
+      parts.push({ geo: track(erLamellaGeometry({ ...erOpts, layer, thickness: 0.085 * scale, latSeg: perf ? 12 : 22, lonSeg: perf ? 26 : 48 })) });
+      const riboN = perf ? 70 : 200;
+      riboPts.push(...erLamellaRibosomes({ ...erOpts, layer }, Math.round(riboN * scale * 0.7 + riboN * 0.3), `${seedTag}L${L}`));
     }
     const mesh = new THREE.Mesh(track(mergeGeoms(parts)), rerMat);
     mesh.renderOrder = 44;
@@ -724,12 +714,12 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   // 外周 ER 管网（SER 语义; 前期回缩 → 末期重建 —— RER 冠之外的持续 ER 网络）
   const erMat = mat({
     color: REF.erSheet,
-    emissive: '#3a4a5c',
+    emissive: '#54507a',
     emissiveIntensity: 0.22,
     roughness: 0.38,
     opacity: 0,
     clearcoat: 0.3,
-    flow: { color: '#74869c', strength: 0.12, scale: 0.9, speed: 0.06, rim: 0.16 },
+    flow: { color: '#9c96b8', strength: 0.12, scale: 0.9, speed: 0.06, rim: 0.16 },
   });
   const erNet = (() => {
     const parts: { geo: THREE.BufferGeometry }[] = [];
@@ -752,7 +742,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   group.add(erNet);
   // 游离核糖体微粒（翻译车间持续运转）
   const riboGeo = track(new THREE.SphereGeometry(0.052, 5, 4));
-  const riboMat = track(new THREE.MeshStandardMaterial({ color: '#a07a54', emissive: '#8a6240', emissiveIntensity: 0.85, roughness: 0.5 }));
+  const riboMat = track(new THREE.MeshStandardMaterial({ color: '#c9a54e', emissive: '#a8842e', emissiveIntensity: 0.85, roughness: 0.5 }));
   const RIB_N = perf ? 60 : 120;
   const ribos = new THREE.InstancedMesh(riboGeo, riboMat, RIB_N);
   const ribSeeds = Array.from({ length: RIB_N }, (_, i) => ({

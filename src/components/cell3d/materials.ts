@@ -31,15 +31,17 @@ export const REF = {
   mitoMatrix: '#392b27',
   mitoAtp: '#c9a227',
   mtdna: '#a8889a',
-  /* 内质网（石板蓝族） */
-  erSheet: '#56616e',
-  erSheetHi: '#6e7f92',
-  erLumen: '#74869c',
-  ribosome: '#8a6a4a',
-  /* 高尔基（暖棕金 → 赭石梯度） */
-  golgiCis: '#6b5a42',
-  golgiTrans: '#8a7a58',
-  golgiVesicle: '#77684c',
+  /* 内质网（v17 参照图严格还原: 薰衣草紫族 —— 像素实测核周 ER 亮带 199,189,218 / 136,135,167 / 140,142,178,
+   * 与核同色系（内膜系统同源性科学叙事: 外核膜连续于 rER）; 核糖体亮金「黄沙」实测 207,189,164 族） */
+  erSheet: '#948fae',
+  erSheetHi: '#a29dbd',
+  erLumen: '#9c96b8',
+  ribosome: '#c9a54e',
+  /* 高尔基（v17 参照图严格还原: 淡藕荷紫族 —— VLM 实测 #D8BFD8/#E6CEE7 淡粉紫半透明;
+   * cis 饱和藕荷 → trans 亮粉紫梯度, 与 ER 蓝紫形成「同系不同调」的内膜家族层次） */
+  golgiCis: '#9a90b4',
+  golgiTrans: '#cfc6dd',
+  golgiVesicle: '#ada4c4',
   /* 溶酶体（暗红棕 —— 酸性水解酶仓） */
   lyso: '#7a4a41',
   lysoHi: '#a06255',

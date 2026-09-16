@@ -187,7 +187,7 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
     for (let s = 0; s < stack; s++) {
       ctx.beginPath();
       ctx.arc(0, -s * 3.1, 13 - s * 0.6, Math.PI * 0.12, Math.PI * 0.88);
-      ctx.strokeStyle = `rgba(138, 106, 72, ${0.55 - s * 0.07})`;
+      ctx.strokeStyle = `rgba(154, 144, 180, ${0.55 - s * 0.07})`;
       ctx.lineWidth = 2.2 - s * 0.3;
       ctx.stroke();
     }
@@ -195,7 +195,7 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
     for (let v = 0; v < 3; v++) {
       ctx.beginPath();
       ctx.arc(-13 + v * 5.2, -stack * 3.1 - 3.5, 1.8, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(160, 106, 58, 0.4)';
+      ctx.fillStyle = 'rgba(173, 164, 196, 0.4)';
       ctx.fill();
     }
     ctx.restore();
