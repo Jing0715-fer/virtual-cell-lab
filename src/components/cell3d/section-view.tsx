@@ -105,11 +105,11 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
   const cy = SIZE / 2;
   const rMem = SIZE / 2 - 4;
 
-  /* --- 细胞质基质（径向渐变, 外深内浅） --- */
+  /* --- 细胞质基质（径向渐变, 外深内浅） --- v12 参照图: 暖石板族 */
   const cyto = ctx.createRadialGradient(cx, cy, rMem * 0.3, cx, cy, rMem);
-  cyto.addColorStop(0, 'rgba(13, 74, 68, 0.80)');
-  cyto.addColorStop(0.55, 'rgba(10, 56, 52, 0.74)');
-  cyto.addColorStop(1, 'rgba(6, 34, 32, 0.90)');
+  cyto.addColorStop(0, 'rgba(58, 54, 50, 0.80)');
+  cyto.addColorStop(0.55, 'rgba(46, 42, 40, 0.74)');
+  cyto.addColorStop(1, 'rgba(34, 31, 29, 0.90)');
   ctx.fillStyle = cyto;
   ctx.beginPath();
   ctx.arc(cx, cy, rMem, 0, Math.PI * 2);
@@ -121,7 +121,7 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
     const rr = rMem * (0.18 + rnd() * 0.8);
     const x = cx + Math.cos(a) * rr;
     const y = cy + Math.sin(a) * rr * 0.96;
-    ctx.fillStyle = rnd() > 0.7 ? 'rgba(94, 234, 212, 0.10)' : 'rgba(45, 212, 191, 0.055)';
+    ctx.fillStyle = rnd() > 0.7 ? 'rgba(145, 175, 207, 0.10)' : 'rgba(94, 110, 130, 0.055)';
     const s = 0.8 + rnd() * 1.6;
     ctx.fillRect(x, y, s, s);
   }
@@ -141,14 +141,14 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
     ctx.rotate(rot);
     ctx.beginPath();
     ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(26, 46, 5, 0.85)';
+    ctx.fillStyle = 'rgba(42, 30, 24, 0.85)';
     ctx.fill();
     ctx.lineWidth = 1.6;
-    ctx.strokeStyle = 'rgba(132, 204, 22, 0.6)';
+    ctx.strokeStyle = 'rgba(140, 96, 80, 0.6)';
     ctx.stroke();
     ctx.beginPath();
     ctx.ellipse(0, 0, rx - 2.6, ry - 2.6, 0, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(101, 163, 13, 0.5)';
+    ctx.strokeStyle = 'rgba(110, 74, 62, 0.5)';
     ctx.lineWidth = 1.1;
     ctx.stroke();
     // 波浪嵴线（沿长轴 4-5 条, 裁剪于椭圆内 —— 与 2D 形态学/3D 板层嵴同构）
@@ -165,7 +165,7 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
         if (xx === -rx + 3) ctx.moveTo(xx, wy);
         else ctx.lineTo(xx, wy);
       }
-      ctx.strokeStyle = 'rgba(101, 163, 13, 0.5)';
+      ctx.strokeStyle = 'rgba(101, 70, 54, 0.5)';
       ctx.lineWidth = 1.2;
       ctx.stroke();
     }
@@ -173,7 +173,7 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
     ctx.restore();
   }
 
-  /* --- 高尔基体剖面（3 组 × 4 条平行弧线堆 = 层叠扁平囊截面，对应 3D 高尔基重塑） --- */
+  /* --- 高尔基体剖面（3 组 × 4 条平行弧线堆 = 层叠扁平囊截面，对应 3D 高尔基重塑） --- v12 参照图: 暖棕金族 */
   for (let g = 0; g < 3; g++) {
     const a = rnd() * Math.PI * 2;
     const rr = rMem * (0.5 + rnd() * 0.4);
@@ -186,7 +186,7 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
     for (let s = 0; s < stack; s++) {
       ctx.beginPath();
       ctx.arc(0, -s * 3.1, 13 - s * 0.6, Math.PI * 0.12, Math.PI * 0.88);
-      ctx.strokeStyle = `rgba(180, 83, 9, ${0.55 - s * 0.07})`;
+      ctx.strokeStyle = `rgba(138, 106, 72, ${0.55 - s * 0.07})`;
       ctx.lineWidth = 2.2 - s * 0.3;
       ctx.stroke();
     }
@@ -194,7 +194,7 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
     for (let v = 0; v < 3; v++) {
       ctx.beginPath();
       ctx.arc(-13 + v * 5.2, -stack * 3.1 - 3.5, 1.8, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(217, 119, 6, 0.4)';
+      ctx.fillStyle = 'rgba(160, 106, 58, 0.4)';
       ctx.fill();
     }
     ctx.restore();
@@ -213,12 +213,12 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
       if (x === -34) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
-    ctx.strokeStyle = 'rgba(13, 148, 136, 0.5)';
+    ctx.strokeStyle = 'rgba(90, 106, 126, 0.5)';
     ctx.lineWidth = 1.8;
     ctx.stroke();
     for (let x = -32; x <= 32; x += 6) {
       const y = Math.sin(x * 0.22 + e * 2) * 5 + 3.4;
-      ctx.fillStyle = 'rgba(45, 212, 191, 0.35)';
+      ctx.fillStyle = 'rgba(138, 106, 74, 0.35)';
       ctx.fillRect(x - 0.7, y - 0.7, 1.5, 1.5);
     }
     ctx.restore();
@@ -240,15 +240,15 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
     ctx.stroke();
   }
 
-  /* --- 质膜剖面（双层磷脂线 + 膜间腔 + 糖被短须） --- */
+  /* --- 质膜剖面（双层磷脂线 + 膜间腔 + 糖被短须） --- v12 参照图: 外缘亮蓝线（实测高光色 145,175,207） */
   ctx.beginPath();
   ctx.arc(cx, cy, rMem, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(45, 212, 191, 0.9)';
+  ctx.strokeStyle = 'rgba(145, 175, 207, 0.9)';
   ctx.lineWidth = 3.2;
   ctx.stroke();
   ctx.beginPath();
   ctx.arc(cx, cy, rMem - 7, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(15, 118, 110, 0.66)';
+  ctx.strokeStyle = 'rgba(80, 100, 120, 0.66)';
   ctx.lineWidth = 1.7;
   ctx.stroke();
   const glyco = Math.floor((rMem * 2 * Math.PI) / 14);
@@ -261,7 +261,7 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
     ctx.beginPath();
     ctx.moveTo(x1, y1);
     ctx.lineTo(x2, y2);
-    ctx.strokeStyle = 'rgba(45, 212, 191, 0.3)';
+    ctx.strokeStyle = 'rgba(145, 175, 207, 0.3)';
     ctx.lineWidth = 1;
     ctx.stroke();
   }
@@ -285,12 +285,12 @@ function makeNucleusTexture(N: number, seed = 7): THREE.CanvasTexture | null {
   const cy = SIZE / 2;
   const rNuc = SIZE / 2 - 4;
 
-  /* --- 常染色质基底（中心浅 → 边缘异染色质深） --- */
+  /* --- 常染色质基底（中心浅 → 边缘异染色质深） --- v12 参照图: 熏衣草灰紫族 */
   const nuc = ctx.createRadialGradient(cx, cy, rNuc * 0.08, cx, cy, rNuc);
-  nuc.addColorStop(0, 'rgba(107, 33, 168, 0.72)');
-  nuc.addColorStop(0.62, 'rgba(88, 28, 135, 0.80)');
-  nuc.addColorStop(0.86, 'rgba(59, 7, 100, 0.9)');
-  nuc.addColorStop(1, 'rgba(46, 16, 101, 0.96)');
+  nuc.addColorStop(0, 'rgba(106, 90, 120, 0.72)');
+  nuc.addColorStop(0.62, 'rgba(90, 74, 104, 0.80)');
+  nuc.addColorStop(0.86, 'rgba(74, 61, 88, 0.9)');
+  nuc.addColorStop(1, 'rgba(64, 52, 78, 0.96)');
   ctx.fillStyle = nuc;
   ctx.beginPath();
   ctx.arc(cx, cy, rNuc, 0, Math.PI * 2);
@@ -299,7 +299,7 @@ function makeNucleusTexture(N: number, seed = 7): THREE.CanvasTexture | null {
   /* --- 异染色质边集环带（核周缘致密, 符合间期核型） --- */
   ctx.beginPath();
   ctx.arc(cx, cy, rNuc - 4.5, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(46, 16, 101, 0.5)';
+  ctx.strokeStyle = 'rgba(64, 52, 78, 0.5)';
   ctx.lineWidth = 8;
   ctx.stroke();
 
@@ -313,7 +313,7 @@ function makeNucleusTexture(N: number, seed = 7): THREE.CanvasTexture | null {
     const rr = rNuc * (0.2 + rnd() * 0.55);
     ctx.beginPath();
     ctx.arc(cx + Math.cos(a0) * rr * 0.4, cy + Math.sin(a0) * rr * 0.4, rr, a0, a0 + Math.PI * (0.7 + rnd() * 0.9));
-    ctx.strokeStyle = 'rgba(168, 85, 247, 0.17)';
+    ctx.strokeStyle = 'rgba(138, 122, 155, 0.17)';
     ctx.lineWidth = 1.4;
     ctx.stroke();
   }
@@ -328,14 +328,14 @@ function makeNucleusTexture(N: number, seed = 7): THREE.CanvasTexture | null {
     const ny = cy + Math.sin(a) * rr;
     const nr = rNuc * (0.16 + rnd() * 0.07);
     const gr = ctx.createRadialGradient(nx, ny, 1, nx, ny, nr);
-    gr.addColorStop(0, 'rgba(251, 113, 133, 0.88)');
-    gr.addColorStop(0.55, 'rgba(159, 18, 57, 0.9)');
-    gr.addColorStop(1, 'rgba(76, 5, 25, 0.94)');
+    gr.addColorStop(0, 'rgba(122, 98, 140, 0.88)');
+    gr.addColorStop(0.55, 'rgba(94, 74, 110, 0.9)');
+    gr.addColorStop(1, 'rgba(66, 50, 80, 0.94)');
     ctx.fillStyle = gr;
     ctx.beginPath();
     ctx.arc(nx, ny, nr, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = 'rgba(244, 63, 94, 0.4)';
+    ctx.strokeStyle = 'rgba(110, 90, 138, 0.4)';
     ctx.lineWidth = 1.4;
     ctx.stroke();
   }
@@ -343,12 +343,12 @@ function makeNucleusTexture(N: number, seed = 7): THREE.CanvasTexture | null {
   /* --- 核被膜双线（外膜 + 内膜 + 核周间隙） + 核孔复合体剖面 --- */
   ctx.beginPath();
   ctx.arc(cx, cy, rNuc, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(244, 114, 182, 0.78)';
+  ctx.strokeStyle = 'rgba(154, 160, 174, 0.78)';
   ctx.lineWidth = 2.4;
   ctx.stroke();
   ctx.beginPath();
   ctx.arc(cx, cy, rNuc - 6.5, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(190, 24, 93, 0.55)';
+  ctx.strokeStyle = 'rgba(110, 101, 133, 0.55)';
   ctx.lineWidth = 1.3;
   ctx.stroke();
   const npores = Math.floor((rNuc * 2 * Math.PI) / 22);
@@ -821,7 +821,7 @@ export function SectionClipController({
           </mesh>
           {/* 剖面发光边缘（真实轮廓缘带三角条, 随相交轮廓贴合; 纯视觉 —— 不参与拾取） */}
           <mesh ref={cytoRingRef} geometry={cytoRibbon} renderOrder={97} raycast={() => null} dispose={null}>
-            <meshBasicMaterial color="#5eead4" transparent opacity={0.65} side={THREE.DoubleSide} depthWrite={false} fog={false} />
+            <meshBasicMaterial color="#91afcf" transparent opacity={0.65} side={THREE.DoubleSide} depthWrite={false} fog={false} />
           </mesh>
           {/* 核剖面盘（真实核相交轮廓; v8 多核每盘独立 —— 肝细胞双核切面双核盘; 纯视觉 —— 不参与拾取） */}
           {nucleiList.map((_, ni) => (

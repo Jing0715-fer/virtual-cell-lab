@@ -261,7 +261,9 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, sim, snapPlane }:
   const cell = CELL_TYPE_MAP.get(cellId);
 
   const morph = cell?.morphology ?? 'hepatocyte';
-  const tint = cell?.tint?.[0] ?? '#134e4a';
+  // v12 参照图: 类型 tint 向暖中性石板收敛 62%（保留类型色相身份的同时, 细胞"肉质"整体
+  // 对齐参照图的低饱和暖棕/灰调读感 —— 实测参照中场 (84,73,69) vs 旧纯 tint 渲染 (16,45,43) 青绿）
+  const tint = `#${new THREE.Color(cell?.tint?.[0] ?? '#134e4a').lerp(new THREE.Color('#564e48'), 0.62).getHexString()}`;
 
   const baseLayout = useMemo(
     () => (graph ? layout3D(graph.core.nodes, graph.core.edges, morph) : null),
@@ -283,9 +285,9 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, sim, snapPlane }:
         <planeGeometry args={[150, 90]} />
         <meshBasicMaterial
           map={glowSpriteTexture()}
-          color="#0d5c5c"
+          color="#0a1c2a"
           transparent
-          opacity={0.55}
+          opacity={0.42}
           blending={THREE.AdditiveBlending}
           depthWrite={false}
           fog={false}
@@ -620,8 +622,8 @@ export function VirtualCell3D() {
           gl={{ antialias: !perfMode, alpha: true, preserveDrawingBuffer: !perfMode }}
           events={canvasRelativePointerEvents}
           onCreated={({ gl }) => {
-            // v11 图片级曝光: ACES 胶片色调映射下的微幅提升（暗部提升而不发灰）
-            gl.toneMappingExposure = 1.12;
+            // v12 图片级曝光: ACES 胶片色调映射下的参照图亮度对标（中场实测 36→68 需 ×1.8; ACES 中段线性度约 0.6 → 曝光 ×1.55）
+            gl.toneMappingExposure = 1.55;
             // WebGL 上下文丢失防护（低端 GPU 内存回收时常见）: 提示 + 浏览器自动恢复
             gl.domElement.addEventListener('webglcontextlost', (e) => {
               e.preventDefault();
@@ -634,24 +636,28 @@ export function VirtualCell3D() {
           onPointerMissed={() => selectNode(null)}
         >
           <ambientLight intensity={0.4} />
-          <directionalLight position={[6, 10, 8]} intensity={0.9} color="#e7fffb" />
-          {/* 轮廓背光（高保真插画的“边缘分离”读感: 逆侧冷青勾出质膜边緣） */}
-          <directionalLight position={[-9, 5, -11]} intensity={0.62} color="#6ff2df" />
-          <pointLight position={[0, 2.2, 0]} intensity={16} distance={26} decay={2} color="#14b8a6" />
-          <pointLight position={[0, 0, 0]} intensity={7} distance={9} decay={2} color="#fb7185" />
-          {/* 指数雾: 深度层次感（远端结构淡入背景） */}
-          <fogExp2 attach="fog" args={['#020a12', 0.0072]} />
+          {/* v12 参照图光照: 左侧暖白主光（实测 lum 左 123 vs 右 40 —— 强方向性 three-point 变体） */}
+          <directionalLight position={[-15, 7, 9]} intensity={1.7} color="#fff1e0" />
+          {/* 右后冷蓝补光（低强度拉开立体角） */}
+          <directionalLight position={[11, 5, -7]} intensity={0.4} color="#b9cfe8" />
+          {/* 后缘光（剪影分离） */}
+          <directionalLight position={[0, 9, -13]} intensity={0.5} color="#7a95b8" />
+          {/* 内透光: 弱环境填充（参照图整体低照度氛围） */}
+          <pointLight position={[0, 2.2, 0]} intensity={5} distance={26} decay={2} color="#4a8a80" />
+          <pointLight position={[0, 0, 0]} intensity={3} distance={9} decay={2} color="#6a5a7a" />
+          {/* 指数雾: 深度层次感（远端结构淡入背景; v12 参照图纯黑背景 —— 色调加深） */}
+          <fogExp2 attach="fog" args={['#010509', 0.0062]} />
           {/* 程序化环境光照: Lightformer 阵列烘焙镜面形体感（离线, 无外部 HDR; v11 分辨率翻倍 —— 湿润透射材质的高光形体更细腻） */}
           <Environment resolution={perfMode ? 64 : 256} frames={1}>
-            <color attach="background" args={['#02101a']} />
-            {/* 顶部主光: 冷青生物荧光 */}
-            <Lightformer intensity={2.4} color="#7ffcf0" position={[0, 14, 4]} scale={[12, 8, 1]} rotation-x={-Math.PI / 2.2} />
-            {/* 侧逆光: 暖琥珀（分子标签色系） */}
-            <Lightformer intensity={1.6} color="#ffc87a" position={[-12, 2, 5]} scale={[7, 5, 1]} rotation-y={Math.PI / 2.6} />
-            {/* 右侧补光: 玫瑰（转录/核色系） */}
-            <Lightformer intensity={1.1} color="#ff9ab5" position={[12, -3, 2]} scale={[6, 4, 1]} rotation-y={-Math.PI / 2.4} />
-            {/* 底部微光: 深青 */}
-            <Lightformer intensity={0.7} color="#0e5f56" position={[0, -12, 0]} scale={[14, 14, 1]} rotation-x={Math.PI / 2} />
+            <color attach="background" args={['#02070c']} />
+            {/* v12 参照图环境光: 左侧暖白主光位（与平行主光同侧 —— 镜面高光形体一致） */}
+            <Lightformer intensity={3.1} color="#fff0dd" position={[-13, 4, 8]} scale={[9, 7, 1]} rotation-y={Math.PI / 2.4} />
+            {/* 右侧冷蓝补光 */}
+            <Lightformer intensity={1.0} color="#9ab8d8" position={[12, 3, 4]} scale={[7, 5, 1]} rotation-y={-Math.PI / 2.3} />
+            {/* 顶冷蓝柔光 */}
+            <Lightformer intensity={0.8} color="#7a95b8" position={[0, 12, 6]} scale={[12, 8, 1]} rotation-x={-Math.PI / 2.3} />
+            {/* 底深蓝微光 */}
+            <Lightformer intensity={0.35} color="#16283a" position={[0, -12, 0]} scale={[14, 14, 1]} rotation-x={Math.PI / 2} />
           </Environment>
           <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} sim={sim} snapPlane={snapPlane} />
           <SceneCapture />
@@ -698,7 +704,7 @@ export function VirtualCell3D() {
                 />
               )}
               {!perfMode && <AdaptiveDof controlsRef={controlsRef} bokehScale={2.4} />}
-              <Bloom mipmapBlur intensity={1.42} luminanceThreshold={0.46} luminanceSmoothing={0.32} />
+              <Bloom mipmapBlur intensity={1.05} luminanceThreshold={0.54} luminanceSmoothing={0.32} />
               {!perfMode && (
                 <ChromaticAberration offset={[0.00055, 0.0008]} radialModulation modulationOffset={0.38} />
               )}

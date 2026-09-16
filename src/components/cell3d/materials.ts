@@ -18,6 +18,59 @@ export function createTimeUniform(): TimeUniform {
   return { value: 0 };
 }
 
+/* ============ 参照图配色系统（v12 —— 用户参考插画像素测量提取） ============
+ * 参照图特征: 纯黑背景 + 低饱和有机色族 + 左侧暖白主光 + 选择性冷蓝高光。
+ * 实测色族（1228×841 像素分析）:
+ *   线粒体区 (100,74,69) 暖古铜 · ER/膜系 (93,99,104) 石板蓝灰 · 核 (105,100,111) 熏衣草灰
+ *   高光 (145,175,207) 浅蓝 · 暖 accents (110,76,54) 琥珀棕
+ * 全部 organelle 颜色从旧"高饱和生物荧光"迁移到该低饱和家族 —— 科研插画的沉稳质感。 */
+export const REF = {
+  /* 线粒体（暖古铜族） */
+  mitoOuter: '#5d4640',
+  mitoCristae: '#93705f',
+  mitoMatrix: '#392b27',
+  mitoAtp: '#c9a227',
+  mtdna: '#a8889a',
+  /* 内质网（石板蓝族） */
+  erSheet: '#56616e',
+  erSheetHi: '#6e7f92',
+  erLumen: '#74869c',
+  ribosome: '#8a6a4a',
+  /* 高尔基（暖棕金 → 赭石梯度） */
+  golgiCis: '#6b5a42',
+  golgiTrans: '#8a7a58',
+  golgiVesicle: '#77684c',
+  /* 溶酶体（暗红棕 —— 酸性水解酶仓） */
+  lyso: '#7a4a41',
+  lysoHi: '#a06255',
+  lysoGranule: '#a06a3a',
+  /* 过氧化物酶体（冷灰蓝 + 结晶核心琥珀） */
+  peroxi: '#5a6874',
+  peroxiCore: '#c9a227',
+  /* 脂滴（琥珀金） */
+  lipid: '#9a7434',
+  lipidHi: '#b8904a',
+  /* 核（熏衣草灰紫族） */
+  nucEnv: '#6b6575',
+  nucInner: '#575065',
+  chromatin: '#6a5a78',
+  hetero: '#4a3d58',
+  nucleolus: '#584a6e',
+  nucleolusHi: '#6e5a8a',
+  npc: '#9aa0ae',
+  /* 囊泡/骨架（石板族 + 浅蓝高光族） */
+  vesicle: '#6a7684',
+  vesicleHi: '#8494a8',
+  microtubule: '#8494a8',
+  interFil: '#7a8598',
+  actin: '#94a0b2',
+  sheen: '#a8c4d8',
+  /* 自噬流（低饱和绿族 —— LC3 生物学标记色保留可辨性） */
+  autophago: '#4a6a62',
+  lc3: '#6a8a5a',
+  autophagoFlash: '#a07a3a',
+} as const;
+
 /* ============ GLSL 有机流光注入 ============ */
 
 export interface FlowOpts {
