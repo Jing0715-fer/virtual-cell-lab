@@ -398,6 +398,40 @@
   color: rgba(148, 163, 184, 0.65);
 }
 
+/* v14 悬停标记卡（悬停即现 —— 单一标记 + 科学描述行; 取代常显标签墙） */
+.anatomy-hover {
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  background: rgba(3, 10, 22, 0.82);
+  box-shadow:
+    0 0 0 1px rgba(52, 211, 153, 0.08),
+    0 6px 22px rgba(0, 0, 0, 0.5);
+  animation: anatomy-hover-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  max-width: 260px;
+  align-items: flex-start;
+  gap: 2px;
+}
+@keyframes anatomy-hover-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.anatomy-hover .anatomy-zh {
+  font-size: 11.5px;
+  color: #d1fae5;
+}
+.anatomy-desc {
+  font-size: 8.5px;
+  line-height: 1.45;
+  color: rgba(148, 163, 184, 0.85);
+  white-space: normal;
+  max-width: 240px;
+}
+
 /* 药物抑制状态（紫色 = 催化输出钳制） */
 .mol3d-inh {
   display: none;

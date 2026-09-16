@@ -8,7 +8,7 @@
  *   - Bloom 后处理辉光 + 暗角，生物荧光实验质感
  * 模拟状态通过 zustand 订阅写入快照引用，帧驱动 imperative 更新（60fps 流畅）
  */
-import { Component, useEffect, useMemo, useRef, useState } from 'react';
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType, ReactNode, RefObject } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, useThree, events as createPointerEvents } from '@react-three/fiber';
@@ -18,12 +18,14 @@ import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, ChromaticAberration, DepthOfField, Noise, N8AO, Vignette } from '@react-three/postprocessing';
 import type { DepthOfFieldEffect } from 'postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Eye, Tags, Focus, RotateCw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick } from 'lucide-react';
+import { Eye, Tags, Focus, RotateCw, RotateCcw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick, ListTree, Split, Play, Pause, LocateFixed } from 'lucide-react';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
 import { layout3D, projectLayoutToPlane, type CellBodySpec, type Vec3 } from '@/lib/simulation/layout3d';
 import { buildGuidedTour, tourIntro } from '@/lib/simulation/guided-tour';
 import { CellBody } from './organelles';
+import { MITOSIS_PHASES, MitosisStage } from './mitosis';
+import { FlyToController, HOVER_GROUP_LABEL, HOVER_GROUP_ORDER, type HoverTarget, type LocateReq } from './hover-labels';
 import { MoleculeLayer, KIND_COLORS, type SimSnapshot } from './molecules';
 import { DrugMoleculeLayer } from './drug-molecules';
 import { EdgeLayer } from './signal-edges';
@@ -246,7 +248,7 @@ function trackedMolecule(layout: ReturnType<typeof layout3D> | null) {
   return null;
 }
 
-function SceneContents({ showAnatomy, showLabels, focus, perf, sim, snapPlane }: {
+function SceneContents({ showAnatomy, showLabels, focus, perf, sim, snapPlane, locate, onHoverTargets }: {
   showAnatomy: boolean;
   showLabels: boolean;
   focus: boolean;
@@ -255,6 +257,10 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, sim, snapPlane }:
   sim: { current: SimSnapshot };
   /** 剖面贴附平面（信号级联正交投影到剖切面上演示; null = 常规 3D 径向布局） */
   snapPlane: { normal: Vec3; constant: number } | null;
+  /** v14 目录「定位」请求（CellBody 悬停层强制点亮 + FlyToController 相机飞行） */
+  locate: LocateReq | null;
+  /** v14 悬停目录上报（索引面板数据源） */
+  onHoverTargets: (targets: HoverTarget[]) => void;
 }) {
   const graph = useLabStore((s) => s.graph);
   const cellId = useLabStore((s) => s.cellId);
@@ -294,7 +300,7 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, sim, snapPlane }:
         />
       </mesh>
       {/* 剖面贴附模式: 核内部标注让位（核盘自带剖面标注）—— 消除核区标签互叠 */}
-      <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} compactNucleusLabels={!!snapPlane} />
+      <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} locate={locate} onHoverTargets={onHoverTargets} />
       <EdgeLayer edges={layout.edges} sim={sim} />
       <MoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />
       {/* 激酶抑制剂 3D 药物分子（球棍模型，结合靶点） */}
@@ -425,6 +431,49 @@ export function VirtualCell3D() {
   const [clipAxis, setClipAxis] = useState<SectionAxis>('front');
   // 信号贴面: 信号转导演示投影到剖切面上进行（用户需求 —— 切面演示; 默认 50% 过心切面最佳）
   const [sectionSnap, setSectionSnap] = useState(true);
+  // v14 悬停标记目录 + 定位飞行（用户需求: 「细胞器改成悬停显示标记, 包含所有细胞器」）
+  const [orgIndexOpen, setOrgIndexOpen] = useState(false);
+  const [locateReq, setLocateReq] = useState<LocateReq | null>(null);
+  const [hoverTargets, setHoverTargets] = useState<HoverTarget[]>([]);
+  const locateNonce = useRef(0);
+  const onHoverTargets = useCallback((t: HoverTarget[]) => setHoverTargets(t), []);
+  const locateTarget = useCallback((target: HoverTarget) => {
+    locateNonce.current += 1;
+    setLocateReq({ nonce: locateNonce.current, target, dist: Math.max(6.5, target.r * 3.2) });
+  }, []);
+  // v14 细胞分裂 3D 演示（用户需求: 单独增加, 基于现有 3D 细胞标准, 不过度简化）
+  const [mitosis, setMitosis] = useState(false);
+  const [mitoPlaying, setMitoPlaying] = useState(true);
+  const [mitoSpeed, setMitoSpeed] = useState(1);
+  const [mitoPhase, setMitoPhase] = useState(0);
+  const [mitoSeek, setMitoSeek] = useState<{ phase: number; nonce: number } | null>(null);
+  const mitoSeekNonce = useRef(0);
+  /** 分裂进度条 DOM 引用（onMitoProgress 逐帧直写 style.width —— 零 React 重渲染） */
+  const mitoProgressRef = useRef<HTMLDivElement | null>(null);
+  const onMitoProgress = useCallback((frac: number) => {
+    const el = mitoProgressRef.current;
+    if (el) el.style.width = `${Math.min(1, Math.max(0, frac)) * 100}%`;
+  }, []);
+  const seekMitosis = useCallback((phase: number) => {
+    mitoSeekNonce.current += 1;
+    setMitoSeek({ phase, nonce: mitoSeekNonce.current });
+    setMitoPhase(phase);
+    setMitoPlaying(true);
+  }, []);
+  const openMitosis = (next: boolean) => {
+    setMitosis(next);
+    if (next) {
+      useLabStore.getState().pause();
+      setAutoRotate(false);
+      setTourOpen(false);
+      setOrgIndexOpen(false);
+      setCamMode('overview');
+      seekMitosis(0);
+      // 相机飞近分裂舞台（复用定位飞行: 目标原点, 距离 23 —— 染色体主角可读尺寸）
+      locateNonce.current += 1;
+      setLocateReq({ nonce: locateNonce.current, target: { pos: { x: 0, y: 0, z: 0 }, r: 3, zh: 'mitosis', latin: 'stage' }, dist: 23 });
+    }
+  };
   // 网页内全屏（用户需求: 不再调用原生 Fullscreen API 接管整个物理屏幕）:
   //   3D 视图以 fixed 视口覆盖层铺满浏览器可见区域 —— 页面级全屏，保留浏览器标签/工具栏，
   //   嵌入式预览 iframe 中同样可靠; ESC / 退出按钮均可关闭
@@ -660,10 +709,25 @@ export function VirtualCell3D() {
             {/* 底深蓝微光 */}
             <Lightformer intensity={0.35} color="#16283a" position={[0, -12, 0]} scale={[14, 14, 1]} rotation-x={Math.PI / 2} />
           </Environment>
-          <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} sim={sim} snapPlane={snapPlane} />
+          {mitosis ? (
+            <MitosisStage
+              playing={mitoPlaying}
+              speed={mitoSpeed}
+              seek={mitoSeek}
+              onPhaseChange={setMitoPhase}
+              onEnded={() => setMitoPlaying(false)}
+              showAnatomy={showAnatomy}
+              perf={perfMode}
+              onProgress={onMitoProgress}
+            />
+          ) : (
+            <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} sim={sim} snapPlane={snapPlane} locate={locateReq} onHoverTargets={onHoverTargets} />
+          )}
+          {/* v14 目录定位 → 相机飞行（1.2s 阻尼聚焦; 用户任何交互立即让位） */}
+          {!mitosis && <FlyToController req={locateReq} />}
           <SceneCapture />
           <SectionClipController
-            enabled={clipView}
+            enabled={clipView && !mitosis}
             depth={clipDepth}
             axis={clipAxis}
             spec={layout?.spec ?? FALLBACK_SPEC}
@@ -814,11 +878,13 @@ export function VirtualCell3D() {
         </button>
         {/* 其余开关: 桌面纵向恒显; 移动端 2 列网格按需展开（网格容器同样穿透, 仅按钮本体可命中） */}
         <div className={`pointer-events-none ${hudOpen ? 'grid' : 'hidden md:grid'} w-[172px] grid-cols-2 gap-1.5 md:flex md:w-auto md:flex-col`}>
+          <HudToggle active={mitosis} onClick={() => openMitosis(!mitosis)} icon={Split} label={t('hud.mitosis')} highlight />
           <HudToggle active={tourOpen} onClick={() => openTour(!tourOpen)} icon={BookOpen} label={t('hud.tour')} highlight
-            disabled={tour.length === 0} />
+            disabled={tour.length === 0 || mitosis} />
           <HudToggle active={glow} onClick={() => setGlow(!glow)} icon={Sparkles} label={t('hud.glow')} />
           <HudToggle active={perfMode} onClick={() => setPerfMode(!perfMode)} icon={Gauge} label={perfMode ? t('hud.perf') : t('hud.hd')} />
-          <HudToggle active={showAnatomy} onClick={() => setShowAnatomy(!showAnatomy)} icon={Tags} label={t('hud.anatomy')} />
+          <HudToggle active={showAnatomy} onClick={() => setShowAnatomy(!showAnatomy)} icon={Tags} label={t('hud.hover')} />
+          <HudToggle active={orgIndexOpen} onClick={() => setOrgIndexOpen(!orgIndexOpen)} icon={ListTree} label={t('hud.index')} disabled={mitosis} />
           <HudToggle active={showLabels} onClick={() => setShowLabels(!showLabels)} icon={Eye} label={t('hud.labels')} />
           <HudToggle active={focus} onClick={() => setFocus(!focus)} icon={Focus} label={t('hud.focus')} />
           <HudToggle active={clipView} onClick={() => setClipView(!clipView)} icon={Layers} label={t('hud.section')} highlight={false} />
@@ -933,6 +999,162 @@ export function VirtualCell3D() {
           </button>
         )}
       </div>
+
+      {/* v14 左中: 细胞器目录面板（点击定位 → 相机飞行 + 脉冲环; 悬停 3D 即现标记） */}
+      {orgIndexOpen && !mitosis && hoverTargets.length > 0 && (
+        <div className="absolute left-3 top-1/2 z-20 w-[min(84vw,252px)] -translate-y-1/2">
+          <div className="rounded-xl border border-white/10 bg-slate-950/88 p-2.5 shadow-[0_8px_32px_rgba(0,0,0,0.45)] backdrop-blur-lg">
+            <div className="mb-2 flex items-center gap-1.5">
+              <ListTree className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+              <span className="text-[11px] font-semibold text-slate-200">{t('hud.index')}</span>
+              <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-px font-mono text-[8px] leading-tight text-emerald-300">
+                {hoverTargets.length} {t('idx.count')}
+              </span>
+              <button
+                onClick={() => setOrgIndexOpen(false)}
+                aria-label={t('hud.index')}
+                className="ml-auto rounded-md border border-white/10 bg-white/5 p-1 text-slate-500 transition hover:text-rose-300"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+            <p className="mb-2 flex items-center gap-1 text-[8.5px] text-slate-500">
+              <LocateFixed className="h-2.5 w-2.5 shrink-0 text-emerald-400/70" />
+              {t('idx.hint')}
+            </p>
+            <div className="lab-scrollbar max-h-[46vh] space-y-2 overflow-y-auto pr-0.5">
+              {HOVER_GROUP_ORDER.map((gk) => {
+                const items = hoverTargets.filter((x) => (x.group ?? 'specialized') === gk);
+                if (items.length === 0) return null;
+                return (
+                  <div key={gk}>
+                    <div className="mb-1 text-[8px] font-semibold uppercase tracking-wider text-slate-500">
+                      {HOVER_GROUP_LABEL[gk][lang]}
+                    </div>
+                    <div className="space-y-0.5">
+                      {items.map((x) => (
+                        <button
+                          key={`${x.zh}|${x.latin}`}
+                          onClick={() => locateTarget(x)}
+                          className="group flex w-full items-center gap-1.5 rounded-md border border-transparent px-1.5 py-1 text-left transition hover:border-emerald-500/30 hover:bg-emerald-500/10"
+                        >
+                          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-500 group-hover:bg-emerald-400" />
+                          <span className="truncate text-[10px] text-slate-300 group-hover:text-emerald-100">
+                            {lang === 'zh' ? x.zh : x.latin}
+                          </span>
+                          {lang === 'zh' && <span className="truncate text-[7.5px] italic text-slate-600">{x.latin}</span>}
+                          <LocateFixed className="ml-auto h-2.5 w-2.5 shrink-0 text-slate-600 opacity-0 transition group-hover:text-emerald-300 group-hover:opacity-100" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* v14 底部中央: 细胞分裂演示控制台（相位时间轴 + 播放/速度/重播 + 双语描述卡） */}
+      {mitosis && (
+        <div className="absolute bottom-3 left-1/2 z-20 w-[min(94%,640px)] -translate-x-1/2">
+          <div className="rounded-xl border border-teal-500/25 bg-slate-950/88 p-3 shadow-[0_8px_32px_rgba(0,0,0,0.45)] backdrop-blur-lg">
+            <div className="flex items-center gap-2">
+              <Split className="h-3.5 w-3.5 shrink-0 text-teal-400" />
+              <span className="text-[12px] font-semibold text-slate-100">{t('mit.title')}</span>
+              <span className="shrink-0 rounded border border-teal-500/30 bg-teal-500/10 px-1.5 py-px font-mono text-[8px] leading-tight text-teal-300">
+                {Math.min(mitoPhase + 1, 7)} / 7
+              </span>
+              <span className="hidden font-mono text-[8px] italic text-slate-500 sm:inline">
+                {MITOSIS_PHASES[mitoPhase]?.latin}
+              </span>
+              <div className="ml-auto flex items-center gap-1">
+                <button
+                  onClick={() => setMitoPlaying((v) => !v)}
+                  aria-label={mitoPlaying ? t('mit.pause') : t('mit.play')}
+                  className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[9px] transition ${
+                    mitoPlaying
+                      ? 'border-teal-400/50 bg-teal-500/15 text-teal-200'
+                      : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {mitoPlaying ? <Pause className="h-2.5 w-2.5" /> : <Play className="h-2.5 w-2.5" />}
+                  <span className="hidden sm:inline">{mitoPlaying ? t('mit.pause') : t('mit.play')}</span>
+                </button>
+                <div className="flex items-center overflow-hidden rounded-lg border border-white/10">
+                  {[0.5, 1, 2].map((sp) => (
+                    <button
+                      key={sp}
+                      onClick={() => setMitoSpeed(sp)}
+                      className={`px-1.5 py-1 font-mono text-[8.5px] transition ${
+                        mitoSpeed === sp ? 'bg-teal-500/20 text-teal-200' : 'bg-white/[0.03] text-slate-500 hover:text-slate-300'
+                      }`}
+                      aria-label={`${t('mit.speed')} ${sp}x`}
+                    >
+                      {sp}x
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => seekMitosis(0)}
+                  aria-label={t('mit.replay')}
+                  title={t('mit.replay')}
+                  className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[9px] text-slate-400 transition hover:text-teal-200"
+                >
+                  <RotateCcw className="h-2.5 w-2.5" />
+                  <span className="hidden sm:inline">{t('mit.replay')}</span>
+                </button>
+                <button
+                  onClick={() => openMitosis(false)}
+                  aria-label={t('hud.mitosis')}
+                  className="rounded-md border border-white/10 bg-white/5 p-1 text-slate-500 transition hover:text-rose-300"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+
+            {/* 相位时间轴 chips（点击跳转） */}
+            <div className="lab-scrollbar mt-2.5 flex items-center gap-1 overflow-x-auto pb-0.5">
+              {MITOSIS_PHASES.map((p, i) => (
+                <button
+                  key={p.key}
+                  onClick={() => seekMitosis(i)}
+                  title={lang === 'zh' ? p.descZh : p.descEn}
+                  className={`shrink-0 rounded-lg border px-2 py-1 text-[9.5px] font-medium transition ${
+                    i === mitoPhase
+                      ? 'border-teal-400/60 bg-teal-500/20 text-teal-100 shadow-[0_0_12px_rgba(45,212,191,0.25)]'
+                      : i < mitoPhase
+                        ? 'border-teal-500/25 bg-teal-500/8 text-teal-300/70 hover:bg-teal-500/15'
+                        : 'border-white/10 bg-white/[0.03] text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  <span className="font-mono text-[8px] text-slate-500">{i + 1}</span>
+                  <span className="ml-1">{lang === 'zh' ? p.zh : p.en}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* 进度条（DOM 直写, 零重渲染） */}
+            <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/8">
+              <div ref={mitoProgressRef} className="h-full w-0 rounded-full bg-gradient-to-r from-teal-500/70 to-emerald-400" />
+            </div>
+
+            {/* 当前相位双语描述（关键分子事件） */}
+            <p className="mt-2 text-[10.5px] leading-relaxed text-slate-300">
+              <span className="mr-1.5 font-semibold text-teal-300">{lang === 'zh' ? MITOSIS_PHASES[mitoPhase]?.zh : MITOSIS_PHASES[mitoPhase]?.en}</span>
+              <span className="text-slate-500">·</span>
+              <span className="ml-1.5">{lang === 'zh' ? MITOSIS_PHASES[mitoPhase]?.descZh : MITOSIS_PHASES[mitoPhase]?.descEn}</span>
+            </p>
+            {!mitoPlaying && mitoPhase >= 6 && (
+              <p className="mt-1 flex items-center gap-1 text-[9px] text-amber-300/80">
+                <RotateCcw className="h-2.5 w-2.5" />
+                {t('mit.endHint')}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 底部中央: 教学引导卡（激活时替换操作提示） */}
       {tourOpen && tourStep ? (

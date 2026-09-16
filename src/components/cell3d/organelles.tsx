@@ -36,8 +36,7 @@
  */
 import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
-import { useFrame, useThree } from '@react-three/fiber';
-import { Html } from '@react-three/drei';
+import { useFrame } from '@react-three/fiber';
 import type { CellBodySpec, Vec3 } from '@/lib/simulation/layout3d';
 import { NUCLEUS_FORM, SHAPE_NOISE, nucleusCenter, nucleusInstances, nucleusRadius, nucleusRayExit, shapeCrossRadius, shapeRadius, shapeXExtent, type ShapeKind } from '@/lib/simulation/cell-shape';
 import { displaceGeometry, fbm3, fibSphere, hash01, mergeGeoms, sph } from './procedural';
@@ -46,6 +45,7 @@ import { createTimeUniform, glowMaterial, organelleMaterial, volumeMaterial, REF
 import { autophagyLevel, AUTOPHAGY_VISIBLE_THRESHOLD } from '@/lib/simulation/autophagy';
 import { useLabStore } from '@/store/lab-store';
 import { useLang } from '@/lib/i18n';
+import { OrganelleHoverLayer, dedupeTargets, type HoverTarget, type HoverGroupKey, type LocateReq } from './hover-labels';
 
 export interface AnatomyLabel {
   pos: Vec3;
@@ -60,6 +60,8 @@ export interface CellBodyBuild {
   /** 帧驱动; ulk1 = 自噬驱动水平（0-1, 缺省 0 —— 无 ULK1 通路自噬系统静默） */
   update: (t: number, ulk1?: number) => void;
   labels: AnatomyLabel[];
+  /** v14 悬停标记目标（全细胞器 —— 含多锚点同名目标, 感应域并集） */
+  hover: HoverTarget[];
   dispose: () => void;
 }
 
@@ -239,6 +241,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     return o;
   };
   const labels: AnatomyLabel[] = [];
+  /* v14 悬停标记目标（"细胞器悬停即现" —— 与 labels 平行累积; 末尾另有 labels 派生基线）
+   * 多锚点同名 = 同一细胞器的多实例/多区域感应域（悬停任一处即显示同一标记） */
+  const hover: HoverTarget[] = [];
 
   // 共享贴图（模块缓存, 不随 dispose 释放）
   const memNormal = organicNormalMap({ freq: 7, strength: 2.2, seed: 11, repeat: 4 });
@@ -388,6 +393,11 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     membraneGroup.add(tmps);
   }
   labels.push({ pos: sph(R * 1.14, 0.62, 0.4), zh: '质膜（脂双层）', latin: 'Plasma membrane' });
+  // v14 悬停锚点: 膜面环带 6 点感应（悬停任一处膜缘即现「质膜」标记）
+  for (let hi = 0; hi < 6; hi++) {
+    const hp = sph(R * 1.02, 0.28, 0.55 + hi * 1.05);
+    hover.push({ pos: hp, r: 2.8, zh: '质膜（脂双层）', latin: 'Plasma membrane', group: 'surface' });
+  }
 
   // 糖萼（胞外多糖-糖蛋白绒被 —— 真实细胞表面的 fuzzy coat; 随膜流动缓转）
   {
@@ -968,6 +978,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     g.scale.set(1, 0.85 + hash01(`ml${i}`) * 0.35, 1);
     group.add(g);
     mitos.push({ obj: g, baseY: p.y, phase: hash01(`m${i}`, 17) * Math.PI * 2 });
+    // v14 悬停锚点: 每颗线粒体各自感应（悬停任一颗即现「线粒体」标记）
+    hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: 2.0, zh: '线粒体（板层嵴）', latin: 'Mitochondrion', group: 'energy' });
   }
   if (mitos.length) {
     const m0 = mitos[0].obj.position;
@@ -983,23 +995,26 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     ]),
   );
   // v13: 不透明 + 高亮发射 —— 参照图核糖体是清晰可辨的点彩颗粒（半透明/depthWrite false 会"发虚"）
-  const ribosomeMat = track(new THREE.MeshStandardMaterial({ color: '#9a7454', emissive: '#7a5638', emissiveIntensity: 0.8 * dim, roughness: 0.5, metalness: 0.05 }));
+  // v14: 发射 1.0 + 更亮琥珀（核周冠远景点彩可读性）
+  const ribosomeMat = track(new THREE.MeshStandardMaterial({ color: '#a07a54', emissive: '#8a6240', emissiveIntensity: 1.0 * dim, roughness: 0.5, metalness: 0.05 }));
   {
-    // 渲染层 +1（视觉行数增多; 不改 layout3d 契约）; perf ×0.6 缩减
-    const sheets = Math.max(1, perf ? Math.round((spec.erSheets + 2) * 0.6) : spec.erSheets + 2);
+    // v14 用户反馈「RER 应在核周且相当大」: 囊池层 6→erSheets+6, 包裹经度 122°→195°, 径向壳层
+    // 0.26-0.91→0.42-1.9（多层同心冠冕 —— 核旁大体积 rER 冠, 参照图读感的核心）
+    const sheets = Math.max(1, perf ? Math.round((spec.erSheets + 6) * 0.55) : spec.erSheets + 6);
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
     const sheetCurves: THREE.CatmullRomCurve3[] = [];
     const allRiboPts: THREE.Vector3[] = [];
     // v13 参照图布局: 平行长囊池堆（千层丝带 —— 径向逐层 + 纬度微扇形展开, 非旧"绕核线团"）
     for (let s = 0; s < sheets; s++) {
-      const latBase = -0.52 + s * 0.135;
-      const lon0 = -0.55 + s * 0.075;
-      const lonSpan = Math.PI * 0.68;
-      const ofs = 0.26 + s * 0.13;
+      // v14 大冠: 纬度自核下 (-0.78) 扫到核上 (+0.75), 每层纬度步进加大 → 冠罩整个核被膜
+      const latBase = -0.78 + s * 0.17;
+      const lon0 = -0.95 + s * 0.07;
+      const lonSpan = Math.PI * 1.08;
+      const ofs = 0.42 + s * 0.165;
       const pts: THREE.Vector3[] = [];
       for (let k = 0; k <= 13; k++) {
         const t = k / 13;
-        const lat = latBase + Math.sin(t * Math.PI * 1.7 + s * 0.9) * 0.13;
+        const lat = latBase + Math.sin(t * Math.PI * 1.7 + s * 0.9) * 0.16;
         const lon = lon0 + t * lonSpan;
         // 囊池贴核被膜平行延展（径向 ofs 逐层 —— 同心壳层层叠）
         const dir = new THREE.Vector3(
@@ -1007,14 +1022,14 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
           Math.sin(lat),
           Math.cos(lat) * Math.sin(lon),
         ).normalize();
-        const p = nucPoint(dir, ofs + Math.sin(t * Math.PI * 1.4 + s * 1.3) * 0.1);
+        const p = nucPoint(dir, ofs + Math.sin(t * Math.PI * 1.4 + s * 1.3) * 0.12);
         pts.push(new THREE.Vector3(p.x, p.y, p.z));
       }
       const curve = new THREE.CatmullRomCurve3(pts);
       sheetCurves.push(curve);
-      // 带状扁平囊池几何（宽 1.05 / 厚 0.095 ≈ 11:1 —— 参照图带状比例）
+      // 带状扁平囊池几何（v14 宽 1.38 / 厚 0.105 ≈ 13:1 —— 更宽阔的带面, 远景可读性↑）
       const frames = cisternaFrames(curve, perf ? 26 : 40, nucC);
-      parts.push({ geo: track(flatCisternaGeometry(frames, 1.05, 0.095, 12)) });
+      parts.push({ geo: track(flatCisternaGeometry(frames, 1.38, 0.105, 12)) });
       // 满铺核糖体点彩（参照实测 47% 高频像素 —— 两宽面网格化铺满, 非旧"两排"; v13b: 7 列×0.17 步距加密）
       const wFrac = perf ? [-0.6, 0, 0.6] : [-0.68, -0.51, -0.34, -0.17, 0, 0.17, 0.34, 0.51, 0.68];
       for (let i = 1; i < frames.length - 1; i++) {
@@ -1039,8 +1054,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       const conn = new THREE.QuadraticBezierCurve3(a, mid, b);
       parts.push({ geo: track(new THREE.TubeGeometry(conn, 16, 0.07, 6)) });
     }
-    // 外周带状囊池堆（v13: 与核旁堆呼应的平行短片层 —— 参照图 ER 迷宫的"层叠丝带"读感）
-    const stackN = perf ? 1 : 3;
+    // 外周带状囊池堆（v13: 与核旁堆呼应的平行短片层 —— 参照图 ER 迷宫的"层叠丝带"读感; v14 ×4 堆）
+    const stackN = perf ? 1 : 4;
     for (let st = 0; st < stackN; st++) {
       const stDir = new THREE.Vector3(
         Math.cos((hash01(`st${st}`, 3) - 0.5) * 2.0) * Math.cos(hash01(`st${st}`, 5) * Math.PI * 2),
@@ -1072,7 +1087,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         }
         const curve = new THREE.CatmullRomCurve3(pts);
         const frames = cisternaFrames(curve, perf ? 12 : 18, new THREE.Vector3(anchor.x, anchor.y, anchor.z));
-        parts.push({ geo: track(flatCisternaGeometry(frames, 0.72, 0.08, 10)) });
+        parts.push({ geo: track(flatCisternaGeometry(frames, 0.85, 0.08, 10)) });
         // 外周堆核糖体满铺（密度略低于核旁堆）
         const wFrac2 = [-0.55, 0, 0.55];
         for (let i = 1; i < frames.length - 1; i += perf ? 2 : 1) {
@@ -1091,6 +1106,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     }
     const er = new THREE.Mesh(track(mergeGeoms(parts)), mat({
       // v12 参照图: rER 石板蓝族（实测 93,99,104）; v13: 更锐高光（发表级囊池边缘亮线）
+      // v14 大冠可读性: 发射 0.16→0.3 + sheen 0.5（核周大体积下远读不"隐身"）
       color: REF.erSheet,
       transmission: transOn ? 0.34 : 0,
       thickness: 0.42,
@@ -1098,13 +1114,13 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       normalMap: orgNormal,
       normalScale: 0.4,
       opacity: transOn ? 1 : 0.72,
-      emissive: '#3a4a5c',
-      emissiveIntensity: 0.16,
+      emissive: '#4a5a70',
+      emissiveIntensity: 0.3,
       clearcoat: 0.55,
       clearcoatRoughness: 0.16,
-      sheen: 0.42,
+      sheen: 0.5,
       sheenColor: REF.sheen,
-      flow: { color: '#74869c', strength: 0.16, scale: 0.8, speed: 0.07, rim: 0.18 },
+      flow: { color: '#74869c', strength: 0.18, scale: 0.8, speed: 0.07, rim: 0.2 },
     }));
     er.renderOrder = 46;
     group.add(er);
@@ -1115,7 +1131,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       const qq = new THREE.Quaternion();
       const eu = new THREE.Euler();
       allRiboPts.forEach((p, i) => {
-        const s = 0.95 + hash01(`rb${i}`) * 0.6;
+        const s = 1.1 + hash01(`rb${i}`) * 0.65;
         // 亚基分裂面随机朝向（哑铃形核糖体取向自然化）
         eu.set(hash01(`rbe${i}`) * Math.PI, hash01(`rbe${i}`, 3) * Math.PI * 2, (hash01(`rbe${i}`, 5) - 0.5) * 0.8);
         qq.setFromEuler(eu);
@@ -1129,6 +1145,12 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     if (sheets) {
       const p = nucPoint(new THREE.Vector3(Math.cos(-0.62) * Math.cos(1.4), Math.sin(-0.62), Math.cos(-0.62) * Math.sin(1.4)), 1.15);
       labels.push({ pos: { x: p.x, y: p.y + 0.75, z: p.z }, zh: '粗面内质网（核糖体）', latin: 'Rough ER' });
+      // v14 悬停锚点: 沿核周冠多点感应（曲线中段采样 —— 悬停任一处囊池冠即现标记）
+      hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: 2.6, zh: '粗面内质网（核糖体）', latin: 'Rough ER', group: 'endomembrane' });
+      for (let s = 1; s < sheetCurves.length; s += 2) {
+        const a = sheetCurves[s].getPoint(0.45);
+        hover.push({ pos: { x: a.x, y: a.y, z: a.z }, r: 2.4, zh: '粗面内质网（核糖体）', latin: 'Rough ER', group: 'endomembrane' });
+      }
     }
   }
 
@@ -1147,6 +1169,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         Math.cos((hash01(`pr${ch}`, 3) - 0.5) * 2.4) * Math.sin(hash01(`pr${ch}`, 5) * Math.PI * 2),
       ).normalize();
       const start = insidePos(prDir, 0.2 + hash01(`pr${ch}`) * 0.62, 0.1, 0.3);
+      if (ch === Math.floor(chains * 0.4)) {
+        hover.push({ pos: { x: start.x, y: start.y, z: start.z }, r: 2.2, zh: '游离多聚核糖体', latin: 'Polysomes', group: 'cytoskeleton' });
+      }
       const dirV = new THREE.Vector3(hash01(`prd${ch}`) - 0.5, hash01(`prd${ch}`, 3) - 0.5, hash01(`prd${ch}`, 5) - 0.5).normalize().multiplyScalar(0.14);
       const n = 4 + Math.floor(hash01(`prn${ch}`) * 3);
       for (let b = 0; b < n; b++) {
@@ -1289,28 +1314,28 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const cisCol = new THREE.Color(REF.golgiCis);
     const transCol = new THREE.Color(REF.golgiTrans);
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4; color?: THREE.Color }[] = [];
-    const cistN = 7;
-    // 非线性极性插值: 暖棕金 → 赭石（v12 参照图: 高尔基 cis/trans 梯度保留但低饱和化）
-    const POLARITY_MIX = [0, 0.08, 0.2, 0.42, 0.66, 0.88, 1];
+    const cistN = 8;
+    // 非线性极性插值: 暖棕金 → 赭石（v12 参照图: 高尔基 cis/trans 梯度保留但低饱和化; v14 八池）
+    const POLARITY_MIX = [0, 0.06, 0.15, 0.3, 0.5, 0.7, 0.88, 1];
     for (let i = 0; i < cistN; i++) {
       const col = cisCol.clone().lerp(transCol, POLARITY_MIX[i] ?? 1);
-      // 更薄更扁的囊（v10: 管径 0.15 + 层间距 0.24 + 逐层旋叠 0.26 —— 高保真插画的"层叠弯曲扁平囊"读感）
-      const torus = track(new THREE.TorusGeometry(1.02 + i * 0.055, 0.15, 12, 46, Math.PI * 1.28));
+      // v14 增大: 管径 0.17 + 层间距 0.27 + 逐层旋叠 0.23 + 基半径 1.16（旧 1.02/0.15/0.24）—— 更宽更醒目的层叠扁平囊杯
+      const torus = track(new THREE.TorusGeometry(1.16 + i * 0.07, 0.17, 12, 48, Math.PI * 1.38));
       const m = new THREE.Matrix4()
         .makeScale(1, 0.2, 1)
-        .multiply(new THREE.Matrix4().makeRotationZ(i * 0.26))
+        .multiply(new THREE.Matrix4().makeRotationZ(i * 0.23))
         .multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2))
-        .setPosition(0, i * 0.24, 0);
+        .setPosition(0, i * 0.27, 0);
       parts.push({ geo: torus, matrix: m, color: col });
     }
-    // 池间小管连接（v10: 12 条随七池梯度同步）
+    // 池间小管连接（v10: 12 条随七池梯度同步; v14 八池梯度）
     for (let c = 0; c < 12; c++) {
       const i = c % (cistN - 1);
       const ang = 0.5 + hash01(`gc${c}`) * 2.2;
-      const r = 1.02 + i * 0.055;
-      const a = new THREE.Vector3(Math.cos(ang) * r, i * 0.24, Math.sin(ang) * r * 0.34);
-      const b = new THREE.Vector3(Math.cos(ang) * r, (i + 1) * 0.24, Math.sin(ang) * r * 0.34);
-      const mid = a.clone().add(b).multiplyScalar(0.5).add(new THREE.Vector3(0, 0, 0.22));
+      const r = 1.16 + i * 0.07;
+      const a = new THREE.Vector3(Math.cos(ang) * r, i * 0.27, Math.sin(ang) * r * 0.34);
+      const b = new THREE.Vector3(Math.cos(ang) * r, (i + 1) * 0.27, Math.sin(ang) * r * 0.34);
+      const mid = a.clone().add(b).multiplyScalar(0.5).add(new THREE.Vector3(0, 0, 0.24));
       parts.push({ geo: track(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(a, mid, b), 10, 0.035, 6)), color: new THREE.Color(REF.golgiVesicle) });
     }
     const golgi = new THREE.Mesh(track(mergeGeoms(parts)), mat({
@@ -1321,9 +1346,10 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       roughness: 0.35,
       opacity: transOn ? 1 : 0.62,
       clearcoat: 0.45,
+      // v14 可读性: 发射 0.1→0.28（低照度环境下 cis→trans 梯度恒可辨）
       emissive: '#4a3f30',
-      emissiveIntensity: 0.1,
-      sheen: 0.5,
+      emissiveIntensity: 0.28,
+      sheen: 0.6,
       sheenColor: '#a8906a',
     }));
     golgi.renderOrder = 46;
@@ -1346,10 +1372,10 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     {
       const mm = new THREE.Matrix4();
       for (let v = 0; v < budCount; v++) {
-        const r = 0.13 + hash01(`gv${v}`) * 0.06;
+        const r = 0.16 + hash01(`gv${v}`) * 0.07;
         const ang = 0.4 + v * 0.5;
         mm.makeScale(r, r, r);
-        mm.setPosition(Math.cos(ang) * (1.16 + hash01(`gv${v}`, 3) * 0.2), 1.62 + hash01(`gv${v}`, 5) * 0.3, Math.sin(ang) * 0.5);
+        mm.setPosition(Math.cos(ang) * (1.35 + hash01(`gv${v}`, 3) * 0.25), 2.02 + hash01(`gv${v}`, 5) * 0.34, Math.sin(ang) * 0.62);
         buds.setMatrixAt(v, mm);
       }
       buds.instanceMatrix.needsUpdate = true;
@@ -1374,10 +1400,10 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     {
       const mm = new THREE.Matrix4();
       for (let v = 0; v < cisBudCount; v++) {
-        const r = 0.09 + hash01(`cgv${v}`) * 0.035;
+        const r = 0.11 + hash01(`cgv${v}`) * 0.04;
         const ang = 1.1 + v * 1.0;
         mm.makeScale(r, r, r);
-        mm.setPosition(Math.cos(ang) * (0.94 + hash01(`cgv${v}`, 3) * 0.24), -0.36 - hash01(`cgv${v}`, 5) * 0.16, Math.sin(ang) * 0.4);
+        mm.setPosition(Math.cos(ang) * (1.06 + hash01(`cgv${v}`, 3) * 0.26), -0.42 - hash01(`cgv${v}`, 5) * 0.18, Math.sin(ang) * 0.46);
         cisBuds.setMatrixAt(v, mm);
       }
       cisBuds.instanceMatrix.needsUpdate = true;
@@ -1385,26 +1411,30 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     }
     g.add(cisBuds);
     // v6 位姿: 高尔基贴核面外延（核旁上位）; 柱状上皮采用核上位置（高尔基位于核与刷状缘之间 —— 教科书位形）
-    const golgiLat = SHAPE === 'columnar' ? 0.85 : -0.42;
-    const golgiLon = 2.4;
+    // v14 用户反馈「高尔基体没看到」: 移位到默认正剖（移除前半）的保留象限（z<0, 经度 5.9）→ 恒可见;
+    // 外延 1.3→2.4（远离核被膜与 rER 冠的叠影, 与 ER 出口位语义一致）
+    const golgiLat = SHAPE === 'columnar' ? 0.85 : 0.5;
+    const golgiLon = SHAPE === 'columnar' ? 2.4 : 5.9;
     const gDir = new THREE.Vector3(
       Math.cos(golgiLat) * Math.cos(golgiLon),
       Math.sin(golgiLat),
       Math.cos(golgiLat) * Math.sin(golgiLon),
     ).normalize();
-    const p = nucPoint(gDir, 1.3);
-    // 防溢出: 若核上位 1.3 外延越出膜面内 1.7, 则按膜面回拉
+    const p = nucPoint(gDir, 2.4);
+    // 防溢出: 若核上位 2.4 外延越出膜面内 2.2, 则按膜面回拉
     {
-      const lim = cellSurf(gDir, R, SHAPE, -1.7);
+      const lim = cellSurf(gDir, R, SHAPE, -2.2);
       const pv = new THREE.Vector3(p.x, p.y, p.z);
       if (pv.length() > lim) pv.setLength(lim);
       p.x = pv.x; p.y = pv.y; p.z = pv.z;
     }
     g.position.set(p.x, p.y, p.z);
-    g.rotation.y = 3.0;
-    g.scale.setScalar(1.15); // 整组放大 1.15×（position 不变）
+    // v14: 杯口朝观察侧（层叠囊面可读）; 整组 1.15→1.8×（直径 ~7 单位, 与核同量级的醒目体量）
+    g.rotation.y = -0.9;
+    g.scale.setScalar(SHAPE === 'columnar' ? 1.4 : 1.8);
     group.add(g);
     labels.push({ pos: { x: p.x * 1.28, y: p.y + 0.65, z: p.z * 1.28 }, zh: '高尔基体（顺→反）', latin: 'Golgi apparatus' });
+    hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: 3.0, zh: '高尔基体（顺→反）', latin: 'Golgi apparatus', group: 'endomembrane' });
   }
 
   /* ================= 运输囊泡 ================= */
@@ -1792,6 +1822,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     cent1.renderOrder = 44;
     cent2.renderOrder = 44;
     group.add(cent1, cent2);
+    // v14 中心体标注 + 悬停锚点（旧版无标注 —— 微管标注不能代表 MTOC 本体）
+    labels.push({ pos: { x: c.x, y: c.y + 0.6, z: c.z }, zh: '中心体（中心粒对）', latin: 'Centrosome' });
+    hover.push({ pos: { x: c.x, y: c.y, z: c.z }, r: 1.7, zh: '中心体（中心粒对）', latin: 'Centrosome', group: 'cytoskeleton' });
     // 中心体放射微管（合并, 原纤维条纹法线）—— v6: 终点贴类型化膜面（旧球形 0.96R 会在窄轴穿出膜外）
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
     for (let i = 0; i < spec.microtubules; i++) {
@@ -1890,6 +1923,12 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       actins.renderOrder = 44;
     }
     group.add(actins);
+    // v14 悬停锚点: 皮层肌动蛋白（膜面内网 —— 无静态标注, 悬停发现）
+    {
+      const aDir = new THREE.Vector3(0.42, 0.18, 0.89).normalize();
+      const ar = cellSurf(aDir, R, SHAPE, -0.62);
+      hover.push({ pos: { x: aDir.x * ar, y: aDir.y * ar, z: aDir.z * ar }, r: 2.3, zh: '皮层肌动蛋白网', latin: 'Cortical actin', group: 'cytoskeleton' });
+    }
   }
 
   /* ================= 胞质颗粒（分子拥挤, 双色系） ================= */
@@ -2874,56 +2913,67 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     group.clear();
   };
 
-  return { group, update, labels, dispose };
+  /* ============ v14 悬停基线派生（labels → hover 全量补齐） ============
+   * 精确锚点（线粒体/RER 冠/高尔基/质膜/中心体/多聚核糖体/皮层 actin）已在构建处内联推送;
+   * 此处将剩余全部解剖标注自动派生为悬停目标 —— 覆盖所有类型特化结构（悬停目录零遗漏）。
+   * 多锚点同名目标 = 感应域并集, 目录面板按 zh+latin 去重。 */
+  {
+    // 感应半径表（latin 前缀匹配 —— 大尺度细胞器给更远的作用范围）
+    const R_TABLE: [string, number][] = [
+      ['Plasma membrane', 2.8], ['Glycocalyx', 2.4], ['Nuclear envelope', 2.7], ['Nuclear pore complex', 1.7],
+      ['Nucleolus', 1.9], ['Heterochromatin', 1.8], ['Mitochondrion', 2.0], ['Rough ER', 2.5], ['Smooth ER', 2.0],
+      ['Golgi apparatus', 2.9], ['Transport vesicle', 1.7], ['Lysosome', 1.8], ['Autophagosome', 1.7],
+      ['Peroxisome', 1.6], ['Lipid droplet', 1.6], ['Microtubules', 2.4], ['Intermediate filaments', 2.0],
+    ];
+    const G_TABLE: [string, HoverGroupKey][] = [
+      ['Nuclear', 'nuclear'], ['Nucleolus', 'nuclear'], ['Heterochromatin', 'nuclear'], ['Micronucleus', 'nuclear'], ['Binucleate', 'nuclear'],
+      ['Rough ER', 'endomembrane'], ['Smooth ER', 'endomembrane'], ['Golgi', 'endomembrane'], ['vesicle', 'endomembrane'],
+      ['Lysosome', 'endomembrane'], ['Autophago', 'endomembrane'], ['Peroxi', 'endomembrane'], ['Lipid droplet', 'endomembrane'],
+      ['canaliculus', 'endomembrane'], ['Sarcoplasmic', 'endomembrane'], ['T-tubule', 'endomembrane'],
+      ['Mitochondrion', 'energy'], ['Glycogen', 'energy'],
+      ['Microtubule', 'cytoskeleton'], ['filament', 'cytoskeleton'], ['actin', 'cytoskeleton'], ['Myofibril', 'cytoskeleton'],
+      ['Stress fiber', 'cytoskeleton'], ['Centrosome', 'cytoskeleton'], ['Polysomes', 'cytoskeleton'], ['Terminal web', 'cytoskeleton'],
+      ['Plasma membrane', 'surface'], ['Glycocalyx', 'surface'], ['junction', 'surface'], ['Microvilli', 'surface'],
+      ['lamina', 'surface'], ['blebbing', 'surface'], ['TCR', 'surface'],
+    ];
+    for (const l of labels) {
+      const r = R_TABLE.find(([k]) => l.latin.startsWith(k))?.[1] ?? 1.7;
+      const grp = G_TABLE.find(([k]) => l.latin.includes(k))?.[1] ?? 'specialized';
+      hover.push({ pos: l.pos, r, zh: l.zh, latin: l.latin, when: l.when, group: grp });
+    }
+  }
+
+  return { group, update, labels, hover, dispose };
 }
 
-/** 窄视口（移动端）优先保留的主要细胞器标注（前缀匹配）; 其余标签拥挤不可读, 隐藏。zh/latin 双语各自前缀匹配 */
-const MAJOR_ORGANELLE_ZH = ['质膜', '核被膜', '核仁', '线粒体', '高尔基体', '溶酶体'];
-const MAJOR_ORGANELLE_LATIN = ['Plasma membrane', 'Nuclear envelope', 'Nucleolus', 'Mitochondrion', 'Golgi apparatus', 'Lysosome'];
-
-/** 贴面模式下让位的核内部标注（核盘自带剖面标注; 前缀匹配 zh/latin） */
-const NUCLEUS_INTERIOR_ZH = ['核仁', '异染色质', '核孔复合体'];
-const NUCLEUS_INTERIOR_LATIN = ['Nucleolus', 'Heterochromatin', 'Nuclear pore complex'];
-
-/** 细胞体组件（仅 dim/规格/画质变化时重建, 动画走 imperative 帧驱动） */
-export const CellBody = ({ spec, tint, dim, showAnatomy, perf, compactNucleusLabels }: {
+/** 细胞体组件（仅 dim/规格/画质变化时重建, 动画走 imperative 帧驱动）
+ *  v14: 解剖标注改为「悬停即现」（用户需求） —— 常显标签墙退役,
+ *  OrganelleHoverLayer 按指针邻近检测显示单一标记卡（中文名 + 拉丁名 + 一句科学描述）; 全细胞器覆盖。 */
+export const CellBody = ({ spec, tint, dim, showAnatomy, perf, locate, onHoverTargets }: {
   spec: CellBodySpec;
   tint: string;
   dim: number;
+  /** 悬停标记启用（HUD 开关） */
   showAnatomy: boolean;
   /** 低端设备流畅模式（禁用折射/减实例） */
   perf?: boolean;
-  /** 剖面贴附模式: 隐藏核内部标注（核盘自带标注, 消除核区标签互叠） */
-  compactNucleusLabels?: boolean;
+  /** 目录「定位」请求（强制点亮 + 相机飞行由 FlyToController 处理） */
+  locate?: LocateReq | null;
+  /** 向外暴露去重后的悬停目录（索引面板数据源） */
+  onHoverTargets?: (targets: HoverTarget[]) => void;
 }) => {
-  const { lang } = useLang();
   const build = useMemo(() => buildCellBody(spec, tint, dim, perf ?? false), [spec, tint, dim, perf]);
   useEffect(() => () => build.dispose(), [build]);
-  // 窄视口（<640px）: 解剖标注仅保留主要细胞器, 避免移动端标签互相遮挡（zh/latin 前缀各自匹配）
-  const isNarrow = useThree((s) => s.size.width) < 640;
+  // 目录数据上报（去重: 同名多锚点只列一行）
+  useEffect(() => {
+    onHoverTargets?.(dedupeTargets(build.hover));
+  }, [build, onHoverTargets]);
   // 自噬流可见性（布尔选择器 —— 仅阈值跨越时重渲染, 逐 tick 零成本）
   const autoActive = useLabStore((s) => autophagyLevel(s.nodeStates) > AUTOPHAGY_VISIBLE_THRESHOLD);
-  const visibleLabels = useMemo(
-    () => {
-      let base = isNarrow
-        ? build.labels.filter((l) =>
-            lang === 'zh'
-              ? MAJOR_ORGANELLE_ZH.some((m) => l.zh.startsWith(m))
-              : MAJOR_ORGANELLE_LATIN.some((m) => l.latin.startsWith(m)),
-          )
-        : build.labels;
-      // 剖面贴附模式: 核内部标注让位（核盘自带剖面标注, 且分子投影到切面后核区标签密度最高）
-      if (compactNucleusLabels) {
-        base = base.filter((l) =>
-          lang === 'zh'
-            ? !NUCLEUS_INTERIOR_ZH.some((m) => l.zh.startsWith(m))
-            : !NUCLEUS_INTERIOR_LATIN.some((m) => l.latin.startsWith(m)),
-        );
-      }
-      // 条件标签: 自噬体标注仅在 ULK1 激活（mTOR 抑制/AMPK 活化语境）时显示
-      return autoActive ? base : base.filter((l) => l.when !== 'autophagy');
-    },
-    [isNarrow, build, lang, autoActive, compactNucleusLabels],
+  // 悬停目标条件过滤（自噬目标仅 ULK1 激活时感应; 移动端不裁剪 —— 单标记无遮挡问题）
+  const visibleHover = useMemo(
+    () => (autoActive ? build.hover : build.hover.filter((t) => t.when !== 'autophagy')),
+    [build, autoActive],
   );
 
   // 帧驱动: 传入 ULK1 自噬驱动水平（无 ULK1 通路 → 0 → 自噬系统静默）
@@ -2932,21 +2982,7 @@ export const CellBody = ({ spec, tint, dim, showAnatomy, perf, compactNucleusLab
   return (
     <>
       <primitive object={build.group} />
-      {showAnatomy &&
-        visibleLabels.map((l, i) => (
-          <Html key={i} position={[l.pos.x, l.pos.y, l.pos.z]} center zIndexRange={[30, 0]} pointerEvents="none" style={{ pointerEvents: 'none' }}>
-            {lang === 'zh' ? (
-              <div className="anatomy-tag">
-                <span className="anatomy-zh">{l.zh}</span>
-                <span className="anatomy-latin">{l.latin}</span>
-              </div>
-            ) : (
-              <div className="anatomy-tag">
-                <span className="anatomy-zh">{l.latin}</span>
-              </div>
-            )}
-          </Html>
-        ))}
+      <OrganelleHoverLayer targets={visibleHover} enabled={showAnatomy} locate={locate ?? null} />
     </>
   );
 };
