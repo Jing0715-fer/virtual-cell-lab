@@ -248,12 +248,14 @@ function trackedMolecule(layout: ReturnType<typeof layout3D> | null) {
   return null;
 }
 
-function SceneContents({ showAnatomy, showLabels, focus, perf, sim, snapPlane, locate, onHoverTargets }: {
+function SceneContents({ showAnatomy, showLabels, focus, perf, cutaway, sim, snapPlane, locate, onHoverTargets }: {
   showAnatomy: boolean;
   showLabels: boolean;
   focus: boolean;
   /** 低端设备流畅模式（禁用折射/减实例） */
   perf: boolean;
+  /** v15 剖面视图激活（传递 CellBody → 高尔基窗口化渲染序列） */
+  cutaway: boolean;
   sim: { current: SimSnapshot };
   /** 剖面贴附平面（信号级联正交投影到剖切面上演示; null = 常规 3D 径向布局） */
   snapPlane: { normal: Vec3; constant: number } | null;
@@ -300,7 +302,7 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, sim, snapPlane, l
         />
       </mesh>
       {/* 剖面贴附模式: 核内部标注让位（核盘自带剖面标注）—— 消除核区标签互叠 */}
-      <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} locate={locate} onHoverTargets={onHoverTargets} />
+      <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} cutaway={cutaway} locate={locate} onHoverTargets={onHoverTargets} />
       <EdgeLayer edges={layout.edges} sim={sim} />
       <MoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />
       {/* 激酶抑制剂 3D 药物分子（球棍模型，结合靶点） */}
@@ -442,7 +444,9 @@ export function VirtualCell3D() {
     setLocateReq({ nonce: locateNonce.current, target, dist: Math.max(6.5, target.r * 3.2) });
   }, []);
   // v14 细胞分裂 3D 演示（用户需求: 单独增加, 基于现有 3D 细胞标准, 不过度简化）
-  const [mitosis, setMitosis] = useState(false);
+  // v15: mitosis 改由 lab-store 单一真源驱动 —— workspace 视图切换器 Tab 与 HUD 按钮双入口等价
+  const mitosis = useLabStore((s) => s.mitosisOpen);
+  const setMitosis = useLabStore((s) => s.setMitosisOpen);
   const [mitoPlaying, setMitoPlaying] = useState(true);
   const [mitoSpeed, setMitoSpeed] = useState(1);
   const [mitoPhase, setMitoPhase] = useState(0);
@@ -721,7 +725,7 @@ export function VirtualCell3D() {
               onProgress={onMitoProgress}
             />
           ) : (
-            <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} sim={sim} snapPlane={snapPlane} locate={locateReq} onHoverTargets={onHoverTargets} />
+            <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} cutaway={clipView} sim={sim} snapPlane={snapPlane} locate={locateReq} onHoverTargets={onHoverTargets} />
           )}
           {/* v14 目录定位 → 相机飞行（1.2s 阻尼聚焦; 用户任何交互立即让位） */}
           {!mitosis && <FlyToController req={locateReq} />}

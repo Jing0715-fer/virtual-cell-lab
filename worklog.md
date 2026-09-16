@@ -1366,3 +1366,44 @@ Stage Summary:
 - 产出: hover-labels.tsx（新）/ mitosis.tsx（新）/ organelles.tsx（RER+高尔基重建 + hover 体系）/ virtual-cell-3d.tsx（状态 + HUD + 面板 + 控制台）/ i18n.tsx / globals.css
 - 遗留/风险: ①SwiftShader QA 帧率慢（非用户问题）②VLM 持续 429 —— 参照图比对仍靠像素量化 ③分裂演示在流畅模式下质膜薄纱 0.5（HD 透射 0.7 更佳）④SimEvent 双语化/PDF EN（Task 22 遗留未变）
 - 下阶段建议: ①「发表模式」截图按钮（隐藏 UI + 2× 超采样 PNG 导出）②减数分裂演示（复用 mitosis 相位时钟, 交叉互换 + 减数分裂器）③核孔密度真实缩放（~2000/核）④微绒毛/纤毛细节增强
+
+---
+Task ID: 37
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户需求四合一 —— ①分裂演示在 UI 中看不到 ②高尔基体跑到细胞膜外（应在核外）③高尔基体形态像内质网 ④悬停弹窗样式对齐 pathway + 完成后 push GitHub
+
+Work Log:
+- 【诊断①: 分裂演示入口】agent-browser 实测 HUD「分裂演示」按钮功能正常（点击后 7 相位 chips 全出）—— 问题纯为可发现性（埋在右上 10+ 个 HUD 开关中）
+  · 修复: lab-store 新增 mitosisOpen/setMitosisOpen 单一真源; workspace 视图切换器（3D/2D/图谱旁）新增琥珀高亮「分裂演示」专属 Tab —— 点击即切 cell3d 视图并开启动画, 与 HUD 按钮双入口等价同步; i18n 新增 view.mitosis/view.mitosisTip
+  · virtual-cell-3d 的 mitosis useState → 订阅 store（退出/重播/HUD 三处状态联动零漂移）
+- 【诊断②: 高尔基不可见根因链（三层洋葱）】
+  · 第一层: v14 位置 nucPoint(gDir,2.4)+整组 1.8× 缩放未计入防溢出钳制 → torus 边缘(半径~3)戳穿质膜 → 用户看到「膜外」的高尔基
+  · 第二层: v15a 重建后仍不可见 → 洋红 BasicMaterial 实验（depthTest:false renderOrder:999）仍零像素 → 排除材质/遮挡/剔除 → onBeforeRender 计数确认每帧被绘制 + NDC 投影 (0.392,0.208) 正确 → 问题在片元级
+  · 第三层（真根因）: clipView 默认 true + 剖面盘 cytoDisc/nucDisc（renderOrder 96/98, opacity 0.94/0.97, 不写深度）在透明队列尾段把切平面后方一切罩掉 → 后半侧 3D 细胞器仅 ~6% 透读。v14 高尔基恰因戳出膜外（盘覆盖区之外）才可见 —— 「膜外可见」与「核旁不可见」是同一设计缺陷的两面
+- 【高尔基 v15 终版重建（organelles.tsx）】
+  · 几何: golgiCisternaGeometry() 参数化「弯透镜盘」（径向 t×环向θ; 厚度 0.6+0.4sin(πt) 包络; 杯曲 cup·t²; 3+5 谐波花边缘; 顶/底/缘带闭合壳, 980 顶点/层）—— 7 层叠杯栈彻底取代 TorusGeometry 管环（「像内质网」根治: 盘栈 vs 丝带形态语言区分）; 池间小管 7 条 + trans TGN 出芽 11 + cis COPII 小泡 6
+  · 位形: 后右上象限 z<0（剖面保留象限 + 避开核剪影: 最近点距核面 4.8>4.4）; GOLGI_RADIAL=1.02 核旁（cis 面贴外核膜）; 盘径 1.92×核径缩放; 整组外包络膜面 -0.55 硬钳（永不忘 v14 教训: 钳制必须计入缩放）
+  · 朝向: 显式世界堆轴 GOLGI_AXIS(0.7,0.2,-0.69)（与默认相机 ~55° 经典 3/4 叠杯视角）+ 绕轴自旋 —— v15a 的 qAlign·qTilt·qYaw 复合四元数会把堆轴甩向相机（轴序耦合不可控）, 显式向量数值可验证
+  · RER 冠让位: 扇区(0.62rad)内囊池径向外跃至囊堆上空 GOLGI_OUTER + 膜面钳制（背侧象限外跃=远离相机不遮挡; v15b 内潜方案因侧视深度重合已废弃）
+  · 剖面窗口可见性核心: cutaway prop 传递链(VirtualCell3D→SceneContents→CellBody→buildCellBody) —— 剖切时高尔基 renderOrder 46→100/101（盘 96/98 之后绘制, 盘不写深度故深度测试放行, 真实前景遮挡仍生效）; 完整视图恢复常规 46/47 序列（透膜观察正常）
+  · 发射提升: 主囊 0.3→0.5（#6a5638）+ 出芽 0.45 —— 完整视图透膜观察下金色恒可辨
+  · 剖面纹理: 画的高尔基弧 3→1 组（避免与真 3D 高尔基「双高尔基」读感冲突）
+- 【悬停卡 pathway 同款样式（hover-labels.tsx + globals.css）】
+  · .anatomy-card: 实心 slate-950/95 + emerald-500/25 边框 + shadow-xl + backdrop-blur + rounded-lg（与 virtual-cell 悬停分子卡 / pathway 节点卡同 token）
+  · 结构: mono 13px emerald-300 标题 + 分组徽章 chip（白5%底 9px）+ 拉丁副题 11px slate-400 斜体 + 描述 10px slate-500 顶边线分隔; 移动端窄屏降噪（徽章隐藏/字号收敛）; 旧 anatomy-tag/anatomy-zh/anatomy-latin 死 CSS 清理
+- QA（agent-browser 端到端 + sharp 像素分析, dev.log 编译干净, lint 零错误, tsc cell3d 零错误, 控制台零错误（GOLGI_TILT 报错为 HMR 编辑中间态残留, 全量重载后清零））:
+  · 默认剖切视图: 高尔基紧凑暖金团块出现于投影点 (720,272)（n=256/16px 格）—— 位置恰在核盘右上缘（ASCII: ▒团块贴 l 核区）, 核旁语义 ✓
+  · 完整视图（剖切关闭）: 洋红对照实验 4127px 团块于 [350,750]×[240,426] —— 几何/位置/朝向数值级正确
+  · 形态: 放大 ASCII 金色紧凑团块（非管网线团）, 内部明暗层次 = 叠杯栈
+  · workspace「分裂演示」Tab: 点击 → 相位 chips 全出（中期/后期/胞质分裂）+ 纺锤体三角形结构渲染 ✓; 退出按钮 → Tab 高亮同步熄灭
+  · 悬停卡: .anatomy-card 于高尔基锚点浮现, bg rgba(2,6,23,0.95) + border rgba(52,211,153,0.25) + 标题 rgb(110,231,183) + 徽章 + 描述全对
+  · 多细胞类型回归: T 细胞（暖团 0.58,0.39）· 柱状上皮（核上位暖团 0.33,0.41）—— 全类型无错渲染
+  · 布局: 1280px 视图切换器无横向溢出; 桌面 HUD 无回归
+- 产出: organelles.tsx（高尔基 v15 重建 + cutaway 渲染序列）/ virtual-cell-3d.tsx（cutaway 传递）/ hover-labels.tsx + globals.css（pathway 同款悬停卡）/ workspace.tsx + lab-store.ts + i18n.tsx（分裂演示双入口）/ section-view.tsx（纹理高尔基弧 3→1）/ scripts/ascii-region.ts + cluster-warm.ts（QA 工具沉淀）
+
+Stage Summary:
+- 用户四项诉求全部落地: ①分裂演示 workspace 专属 Tab（琥珀高亮, 与 HUD 双入口单一真源）②高尔基核旁定位（径向 1.02 紧贴外核膜 + 膜面硬钳永不忘外）③扁平囊叠杯栈形态（弯透镜盘几何工厂, 与 ER 丝带彻底区分）④悬停卡 pathway 同款（实心卡+emerald 标题+徽章+描述）
+- 核心架构发现: 「剖切视图 = 94% 不透明剖面盘覆盖后半侧」是本场景可见性的支配规则 —— 后半侧 3D 细胞器默认仅 6% 透读; cutaway 条件 renderOrder 让特定细胞器进入「剖面窗口」渲染（100/101 > 盘 96/98）是让 3D 结构在剖切视图直读的通用手法（可扩展至线粒体/溶酶体等）
+- 教训沉淀: ①防溢出钳制必须计入整组缩放（v14 根因）②四元数复合轴序不可控 → 显式世界向量锁定最终轴 ③「外跃让位」方向依赖扇区相对相机的方位（背侧外跃=后方, 正面外跃=遮挡）④console 错误可能是 HMR 编辑中间态残留 —— 全量重载后再定性
+- 遗留/风险: ①SwiftShader QA 帧率慢（非用户问题）②完整视图下后半侧细胞器仍受 94% 剖面盘覆盖（仅高尔基窗口化; 若用户要求更多细胞器 3D 直读可批量应用 cutaway renderOrder）③SimEvent 双语化/PDF EN（Task 22 遗留未变）④VLM 持续 429
+- 下阶段建议: ①线粒体/溶酶体等关键细胞器同法剖面窗口化（逐个评估视觉密度）②「发表模式」截图按钮 ③减数分裂演示（复用 mitosis 相位时钟）④核孔密度真实缩放

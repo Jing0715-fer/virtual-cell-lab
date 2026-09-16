@@ -62,6 +62,8 @@ export const T: Record<string, Entry> = {
   'view.2d': { zh: '2D 切面', en: '2D Section' },
   'view.map': { zh: 'KEGG 图谱', en: 'KEGG Map' },
   'view.compare': { zh: '对照实验', en: 'Compare' },
+  'view.mitosis': { zh: '分裂演示', en: 'Mitosis' },
+  'view.mitosisTip': { zh: '有丝分裂全周期 3D 动画（前期→中期→后期→末期→胞质分裂）', en: 'Full-cycle mitosis 3D animation' },
   'view.drug': { zh: '药理', en: 'Pharmacology' },
   'view.heatmap': { zh: '转录热图', en: 'Heatmap' },
   'view.assistant': { zh: 'AI 助手', en: 'AI Assistant' },

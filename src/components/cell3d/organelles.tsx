@@ -29,7 +29,7 @@
  *   8. 保真度 v10（参照用户高保真科学插画基准）:
  *      - 线粒体: 18 条深波形板层嵴 + 更有机的豆状外膜 + 透射加深（嵴腔可见性）
  *      - ER: 外周迷宫管网（三通节点 + 膜旁核糖体）—— "ER 遍布胞质"读感
- *      - 高尔基: 7 层曲面板叠 + 12 池间小管 + 11 反面出芽
+ *      - 高尔基: 7 层扁平囊「叠杯」栈（参数化弯透镜盘 + 花边缘）+ 池间小管 + trans 出芽/TGN + cis COPII 小泡
  *      - 核孔复合体八重对称轮辐花冠; 异染色质双色调密集团块（38 丛 ×8-12 珠）
  *      - 中心粒 9×三联微管桶; 胞质分子拥挤 860+; 脂双层 1300 头; 胞质体积雾填充
  * 科学参照: Alberts MBoC 6th / Karp Cell & Molecular Biology 9th / cellimagelibrary
@@ -182,6 +182,74 @@ function flatCisternaGeometry(
   return geo;
 }
 
+/* ============ 高尔基扁平囊几何（v15 —— 教科书「叠杯」形态核心） ============
+ * 旧实现 TorusGeometry 管环堆 → 视觉语言与内质网管系无法区分（用户反馈「更像内质网」）。
+ * 真实高尔基: 4-8 层扁平囊(cisterna)堆叠成杯状栈, cis 面宽、trans 面窄而弯, 边缘花边状膨大。
+ * 参数化「弯透镜盘」: 径向 t∈[0,1] × 环向 θ;
+ *   - 厚度沿径向中央厚缘薄（饼缘圆润: 0.6+0.4·sin(πt) 包络）
+ *   - 杯曲 y = cup·t²（越靠边缘翘起越高 —— trans 囊更弯 → 经典杯状栈剪影）
+ *   - 边缘半径 3+5 谐波调制（有机花边膨大, 每层独立种子）
+ *   - 顶/底双面 + 缘带缝合为闭合壳（透射材质下无背面穿帮） */
+function golgiCisternaGeometry(
+  radius: number,
+  thickness: number,
+  cup: number,
+  seed: number,
+  ringSeg = 9,
+  radial = 48,
+): THREE.BufferGeometry {
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  const lobes = 3 + Math.floor(hash01(`gl${seed}`) * 2); // 3-4 主瓣
+  const lobeAmp = 0.05 + hash01(`ga${seed}`) * 0.04;
+  const lobes2 = 5;
+  const lobe2Amp = lobeAmp * 0.55;
+  const p1 = hash01(`gp${seed}`) * Math.PI * 2;
+  const p2 = hash01(`gq${seed}`) * Math.PI * 2;
+  const cols = radial + 1;
+  for (let i = 0; i <= ringSeg; i++) {
+    const t = i / ringSeg;
+    // 厚度包络: 中央饱满、缘部 60% 收薄（圆润囊缘）
+    const th = thickness * (0.6 + 0.4 * Math.sin(Math.PI * Math.min(1, t * 1.12)));
+    const dish = cup * t * t;
+    for (let j = 0; j <= radial; j++) {
+      const thta = (j / radial) * Math.PI * 2;
+      // 花边半径调制（随 t 增强 —— 中心圆整、边缘波浪）
+      const rr =
+        radius * t * (1 + lobeAmp * Math.sin(lobes * thta + p1) * t + lobe2Amp * Math.sin(lobes2 * thta + p2) * t * t);
+      const x = Math.cos(thta) * rr;
+      const z = Math.sin(thta) * rr;
+      positions.push(x, dish + th / 2, z);
+      positions.push(x, dish - th / 2, z);
+      uvs.push(t, j / radial, t, j / radial);
+    }
+  }
+  const idx = (i: number, j: number, top: boolean) => 2 * (i * cols + j) + (top ? 0 : 1);
+  for (let i = 0; i < ringSeg; i++) {
+    for (let j = 0; j < radial; j++) {
+      const aT = idx(i, j, true), bT = idx(i, j + 1, true), cT = idx(i + 1, j, true), dT = idx(i + 1, j + 1, true);
+      const aB = idx(i, j, false), bB = idx(i, j + 1, false), cB = idx(i + 1, j, false), dB = idx(i + 1, j + 1, false);
+      // 顶面（法向 +y）
+      indices.push(aT, bT, cT, bT, dT, cT);
+      // 底面（法向 -y, 反绕）
+      indices.push(aB, cB, bB, bB, cB, dB);
+    }
+  }
+  // 缘带（最外环顶/底缝合, 法向径向朝外）
+  for (let j = 0; j < radial; j++) {
+    const tT = idx(ringSeg, j, true), tT2 = idx(ringSeg, j + 1, true);
+    const tB = idx(ringSeg, j, false), tB2 = idx(ringSeg, j + 1, false);
+    indices.push(tT, tT2, tB, tT2, tB2, tB);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
 /* ============ 位移球体（细胞器有机轮廓, 保持球状基底） ============ */
 
 function displacedSphere(R: number, detail: number, freq: number, amp: number, seed: number): THREE.BufferGeometry {
@@ -224,7 +292,7 @@ function surf(dir: THREE.Vector3, R: number, freq: number, amp: number, seed: nu
 
 /* ============ 主构建 ============ */
 
-export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, perf = false): CellBodyBuild {
+export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, perf = false, cutaway = false): CellBodyBuild {
   const group = new THREE.Group();
   const R = spec.membraneR;
   const N = spec.nucleusR;
@@ -529,6 +597,33 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const t = Math.min(lo + (hi - lo) * Math.min(1, Math.max(0, frac)), outer);
     return new THREE.Vector3(d.x * t, d.y * t, d.z * t);
   };
+
+  /* ============ 高尔基位形常量（v15 —— RER 冠生成与此处共用, 必须先于 RER 定义） ============
+   * 用户反馈 v14: ①高尔基体跑到细胞膜外 ②形态像内质网 → v15 重建:
+   *   - 定位: 紧贴核被膜外的核旁位（GOLGI_RADIAL≈1.0 —— cis 面近贴外核膜, 「细胞核外」语义）
+   *   - 方位: 后右上象限（z<0 —— 剖面视图默认移除前半, 此象限恒可见; 同时避开核剪影遮挡）
+   *   - 堆轴: 显式世界向量 STACK_AXIS（与默认相机呈 ~55° —— 经典 3/4 叠杯可读角, 非正放射呆板）
+   *   - 尺度: cis 盘直径 ≈ 核半径 96%（醒目）, 整组外包络膜面硬钳 —— 永不越膜 */
+  const golgiLat = SHAPE === 'columnar' ? 0.85 : 0.35;
+  const golgiLon = SHAPE === 'columnar' ? 2.4 : 5.9;
+  const GOLGI_DIR = new THREE.Vector3(
+    Math.cos(golgiLat) * Math.cos(golgiLon),
+    Math.sin(golgiLat),
+    Math.cos(golgiLat) * Math.sin(golgiLon),
+  ).normalize();
+  const GOLGI_SCALE = (SHAPE === 'columnar' ? 1.05 : N / 4.1) * (R < 9.2 ? 0.92 : 1); // 盘径随核径缩放, 小细胞再收敛
+  const GOLGI_CIST_N = 7; // 扁平囊层数（cis→trans）
+  const GOLGI_DISK_R = 1.92 * GOLGI_SCALE; // cis 盘半径（直径≈核半径 96%）
+  const GOLGI_STEP = 0.148 * GOLGI_SCALE; // 囊层距
+  const GOLGI_STACK_H = GOLGI_CIST_N * GOLGI_STEP; // 囊堆总高
+  const GOLGI_RADIAL = 1.02 * GOLGI_SCALE; // 堆中心距核被膜径向距离
+  /** 囊堆径向外包络（RER 让位目标高度: 扇区内囊池外跃至囊堆上空 —— 背侧象限外跃 = 远离相机, 不遮挡） */
+  const GOLGI_OUTER = GOLGI_RADIAL + GOLGI_STACK_H * 0.5 + GOLGI_DISK_R * 0.4 + 0.3;
+  /** 堆轴世界向量: 自径向倾 ~23° 朝相机侧 —— 默认相机 [0,10,29] 下囊盘呈 ~55° 经典 3/4 视角 */
+  const GOLGI_AXIS = new THREE.Vector3(0.7, 0.2, -0.69).normalize();
+  /** 盘面自旋（绕堆轴 —— 花边瓣朝向变化, 打破轴对称） */
+  const GOLGI_SPIN = 0.8;
+
   const nucMat = mat({
     // v12 参照图: 核被膜熏衣草灰紫族（实测 105,100,111）—— 高饱和玫瑰退役
     color: REF.nucEnv,
@@ -1022,7 +1117,23 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
           Math.sin(lat),
           Math.cos(lat) * Math.sin(lon),
         ).normalize();
-        const p = nucPoint(dir, ofs + Math.sin(t * Math.PI * 1.4 + s * 1.3) * 0.12);
+        // v15 高尔基让位窗: 囊池带经过高尔基扇区时径向外跃至囊堆上空（GOLGI_OUTER）——
+        // 高尔基在后上背侧象限(z<0), 外跃的 ER 囊池恒在囊堆「后方」（远离默认相机, 不遮挡;
+        // v15b 曾试内潜 —— 侧视角下与囊堆深度重合, 视觉互叠, 外跃才是正解）
+        let vofs = ofs + Math.sin(t * Math.PI * 1.4 + s * 1.3) * 0.12;
+        const angNear = dir.angleTo(GOLGI_DIR);
+        if (angNear < 0.62) {
+          const kSmooth = 1 - angNear / 0.62; // 扇区中心 1 → 边缘 0
+          let vault = vofs + (GOLGI_OUTER - vofs) * kSmooth;
+          const probe = nucPoint(dir, vault);
+          const pl = probe.length();
+          if (pl > 1e-6) {
+            const lim = cellSurf(probe.clone().normalize(), R, SHAPE, -0.95);
+            if (pl > lim) vault -= pl - lim; // 紧细胞硬钳: 让位高度受限但不穿膜（带半宽余量 0.95）
+          }
+          vofs = Math.max(vofs, vault);
+        }
+        const p = nucPoint(dir, vofs);
         pts.push(new THREE.Vector3(p.x, p.y, p.z));
       }
       const curve = new THREE.CatmullRomCurve3(pts);
@@ -1308,87 +1419,99 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     labels.push({ pos: { x: serFirst.x * 1.25, y: serFirst.y + 0.6, z: serFirst.z * 1.25 }, zh: '滑面内质网', latin: 'Smooth ER' });
   }
 
-  /* ================= 高尔基体（顺→反梯度 + 出芽囊泡） ================= */
+  /* ================= 高尔基体（v15 重建: 扁平囊堆「叠杯」+ 核旁定位 + 出芽囊泡） ================= */
   {
     const g = new THREE.Group();
     const cisCol = new THREE.Color(REF.golgiCis);
     const transCol = new THREE.Color(REF.golgiTrans);
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4; color?: THREE.Color }[] = [];
-    const cistN = 8;
-    // 非线性极性插值: 暖棕金 → 赭石（v12 参照图: 高尔基 cis/trans 梯度保留但低饱和化; v14 八池）
-    const POLARITY_MIX = [0, 0.06, 0.15, 0.3, 0.5, 0.7, 0.88, 1];
-    for (let i = 0; i < cistN; i++) {
+    // 非线性极性插值: 暖棕金(cis) → 赭石(trans) —— 顶点色逐层梯度
+    const POLARITY_MIX = [0, 0.07, 0.17, 0.32, 0.5, 0.72, 1];
+    for (let i = 0; i < GOLGI_CIST_N; i++) {
       const col = cisCol.clone().lerp(transCol, POLARITY_MIX[i] ?? 1);
-      // v14 增大: 管径 0.17 + 层间距 0.27 + 逐层旋叠 0.23 + 基半径 1.16（旧 1.02/0.15/0.24）—— 更宽更醒目的层叠扁平囊杯
-      const torus = track(new THREE.TorusGeometry(1.16 + i * 0.07, 0.17, 12, 48, Math.PI * 1.38));
+      // 盘径逐层收窄(cis 最宽) + 杯曲逐层加深(trans 最弯) → 经典「叠杯/漏斗」剪影 —— 与 ER 带状囊池彻底区分
+      const rad = GOLGI_DISK_R * (1 - i * 0.055);
+      const cup = (0.1 + i * 0.035) * GOLGI_SCALE;
+      const geo = track(golgiCisternaGeometry(rad, 0.085 * GOLGI_SCALE, cup, i * 7 + 3, perf ? 7 : 9, perf ? 32 : 48));
       const m = new THREE.Matrix4()
-        .makeScale(1, 0.2, 1)
-        .multiply(new THREE.Matrix4().makeRotationZ(i * 0.23))
-        .multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2))
-        .setPosition(0, i * 0.27, 0);
-      parts.push({ geo: torus, matrix: m, color: col });
+        .makeRotationY(i * 0.13)
+        .setPosition(0, i * GOLGI_STEP - GOLGI_STACK_H * 0.5, 0); // 堆中心置于局部原点（cis 底/trans 顶）
+      parts.push({ geo, matrix: m, color: col });
     }
-    // 池间小管连接（v10: 12 条随七池梯度同步; v14 八池梯度）
-    for (let c = 0; c < 12; c++) {
-      const i = c % (cistN - 1);
-      const ang = 0.5 + hash01(`gc${c}`) * 2.2;
-      const r = 1.16 + i * 0.07;
-      const a = new THREE.Vector3(Math.cos(ang) * r, i * 0.27, Math.sin(ang) * r * 0.34);
-      const b = new THREE.Vector3(Math.cos(ang) * r, (i + 1) * 0.27, Math.sin(ang) * r * 0.34);
-      const mid = a.clone().add(b).multiplyScalar(0.5).add(new THREE.Vector3(0, 0, 0.24));
-      parts.push({ geo: track(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(a, mid, b), 10, 0.035, 6)), color: new THREE.Color(REF.golgiVesicle) });
+    // 池间小管（相邻囊缘的细连接 —— 高尔基「梯骨」结构; 随层梯度同步收窄）
+    const tubN = perf ? 4 : 7;
+    for (let c = 0; c < tubN; c++) {
+      const i = c % (GOLGI_CIST_N - 1);
+      const ang = (c / tubN) * Math.PI * 2 + hash01(`gt${c}`) * 0.8;
+      const rA = GOLGI_DISK_R * (1 - i * 0.055) * 0.96;
+      const rB = GOLGI_DISK_R * (1 - (i + 1) * 0.055) * 0.96;
+      const cupA = (0.1 + i * 0.035) * GOLGI_SCALE;
+      const cupB = (0.1 + (i + 1) * 0.035) * GOLGI_SCALE;
+      const a = new THREE.Vector3(Math.cos(ang) * rA, i * GOLGI_STEP - GOLGI_STACK_H * 0.5 + cupA, Math.sin(ang) * rA);
+      const b = new THREE.Vector3(Math.cos(ang) * rB, (i + 1) * GOLGI_STEP - GOLGI_STACK_H * 0.5 + cupB, Math.sin(ang) * rB);
+      const mid = a.clone().add(b).multiplyScalar(0.5).multiplyScalar(1.08); // 微外凸弧
+      parts.push({ geo: track(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(a, mid, b), 8, 0.028 * GOLGI_SCALE, 6)), color: new THREE.Color(REF.golgiVesicle) });
     }
     const golgi = new THREE.Mesh(track(mergeGeoms(parts)), mat({
       color: '#ffffff',
       vertexColors: true,
       transmission: transOn ? 0.26 : 0,
       thickness: 0.4,
-      roughness: 0.35,
-      opacity: transOn ? 1 : 0.62,
-      clearcoat: 0.45,
-      // v14 可读性: 发射 0.1→0.28（低照度环境下 cis→trans 梯度恒可辨）
-      emissive: '#4a3f30',
-      emissiveIntensity: 0.28,
+      // v15 扁平囊: 更亮清晰的囊面读感（与 ER 的带状囊池形成「盘栈 vs 丝带」形态对比）
+      roughness: 0.26,
+      opacity: transOn ? 1 : 0.66,
+      clearcoat: 0.6,
+      // v15b: 发射 0.3→0.5 —— 完整视图（透膜观察）下金色恒可辨; 剖面窗口内更亮一层
+      emissive: '#6a5638',
+      emissiveIntensity: 0.5,
       sheen: 0.6,
       sheenColor: '#a8906a',
     }));
-    golgi.renderOrder = 46;
+    /* v15 剖面窗口可见性核心: 默认剖切视图下, 切平面后方的 3D 结构会被 94% 不透明的剖面盘
+     * （section-view cytoDisc/nucDisc, renderOrder 96/98, 不写深度）覆盖 —— 后半侧细胞器仅余 ~6% 透读。
+     * 高尔基改在盘之后绘制（renderOrder 100/101, 深度测试开启 —— 盘不写深度放行, 真实前景遮挡仍生效）
+     * → 剖面视图中高尔基以其真实 3D 形态呈现于「核旁窗口」; 完整视图（剖切关闭）恢复常规序列 46/47。 */
+    golgi.renderOrder = cutaway ? 100 : 46;
     g.add(golgi);
-    // 反面出芽囊泡（衣被蛋白斑点）
+    // trans 面出芽囊泡（反面网 TGN —— 衣被蛋白斑点, 大且多）
     const budGeo = track(new THREE.SphereGeometry(1, 12, 10));
     const budMat = mat({
-      // v12 参照图: 反面出芽囊泡赭石族
       color: REF.golgiTrans,
       emissive: '#6a543a',
-      emissiveIntensity: 0.32,
+      emissiveIntensity: 0.45,
       opacity: 0.72,
       roughness: 0.35,
       normalMap: coatNormal,
       normalScale: 0.9,
       clearcoat: 0.3,
     });
-    const budCount = 11;
+    const budCount = perf ? 6 : 11;
     const buds = new THREE.InstancedMesh(budGeo, budMat, budCount);
     {
       const mm = new THREE.Matrix4();
+      const transDiskR = GOLGI_DISK_R * (1 - (GOLGI_CIST_N - 1) * 0.055);
       for (let v = 0; v < budCount; v++) {
-        const r = 0.16 + hash01(`gv${v}`) * 0.07;
-        const ang = 0.4 + v * 0.5;
+        const r = (0.14 + hash01(`gv${v}`) * 0.07) * GOLGI_SCALE;
+        const ang = 0.4 + v * (Math.PI * 2 / budCount) + hash01(`gva${v}`) * 0.5;
+        const rr = transDiskR * (0.55 + hash01(`gv${v}`, 3) * 0.55);
         mm.makeScale(r, r, r);
-        mm.setPosition(Math.cos(ang) * (1.35 + hash01(`gv${v}`, 3) * 0.25), 2.02 + hash01(`gv${v}`, 5) * 0.34, Math.sin(ang) * 0.62);
+        mm.setPosition(
+          Math.cos(ang) * rr,
+          GOLGI_STACK_H * 0.5 + (0.08 + hash01(`gv${v}`, 5) * 0.3) * GOLGI_SCALE,
+          Math.sin(ang) * rr,
+        );
         buds.setMatrixAt(v, mm);
       }
       buds.instanceMatrix.needsUpdate = true;
-      buds.renderOrder = 47;
+      buds.renderOrder = cutaway ? 101 : 47;
     }
     g.add(buds);
-    // 顺面入芽小泡（ER → 高尔基运输小泡语义, teal 系; perf 减至 2）
+    // 顺面入芽小泡（ER → 高尔基 COPII 运输小泡 —— cis 面, 小而贴底）
     const cisBudGeo = track(new THREE.SphereGeometry(1, 10, 8));
     const cisBudMat = mat({
-      // v12 参照图: 顺面小泡暖棕金族
       color: REF.golgiCis,
       emissive: '#4a3f2a',
-      emissiveIntensity: 0.3,
+      emissiveIntensity: 0.42,
       opacity: 0.72,
       roughness: 0.35,
       normalMap: coatNormal,
@@ -1400,41 +1523,55 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     {
       const mm = new THREE.Matrix4();
       for (let v = 0; v < cisBudCount; v++) {
-        const r = 0.11 + hash01(`cgv${v}`) * 0.04;
-        const ang = 1.1 + v * 1.0;
+        const r = (0.1 + hash01(`cgv${v}`) * 0.045) * GOLGI_SCALE;
+        const ang = 1.1 + v * (Math.PI * 2 / cisBudCount);
+        const rr = GOLGI_DISK_R * (0.5 + hash01(`cgv${v}`, 3) * 0.42);
         mm.makeScale(r, r, r);
-        mm.setPosition(Math.cos(ang) * (1.06 + hash01(`cgv${v}`, 3) * 0.26), -0.42 - hash01(`cgv${v}`, 5) * 0.18, Math.sin(ang) * 0.46);
+        mm.setPosition(
+          Math.cos(ang) * rr,
+          -GOLGI_STACK_H * 0.5 - (0.1 + hash01(`cgv${v}`, 5) * 0.16) * GOLGI_SCALE,
+          Math.sin(ang) * rr,
+        );
         cisBuds.setMatrixAt(v, mm);
       }
       cisBuds.instanceMatrix.needsUpdate = true;
-      cisBuds.renderOrder = 47;
+      cisBuds.renderOrder = cutaway ? 101 : 47;
     }
     g.add(cisBuds);
-    // v6 位姿: 高尔基贴核面外延（核旁上位）; 柱状上皮采用核上位置（高尔基位于核与刷状缘之间 —— 教科书位形）
-    // v14 用户反馈「高尔基体没看到」: 移位到默认正剖（移除前半）的保留象限（z<0, 经度 5.9）→ 恒可见;
-    // 外延 1.3→2.4（远离核被膜与 rER 冠的叠影, 与 ER 出口位语义一致）
-    const golgiLat = SHAPE === 'columnar' ? 0.85 : 0.5;
-    const golgiLon = SHAPE === 'columnar' ? 2.4 : 5.9;
-    const gDir = new THREE.Vector3(
-      Math.cos(golgiLat) * Math.cos(golgiLon),
-      Math.sin(golgiLat),
-      Math.cos(golgiLat) * Math.sin(golgiLon),
-    ).normalize();
-    const p = nucPoint(gDir, 2.4);
-    // 防溢出: 若核上位 2.4 外延越出膜面内 2.2, 则按膜面回拉
+    /* v15 位姿（用户反馈「跑到细胞膜外/像内质网」根治）:
+     *  - 定位: nucPoint(GOLGI_DIR, GOLGI_RADIAL) —— 紧贴核被膜外的核旁位（cis 面近贴外核膜, ER 出口位语义）
+     *  - 朝向: 局部 +y(trans) 对齐 GOLGI_DIR + 有机倾斜/yaw —— 囊堆侧 45° 可读
+     *  - 防溢出: 整组外包络（盘径×1.12 + 半堆高）膜面内 0.55 硬钳 —— v14「戳穿质膜」根因（旧 1.8× 缩放
+     *    未计入钳制）修复 */
+    const p = nucPoint(GOLGI_DIR, GOLGI_RADIAL);
     {
-      const lim = cellSurf(gDir, R, SHAPE, -2.2);
       const pv = new THREE.Vector3(p.x, p.y, p.z);
-      if (pv.length() > lim) pv.setLength(lim);
+      const need = GOLGI_DISK_R * 1.12 + GOLGI_STACK_H * 0.5 + 0.15;
+      const pl = pv.length();
+      if (pl > 1e-6) {
+        const lim = cellSurf(pv.clone().normalize(), R, SHAPE, -0.55) - need;
+        if (pl > lim && lim > N * 0.8) pv.setLength(lim);
+      }
       p.x = pv.x; p.y = pv.y; p.z = pv.z;
     }
     g.position.set(p.x, p.y, p.z);
-    // v14: 杯口朝观察侧（层叠囊面可读）; 整组 1.15→1.8×（直径 ~7 单位, 与核同量级的醒目体量）
-    g.rotation.y = -0.9;
-    g.scale.setScalar(SHAPE === 'columnar' ? 1.4 : 1.8);
+    /* v15 朝向: 局部 +y(trans) 对齐显式堆轴 GOLGI_AXIS（自径向倾 ~23° 朝相机侧 → 囊盘 ~55° 经典 3/4 视角）
+     * + 绕轴自旋（花边瓣朝向变化）。v15a 的 qAlign·qTilt·qYaw 复合会把堆轴甩向相机（四元数轴序耦合不可控）,
+     * 显式世界向量直接锁定最终轴 —— 数值可验证。 */
+    const qAlign = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), GOLGI_AXIS);
+    const qSpin = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), GOLGI_SPIN);
+    g.quaternion.copy(qAlign).multiply(qSpin);
     group.add(g);
-    labels.push({ pos: { x: p.x * 1.28, y: p.y + 0.65, z: p.z * 1.28 }, zh: '高尔基体（顺→反）', latin: 'Golgi apparatus' });
-    hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: 3.0, zh: '高尔基体（顺→反）', latin: 'Golgi apparatus', group: 'endomembrane' });
+    const topOff = new THREE.Vector3(GOLGI_DIR.x, GOLGI_DIR.y, GOLGI_DIR.z).multiplyScalar(GOLGI_STACK_H * 0.5 + 0.45 * GOLGI_SCALE);
+    labels.push({
+      pos: { x: p.x + topOff.x, y: p.y + topOff.y + 0.35, z: p.z + topOff.z },
+      zh: '高尔基体（顺→反）', latin: 'Golgi apparatus',
+    });
+    hover.push({
+      pos: { x: p.x, y: p.y, z: p.z },
+      r: GOLGI_DISK_R * 1.18 + GOLGI_STACK_H * 0.4,
+      zh: '高尔基体（顺→反）', latin: 'Golgi apparatus', group: 'endomembrane',
+    });
   }
 
   /* ================= 运输囊泡 ================= */
@@ -2949,7 +3086,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
 /** 细胞体组件（仅 dim/规格/画质变化时重建, 动画走 imperative 帧驱动）
  *  v14: 解剖标注改为「悬停即现」（用户需求） —— 常显标签墙退役,
  *  OrganelleHoverLayer 按指针邻近检测显示单一标记卡（中文名 + 拉丁名 + 一句科学描述）; 全细胞器覆盖。 */
-export const CellBody = ({ spec, tint, dim, showAnatomy, perf, locate, onHoverTargets }: {
+export const CellBody = ({ spec, tint, dim, showAnatomy, perf, cutaway, locate, onHoverTargets }: {
   spec: CellBodySpec;
   tint: string;
   dim: number;
@@ -2957,12 +3094,14 @@ export const CellBody = ({ spec, tint, dim, showAnatomy, perf, locate, onHoverTa
   showAnatomy: boolean;
   /** 低端设备流畅模式（禁用折射/减实例） */
   perf?: boolean;
+  /** v15 剖面视图激活（剖面盘覆盖后半侧 —— 高尔基等窗口化细胞器切换到盘后渲染序列） */
+  cutaway?: boolean;
   /** 目录「定位」请求（强制点亮 + 相机飞行由 FlyToController 处理） */
   locate?: LocateReq | null;
   /** 向外暴露去重后的悬停目录（索引面板数据源） */
   onHoverTargets?: (targets: HoverTarget[]) => void;
 }) => {
-  const build = useMemo(() => buildCellBody(spec, tint, dim, perf ?? false), [spec, tint, dim, perf]);
+  const build = useMemo(() => buildCellBody(spec, tint, dim, perf ?? false, cutaway ?? false), [spec, tint, dim, perf, cutaway]);
   useEffect(() => () => build.dispose(), [build]);
   // 目录数据上报（去重: 同名多锚点只列一行）
   useEffect(() => {

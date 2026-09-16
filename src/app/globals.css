@@ -373,42 +373,70 @@
   color: rgba(203, 213, 225, 0.82);
 }
 
-/* 细胞解剖标注 */
-.anatomy-tag {
+/* 细胞解剖标注 → v15 起统一为 .anatomy-card 悬停卡（pathway 同款, 见下） */
+
+/* v14→v15 悬停标记卡 —— 样式对齐 pathway 信息卡（virtual-cell.tsx 悬停分子卡 / pathway-map-view.tsx 节点卡同款语言）:
+ * 实心 slate-950/95 圆角卡 + emerald-500/25 边框 + shadow-xl + backdrop-blur;
+ * 标题行 mono 13px emerald-300 + 分组徽章（白 5% 底 9px chip）; 拉丁副题 11px slate-400; 描述 10px slate-500 */
+.anatomy-card {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  padding: 3px 8px;
-  border-radius: 7px;
-  border: 1px dashed rgba(148, 163, 184, 0.4);
-  background: rgba(2, 6, 23, 0.66);
-  backdrop-filter: blur(2px);
-  white-space: nowrap;
+  align-items: flex-start;
+  gap: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  background: rgba(2, 6, 23, 0.95);
+  box-shadow:
+    0 20px 25px -5px rgba(0, 0, 0, 0.35),
+    0 8px 10px -6px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(52, 211, 153, 0.06);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  white-space: normal;
+  max-width: 264px;
+  animation: anatomy-hover-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2);
   -webkit-font-smoothing: antialiased;
 }
-.anatomy-zh {
-  font-size: 11px;
+.anatomy-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+.anatomy-card-title {
+  font-family: var(--font-geist-mono, ui-monospace, monospace);
+  font-size: 13px;
   font-weight: 600;
-  color: #cbd5e1;
+  color: #6ee7b7; /* emerald-300 —— 与 pathway 悬停卡标题一致 */
+  letter-spacing: 0.01em;
 }
-.anatomy-latin {
+.anatomy-card-chip {
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0 6px;
   font-size: 9px;
-  font-style: italic;
-  color: rgba(148, 163, 184, 0.65);
+  line-height: 16px;
+  color: #94a3b8; /* slate-400 */
+  white-space: nowrap;
 }
-
-/* v14 悬停标记卡（悬停即现 —— 单一标记 + 科学描述行; 取代常显标签墙） */
-.anatomy-hover {
-  border: 1px solid rgba(52, 211, 153, 0.35);
-  background: rgba(3, 10, 22, 0.82);
-  box-shadow:
-    0 0 0 1px rgba(52, 211, 153, 0.08),
-    0 6px 22px rgba(0, 0, 0, 0.5);
-  animation: anatomy-hover-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2);
-  max-width: 260px;
-  align-items: flex-start;
-  gap: 2px;
+.anatomy-card-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.45;
+  font-style: italic;
+  color: #94a3b8; /* slate-400 —— pathway 卡副题行 */
+}
+.anatomy-card-desc {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 10px;
+  line-height: 1.5;
+  color: #64748b; /* slate-500 —— pathway 卡描述行 */
+  max-width: 240px;
 }
 @keyframes anatomy-hover-in {
   from {
@@ -419,17 +447,6 @@
     opacity: 1;
     transform: translateY(0) scale(1);
   }
-}
-.anatomy-hover .anatomy-zh {
-  font-size: 11.5px;
-  color: #d1fae5;
-}
-.anatomy-desc {
-  font-size: 8.5px;
-  line-height: 1.45;
-  color: rgba(148, 163, 184, 0.85);
-  white-space: normal;
-  max-width: 240px;
 }
 
 /* 药物抑制状态（紫色 = 催化输出钳制） */
@@ -513,14 +530,22 @@
   .mol3d-kind {
     display: none;
   }
-  .anatomy-tag {
-    padding: 2px 6px;
+  .anatomy-card {
+    padding: 6px 9px;
+    max-width: 208px;
   }
-  .anatomy-zh {
+  .anatomy-card-title {
+    font-size: 11px;
+  }
+  .anatomy-card-chip {
+    display: none; /* 窄屏隐藏分组徽章, 保标题+描述可读 */
+  }
+  .anatomy-card-sub {
+    font-size: 9.5px;
+  }
+  .anatomy-card-desc {
     font-size: 9px;
-  }
-  .anatomy-latin {
-    display: none;
+    max-width: 180px;
   }
   .mol3d-tip {
     width: 172px;

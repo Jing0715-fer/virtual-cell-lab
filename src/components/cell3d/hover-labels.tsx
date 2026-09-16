@@ -203,10 +203,19 @@ export function OrganelleHoverLayer({ targets, enabled, locate }: {
           pointerEvents="none"
           style={{ pointerEvents: 'none' }}
         >
-          <div className="anatomy-tag anatomy-hover">
-            <span className="anatomy-zh">{lang === 'zh' ? show.zh : show.latin}</span>
-            <span className="anatomy-latin">{lang === 'zh' ? show.latin : show.zh}</span>
-            {info && <span className="anatomy-desc">{lang === 'zh' ? info.zh : info.en}</span>}
+          {/* v15 悬停卡样式对齐 pathway 信息卡（用户需求「和 pathway 一样的样式」）:
+              实心 slate-950/95 圆角卡 + emerald 边框 + mono 标题 + 分组徽章 + 拉丁副题 + 科学描述行 */}
+          <div className="anatomy-card">
+            <div className="anatomy-card-head">
+              <span className="anatomy-card-title">{lang === 'zh' ? show.zh : show.latin}</span>
+              {show.group && (
+                <span className="anatomy-card-chip">
+                  {lang === 'zh' ? HOVER_GROUP_LABEL[show.group].zh : HOVER_GROUP_LABEL[show.group].en}
+                </span>
+              )}
+            </div>
+            <div className="anatomy-card-sub">{lang === 'zh' ? show.latin : show.zh}</div>
+            {info && <div className="anatomy-card-desc">{lang === 'zh' ? info.zh : info.en}</div>}
           </div>
         </Html>
       )}

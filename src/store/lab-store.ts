@@ -21,6 +21,9 @@ interface LabStore {
   cellId: string;
   pathwayId: string | null;
   view: ViewMode;
+  /** v15 细胞分裂 3D 演示开关（workspace 视图切换器 Tab 与 cell3d HUD 双入口共用单一真源） */
+  mitosisOpen: boolean;
+  setMitosisOpen: (v: boolean) => void;
 
   // 通路图数据
   graph: PathwayGraph | null;
@@ -70,6 +73,7 @@ export const useLabStore = create<LabStore>((set, get) => ({
   cellId: 'hepatocyte',
   pathwayId: 'hsa04010',
   view: 'cell3d',
+  mitosisOpen: false,
   graph: null,
   graphLoading: false,
   graphError: null,
@@ -110,6 +114,8 @@ export const useLabStore = create<LabStore>((set, get) => ({
   },
 
   setView: (v) => set({ view: v }),
+
+  setMitosisOpen: (v) => set({ mitosisOpen: v }),
 
   setGraphState: (loading, error, graph) => set({ graphLoading: loading, graphError: error, graph }),
 

@@ -173,8 +173,9 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
     ctx.restore();
   }
 
-  /* --- 高尔基体剖面（3 组 × 4 条平行弧线堆 = 层叠扁平囊截面，对应 3D 高尔基重塑） --- v12 参照图: 暖棕金族 */
-  for (let g = 0; g < 3; g++) {
+  /* --- 高尔基体剖面（v15: 3→1 组弧线堆 —— 真 3D 高尔基现于剖面窗口渲染（renderOrder 100）,
+         纹理仅保留 1 组作远处衬景, 避免「双高尔基」读感冲突）--- v12 参照图: 暖棕金族 */
+  for (let g = 0; g < 1; g++) {
     const a = rnd() * Math.PI * 2;
     const rr = rMem * (0.5 + rnd() * 0.4);
     const x = cx + Math.cos(a) * rr;

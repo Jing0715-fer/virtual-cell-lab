@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useQuery } from '@tanstack/react-query';
-import { Microscope, Map as MapIcon, FlaskConical, Boxes, Orbit, Pill, Activity, GitCompare, AlertTriangle, X } from 'lucide-react';
+import { Microscope, Map as MapIcon, FlaskConical, Boxes, Orbit, Pill, Activity, GitCompare, AlertTriangle, X, Split } from 'lucide-react';
 import type { PathwayGraph } from '@/types/kegg';
 import { useLabStore } from '@/store/lab-store';
 import { useCompareStore } from '@/store/compare-store';
@@ -56,6 +56,8 @@ export function LabWorkspace() {
   const cellId = useLabStore((s) => s.cellId);
   const view = useLabStore((s) => s.view);
   const setView = useLabStore((s) => s.setView);
+  const mitosisOpen = useLabStore((s) => s.mitosisOpen);
+  const setMitosisOpen = useLabStore((s) => s.setMitosisOpen);
   const loadGraph = useLabStore((s) => s.loadGraph);
   const setGraphState = useLabStore((s) => s.setGraphState);
   const running = useLabStore((s) => s.running);
@@ -169,6 +171,24 @@ export function LabWorkspace() {
               {t('view.map')}
             </button>
           </div>
+          {/* v15 分裂演示专属入口（用户反馈「UI 中没看到分裂演示」）: 视图切换器同级 Tab + 琥珀高亮 ——
+              与 cell3d HUD 按钮共用 lab-store 单一真源, 点击即切入 3D 视图并启动有丝分裂全周期动画 */}
+          <button
+            onClick={() => {
+              setView('cell3d');
+              setMitosisOpen(!mitosisOpen);
+            }}
+            title={t('view.mitosisTip')}
+            className={cn(
+              'flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition',
+              mitosisOpen
+                ? 'border-amber-400/60 bg-amber-500/20 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.25)]'
+                : 'border-amber-500/35 bg-amber-500/10 text-amber-300/90 hover:border-amber-400/60 hover:bg-amber-500/20',
+            )}
+          >
+            <Split className="h-3.5 w-3.5" />
+            {t('view.mitosis')}
+          </button>
           <div className="ml-auto flex items-center gap-2">
             <button
               onClick={() => {
