@@ -1371,6 +1371,20 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     flow: { color: '#8a6a58', strength: 0.22, scale: 1.7, speed: 0.13, rim: 0.34 },
   });
   const mitoMatrixMat = mat({ color: REF.mitoMatrix, emissive: '#241a16', emissiveIntensity: 0.22, opacity: 0.24 });
+  // v25 内膜（inner boundary membrane）: 双膜三明治读感 —— 外膜 0.4 / 膜间隙 ~0.035 / 内膜 0.365;
+  //   科学: 嵴是内膜向内折叠 —— 嵴板层片缘（Rm 0.345）恰贴内膜内面, 「嵴从内膜折出」解剖学直读;
+  //   剖面切缘双环 + 膜间隙暗带 = 电镜双层膜标准剪影。与外膜同 FBM 种子 → 有机轮廓相互跟踪。
+  const mitoInnerGeo = track(displaceGeometry(new THREE.CapsuleGeometry(0.365, 1.46, 12, 24), 3.1, 0.05, 17));
+  const mitoInnerMat = mat({
+    color: REF.mitoCristae,
+    emissive: '#6a4a3e',
+    emissiveIntensity: 0.4,
+    roughness: 0.3,
+    opacity: 0.55,
+    sheen: 0.5,
+    sheenColor: '#a8826e',
+    flow: { color: '#8a6a58', strength: 0.18, scale: 2.0, speed: 0.14, rim: 0.3 },
+  });
   const cristaeMat = mat({
     color: REF.mitoCristae,
     emissive: '#7a5548',
@@ -1411,6 +1425,12 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     matrix.scale.set(1, 1, 0.82);
     matrix.renderOrder = cutaway ? 99.6 : 45; // v22 剖面窗口化（先于外膜壳绘制）
     g.add(matrix);
+    // v25 内膜（inner boundary membrane）: 外膜与基质之间的独立壳体 —— 双膜 + 膜间隙;
+    //   嵴板层从内膜折出（片缘 Rm 0.345 贴内膜内面 0.365）—— 教科书级剖面剪影
+    const inner = new THREE.Mesh(mitoInnerGeo, mitoInnerMat);
+    inner.scale.set(1, 1, 0.82);
+    inner.renderOrder = cutaway ? 100.2 : 46.5; // v22 体系: 外膜壳 100 → 内膜 100.2 → 嵴 100.4
+    g.add(inner);
     // v24 板层嵴: 横贯斜置波浪板层堆（12 片 perf 7 —— 参照图「//////」斜带节奏;
     // 片缘贴基质壁 = 嵴连接; 胶囊端帽钳 → 端部板层顺冠面内收）
     const { geometry: cristaeGeo, lamellae } = cristaeLamellaeGeometry(i * 31, cristaeN, 0.345, 0.69, 0.75, perf);

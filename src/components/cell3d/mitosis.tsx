@@ -483,6 +483,21 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     sheen: 0.4,
     sheenColor: REF.sheen,
   });
+  // v25 中央纺锤体（极微管重叠区）独立材质: 与星体微管分拍退役 ——
+  //   科学: 后期末星体微管 catastrophically 解聚, 但中带（midzone）反平行重叠区
+  //   持续存留并随缢裂致密化汇入中间体; 旧版共用 mtMat 全体同拍淡出 → 缢裂期
+  //   「纤维全部消失 → 中间体突然冒出」断档读感（用户反馈根因）。
+  const mtPolarMat = mat({
+    color: REF.microtubule,
+    emissive: '#5a6c84',
+    emissiveIntensity: 0.6,
+    roughness: 0.4,
+    normalMap: mtStripe,
+    normalScale: 0.6,
+    opacity: 0,
+    sheen: 0.4,
+    sheenColor: REF.sheen,
+  });
   // 星体微管（每极放射状）—— v16: 静态合并网格 → 逐帧 InstancedMesh
   // v14 静态端点 dir×6.9 在中期即戳出 R=8.5 质膜（用户反馈「结构跑到细胞外」根因之一）;
   // v16 逐帧将端点钳回当前质膜回转面内（u=(z/L+1)/2 → r(u)×0.93）—— 恒「触皮质」而不穿膜
@@ -514,7 +529,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
         parts.push({ geo: track(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(start, ctrl, end), 16, 0.03, 5)) });
       }
     }
-    const polar = new THREE.Mesh(track(mergeGeoms(parts)), mtMat);
+    const polar = new THREE.Mesh(track(mergeGeoms(parts)), mtPolarMat);
     polar.renderOrder = 43;
     spindle.add(polar);
   }
@@ -651,6 +666,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   // v24 板层嵴（非 perf）: 横贯斜置波浪板层堆 ×6 —— 共享线粒体实例矩阵（同一运动学）;
   // 嵴随线粒体整体分向双子细胞, 透射外壳下「斜带横贯」读感与主细胞一致
   let mitoCristae: THREE.InstancedMesh | null = null;
+  let mitoInner: THREE.InstancedMesh | null = null;
   if (!perf) {
     const { geometry: mcGeo } = cristaeLamellaeGeometry(77, 6, 0.34, 0.34, 0.32, false);
     const mcMat = mat({
@@ -664,6 +680,20 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     });
     mitoCristae = new THREE.InstancedMesh(track(mcGeo), mcMat, MITO_N);
     group.add(mitoCristae);
+    // v25 内膜（inner boundary membrane）: 双膜三明治 —— 外膜 0.4 / 膜间隙 0.03 / 内膜 0.37;
+    //   嵴板层片缘（Rm 0.34）贴内膜内面 → 「嵴从内膜折叠」读感; 共享实例矩阵同一运动学
+    const miGeo = track(new THREE.CapsuleGeometry(0.37, 0.74, 6, 14));
+    const miMat = mat({
+      color: REF.mitoCristae,
+      emissive: '#6a4a3e',
+      emissiveIntensity: 0.4,
+      roughness: 0.3,
+      opacity: 0.55,
+      sheen: 0.5,
+      sheenColor: '#a8826e',
+    });
+    mitoInner = new THREE.InstancedMesh(miGeo, miMat, MITO_N);
+    group.add(mitoInner);
   }
   // 运输囊泡
   const vesGeo = track(new THREE.SphereGeometry(1, 10, 8));
@@ -901,6 +931,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   const centroMatRef = centroMat as THREE.MeshPhysicalMaterial;
   const kinMatRef = kinMat as THREE.MeshPhysicalMaterial;
   const mtMatRef = mtMat as THREE.MeshPhysicalMaterial;
+  const mtPolarMatRef = mtPolarMat as THREE.MeshPhysicalMaterial;
   const kfiberMatRef = kfiberMat as THREE.MeshPhysicalMaterial;
   const neMatRef = neMat as THREE.MeshPhysicalMaterial;
   const npcMatRef = npcMat as THREE.MeshPhysicalMaterial;
@@ -1037,8 +1068,10 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       g.scale.setScalar(Math.max(0.001, scl * clamp01(ramp(t, 0.05, 0.6))));
     });
 
-    /* 动粒微管（逐帧: 极 → 染色体着丝粒） */
-    const kfiberOpacity = clamp01(ramp(t, 1.15, 1.8) * (1 - ramp(t, 4.1, 4.9)));
+    /* 动粒微管（逐帧: 极 → 染色体着丝粒）
+     * v25 [4.1,4.9]→[4.2,5.02]: 与星体微管同拍退役 —— 三族纤维整齐谢事,
+     * 中央纺锤体（极微管）独自留存承载缢裂期（见下方 mtPolarOpacity） */
+    const kfiberOpacity = clamp01(ramp(t, 1.15, 1.8) * (1 - ramp(t, 4.2, 5.02)));
     kfiberMatRef.opacity = kfiberOpacity;
     /* v22 纺锤解聚加速: 旧版 4.3→5.3 淡出 —— 深缢裂期（furrowK>0.6）仍有 ~15% 残影贴着收缩
      * 回转面, 半透质膜 + 辉光下读感「纤维戳膜/出膜」。收缩环一旦启动（4.55）, 微管迅速
@@ -1046,6 +1079,15 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
      * 全窗口内纤维可见度单调归零, 不再与深缢裂共存。 */
     const mtOpacity = clamp01(ramp(t, 0.7, 1.6) * (1 - ramp(t, 4.3, 5.05)));
     mtMatRef.opacity = mtOpacity;
+    /* v25 中央纺锤体（midzone 反平行重叠区）持续到胞质分裂（用户反馈「纺锤丝消失后突然又出现」根治）:
+     *   旧版极微管与星体共用 mtMat → 5.05 同拍全隐; 中间体 5.5 才快拍淡入 —— t∈[5.05,5.5]
+     *   纺锤类结构完全断档 + 中间体 2.5s 内 0→0.95 快拍冒出。现三段连续交接:
+     *   ① 星体/动粒纤维 4.2-5.02 退役 ② 中带 [4.95,5.8] 一边致密化一边淡出（科学: 后期 B
+     *   中带存留 → 随缢裂向中央来焦）③ 中间体 [5.3,5.85] 在同一位置淡入接棒 ——
+     *   全程任一时刻纺锤-中间体链都有可见结构, 无断档无突兀。 */
+    const mtPolarOpacity = clamp01(ramp(t, 0.7, 1.6) * (1 - ramp(t, 4.95, 5.8)));
+    mtPolarMatRef.opacity = mtPolarOpacity;
+    spindle.visible = mtPolarOpacity > 0.01;
     /* v22 收缩环联动（用户反馈「收缩过程中纺锤丝没有随着发生变化」）:
      * 数值上纤维已恒在膜内（v20 双保险钳制 + __spindleQa 实测零越界）—— 但收缩期纤维
      * 长度/贴边位置不变, 半透膜下视觉上「顶穿」缢裂面。现让纺锤随收缩环主动退场:
@@ -1148,7 +1190,11 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     centA.rotation.y += dt * 0.8;
     centB.rotation.y -= dt * 0.8;
     // 静态微管族跟随极位（组 z 缩放 = 纺锤体拉长）
-    spindle.scale.z = PZ / POLE_Z0;
+    /* v25 中带致密化: 随收缩环 (1−0.62·furrowMT) 向中央收拢 —— 极端锚点向内脱锚、
+     * 重叠区向中间体位汇聚（科学: 胞质分裂期中带 antiparallel overlap 向中央来焦致密化,
+     * 成为中间体骨架）; 与纺锤腰收窄 (spindleWaist) 同步 = 「纤维束凝缩成致密杆」读感,
+     * 与下方中间体淡入无缝接棒。 */
+    spindle.scale.z = (PZ / POLE_Z0) * (1 - 0.62 * furrowMT);
     /* v22 中央纺锤（极微管重叠区）随收缩环收窄: 旧版 xy 恒定 —— 缢裂腰部回转面半径
      * 收缩到 ~2-3 时重叠区 ±0.9 的横向跨度读感「顶住膜面」; 现随 furrowMT 收窄 45%
      * （科学: 极微管随中间体成熟向中央来焦, antiparallel overlap 致密化） */
@@ -1189,7 +1235,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       qa.astral = astralQa.worst; qa.nAstral = astralQa.n;
       qa.kfiber = kfiberQa.worst; qa.nKfiber = kfiberQa.n;
       // 极微管: 静态合并网格 → 世界包围盒 8 角（回变换到组局部坐标 —— 与膜回转面同坐标系）
-      if (spindle.visible && mtMatRef.opacity > 0.02) {
+      if (spindle.visible && mtPolarMatRef.opacity > 0.02) {
         spindle.updateWorldMatrix(true, true);
         const bb = new THREE.Box3().setFromObject(spindle);
         const wp = new THREE.Vector3();
@@ -1200,6 +1246,23 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
         }
       }
       (window as unknown as { __spindleQa?: unknown }).__spindleQa = qa;
+    }
+
+    /* v25 QA 插桩: 纺锤-中间体连续性 + 中间体胞外检测（数值真源 —— 断档/出膜的逐帧判定）:
+     *   · gap: t∈[2.0,6.1] 内四族纺锤结构（星体/动粒/中带/中间体）同时近零 → 视觉断档帧
+     *   · mbOut: 中间体可见且双子膜已淡入时, 杆端（半长×scale.y）伸出子细胞球面 → 胞外帧 */
+    if (typeof window !== 'undefined' && (window as { __spindleChainQaProbe?: boolean }).__spindleChainQaProbe) {
+      const mbOp = (midbodyMat as THREE.MeshPhysicalMaterial).opacity;
+      const chain = {
+        t,
+        astralOp: mtOpacity, kfiberOp: kfiberOpacity, polarOp: mtPolarOpacity, midbodyOp: mbOp,
+        gap: (t > 2.0 && t < 6.1 && mtOpacity < 0.02 && kfiberOpacity < 0.02 && mtPolarOpacity < 0.02 && mbOp < 0.02) ? 1 : 0,
+        mbHalf: 0.55 * (1 - 0.55 * ramp(t, 5.85, 6.45)),
+        dauGap: zD - rD,
+        dauFade,
+        mbOut: (mbOp > 0.02 && dauFade > 0.02 && 0.55 * (1 - 0.55 * ramp(t, 5.85, 6.45)) > zD - rD) ? 1 : 0,
+      };
+      (window as unknown as { __spindleChainQa?: unknown }).__spindleChainQa = chain;
     }
 
     /* 核被膜: 完整 → 崩解碎片 → 双子核重组 */
@@ -1288,10 +1351,12 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
         mm.compose(pv, qq.setFromEuler(ms.rot), one);
         mitos.setMatrixAt(i, mm);
         if (mitoCristae) mitoCristae.setMatrixAt(i, mm); // v24 嵴板层与本体同一矩阵
+        if (mitoInner) mitoInner.setMatrixAt(i, mm); // v25 内膜同一矩阵
       });
       if (rec) (window as unknown as { __mitoQaPos?: number[][] }).__mitoQaPos = rec;
       mitos.instanceMatrix.needsUpdate = true;
       if (mitoCristae) mitoCristae.instanceMatrix.needsUpdate = true;
+      if (mitoInner) mitoInner.instanceMatrix.needsUpdate = true;
       vesSeeds.forEach((vs2, i) => {
         const toZ = vs2.side * THREE.MathUtils.lerp(2.0, 6.6, ramp(t, 4.8, 7));
         pv.set(Math.cos(vs2.ang) * vs2.rad * (1 - part * 0.35), vs2.y * (1 - part * 0.45), THREE.MathUtils.lerp(0, toZ, part));
@@ -1352,11 +1417,17 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     furrowRing.scale.y *= squeeze;
     // 中间体（深缢裂后的致密胞质桥）
     // v19: ESCRT-Ⅲ 内切时随 scission 收细淡出（桥断离后残余迅速降解）
+    /* v25 平滑交接 + 收纳根治（用户反馈「突然又出现 + 有一部分在细胞外」）:
+     *   ① 淡入 [5.5,5.95]→[5.3,5.85]: 与中央纺锤体致密化淡出 [4.95,5.8] 同窗重叠 ——
+     *      致密纤维束与致密杆在同一位置交叉渐变, 不再 2.5s 快拍冒出
+     *   ② 淡出 [6.0,6.4]→[5.9,6.15]: 在双子细胞膜 crossfade（dauFade 6.2 起）之前完全
+     *      消失 —— 旧版 6.2-6.4 窗口内半长恒 0.55 的杆端伸出两子细胞球面（gap zD−rD<0.55）
+     *      悬在胞外空隙; 现在连同长度随 scission 压缩（0.55→0.25）一并缩回桥内 */
     const scissionK = ramp(t, 5.85, 6.45);
-    midbodyMatRef.opacity = ramp(t, 5.5, 5.95) * 0.95 * (1 - ramp(t, 6.0, 6.4));
-    // 中间体: 仅深缢裂后可见; 半径跟随胞质桥并随内收缩细, 长度（局部 Y → 世界 Z）恒定
-    const mbR = Math.max(0.3, Math.min(1.1, eqR)) * (1 - scissionK * 0.55);
-    midbody.scale.set(mbR / 0.3, 1, mbR / 0.3);
+    midbodyMatRef.opacity = ramp(t, 5.3, 5.85) * 0.95 * (1 - ramp(t, 5.9, 6.15));
+    // 中间体: 仅深缢裂后可见; 半径跟随胞质桥并随内收缩细; 长度（局部 Y → 世界 Z）随 scission 压缩
+    const mbR = Math.max(0.3, Math.min(1.05, eqR)) * (1 - scissionK * 0.55);
+    midbody.scale.set(mbR / 0.3, 1 - 0.55 * scissionK, mbR / 0.3);
     midbody.visible = midbodyMatRef.opacity > 0.02;
   };
 
