@@ -130,8 +130,8 @@ export const T: Record<string, Entry> = {
   'legend.mrna': { zh: 'mRNA 出核', en: 'mRNA export' },
   'legend.pulse': { zh: '信号事件脉冲', en: 'Signal event pulse' },
   'legend.hint': {
-    zh: '点击分子球或标签 → 查看分子档案',
-    en: 'Click a sphere or label → molecule profile',
+    zh: '点击分子球/标签 → 分子档案 · 悬停弧线/细胞器 → 即时识别',
+    en: 'Click sphere/label → profile · hover an arc or organelle → identify',
   },
   'hud.tip.free': {
     zh: '拖拽旋转 · 滚轮缩放 · 中键/右键平移 · 点击分子球或标签查看档案 · 悬停显示分子卡',

@@ -3349,8 +3349,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
 
 /** 细胞体组件（仅 dim/规格/画质变化时重建, 动画走 imperative 帧驱动）
  *  v14: 解剖标注改为「悬停即现」（用户需求） —— 常显标签墙退役,
- *  OrganelleHoverLayer 按指针邻近检测显示单一标记卡（中文名 + 拉丁名 + 一句科学描述）; 全细胞器覆盖。 */
-export const CellBody = ({ spec, tint, dim, showAnatomy, perf, cutaway, locate, onHoverTargets }: {
+ *  OrganelleHoverLayer 按指针邻近检测显示单一标记卡（中文名 + 拉丁名 + 一句科学描述）; 全细胞器覆盖。
+ *  v20: extraHover —— 信号传导边等外来悬停目标并入同一标记层（单一胜者, 不与细胞器互扰）。 */
+export const CellBody = ({ spec, tint, dim, showAnatomy, perf, cutaway, locate, onHoverTargets, extraHover }: {
   spec: CellBodySpec;
   tint: string;
   dim: number;
@@ -3364,6 +3365,8 @@ export const CellBody = ({ spec, tint, dim, showAnatomy, perf, cutaway, locate, 
   locate?: LocateReq | null;
   /** 向外暴露去重后的悬停目录（索引面板数据源） */
   onHoverTargets?: (targets: HoverTarget[]) => void;
+  /** v20 外来悬停目标（信号边等 —— 并入标记层但不进目录） */
+  extraHover?: HoverTarget[];
 }) => {
   const build = useMemo(() => buildCellBody(spec, tint, dim, perf ?? false, cutaway ?? false), [spec, tint, dim, perf, cutaway]);
   useEffect(() => () => build.dispose(), [build]);
@@ -3378,6 +3381,11 @@ export const CellBody = ({ spec, tint, dim, showAnatomy, perf, cutaway, locate, 
     () => (autoActive ? build.hover : build.hover.filter((t) => t.when !== 'autophagy')),
     [build, autoActive],
   );
+  // v20 信号边目标并入（同一标记层单一胜者 —— 边锚点 r 0.85 小惩罚, 细胞器直指时仍优先）
+  const allHover = useMemo(
+    () => (extraHover && extraHover.length ? [...visibleHover, ...extraHover] : visibleHover),
+    [visibleHover, extraHover],
+  );
 
   // 帧驱动: 传入 ULK1 自噬驱动水平（无 ULK1 通路 → 0 → 自噬系统静默）
   useFrame((state) => build.update(state.clock.elapsedTime, autophagyLevel(useLabStore.getState().nodeStates)));
@@ -3385,7 +3393,7 @@ export const CellBody = ({ spec, tint, dim, showAnatomy, perf, cutaway, locate, 
   return (
     <>
       <primitive object={build.group} />
-      <OrganelleHoverLayer targets={visibleHover} enabled={showAnatomy} locate={locate ?? null} />
+      <OrganelleHoverLayer targets={allHover} enabled={showAnatomy} locate={locate ?? null} />
     </>
   );
 };

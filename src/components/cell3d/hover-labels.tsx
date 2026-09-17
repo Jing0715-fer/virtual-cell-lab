@@ -1,14 +1,19 @@
 'use client';
 
 /**
- * 细胞器悬停标记系统 v14（用户需求: 「细胞器改成悬停显示标记, 需要包含所有的细胞器」）
- *   - 解剖标注从「常显标签墙」改为「悬停即现」: 指针接近哪个细胞器, 就地浮现名称卡
- *     （中文名 + 拉丁名 + 一句科学描述 —— 教学价值升级）
- *   - 邻近检测用「点到相机射线距离」而非网格拾取:
- *     · 零渲染开销（无隐形代理网格） · 穿透质膜/核被膜照常可悬停（细胞器发现优先）
- *     · 被遮挡的细胞器也能被探到 —— 直接解决「看不到 RER/高尔基在哪」的发现性问题
+ * 细胞器悬停标记系统 v20（用户反馈: 「悬停不精准 · 离很远就弹窗 · 高亮不够明显」）
+ *   - v20 屏幕空间像素精准命中: 旧「射线-锚点世界距离 < r」在镜头拉近时角半径暴涨
+ *     （r=1.7 的线粒体在距离 5 时角半径 ≈ 19° ≈ 屏上半径 220px —— 指针离细胞器 200px 也弹窗）。
+ *     新算法: 锚点投影到屏幕 → 像素距离命中, 捕获半径 = clamp(锚点感应半径的屏幕换算,
+ *     24px, 64px) —— 拉近时永远不超过 64px（弹窗只在真正指向细胞器时出现）,
+ *     拉远时不小于 24px（小细胞器仍可发现）。
+ *   - v20 视网膜套环高亮: 悬停即现「旋转虚线环 + 十字刻度」SVG 套环（尺寸 = 捕获半径,
+ *     恒套住细胞器屏幕足迹）+ 脉冲环增强（翡翠色更亮）+ 锚点光点随细胞器尺寸缩放
+ *     —— 「悬停到了哪个结构」一眼可辨。
+ *   - v20 信号边/分子悬停覆盖: 主视图信号传导边（玫红抑制弧线等）新增可悬停识别
+ *     （「红色的长条是什么」—— 现在悬停即知）。
+ *   - 邻近检测保留「点到相机射线距离」穿透质膜/核被膜照常可悬停（细胞器发现优先）
  *   - 配套目录面板: 列出全部细胞器 → 点击「定位」= 相机飞行 + 脉冲环高亮
- *   - 定位脉冲: 双环扩散 + 锚点亮起（glowSprite 加法精灵, 恒面向相机）
  */
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
@@ -32,6 +37,8 @@ export interface HoverTarget {
   when?: 'autophagy';
   /** 目录分组（展示排序用） */
   group?: HoverGroupKey;
+  /** v20 悬停卡强调色（信号边/分子目标按语义色着色; 默认翡翠） */
+  accent?: string;
 }
 
 export type HoverGroupKey = 'nuclear' | 'endomembrane' | 'energy' | 'cytoskeleton' | 'surface' | 'specialized';
@@ -91,6 +98,14 @@ export const ORG_INFO: Record<string, { zh: string; en: string }> = {
   Microvilli: { zh: '微绒毛刷状缘 · 吸收面积极化放大', en: 'Brush border amplifying absorptive area' },
   'Binucleate (~25%)': { zh: '约 25% 肝细胞双核 · 胞质分裂未完成所致', en: 'Failed cytokinesis yields binucleation' },
   'Replication forks': { zh: 'S 期复制叉 · PCNA 滑动夹环双向合成新 DNA 链（姐妹染色单体前体）', en: 'S-phase forks — PCNA clamps synthesizing sister DNA strands' },
+  /* v20 信号传导边悬停词条（「红色的长条是什么」—— 玫红虚线弧线等边类型可悬停识别） */
+  'Signal edge · inhibition': { zh: '抑制关系边 · 负反馈降低下游分子活性（玫红虚线弧线）', en: 'Inhibitory edge — negative feedback damping downstream activity' },
+  'Signal edge · repression': { zh: '转录阻遏边 · 抑制靶基因表达（玫红虚线弧线）', en: 'Repressive edge — blocking target gene expression' },
+  'Signal edge · activation': { zh: '激活关系边 · 上游分子激活下游靶点（翡翠绿弧线）', en: 'Activating edge — upstream activates the downstream target' },
+  'Signal edge · phosphorylation': { zh: '磷酸化边 · 激酶转移磷酸基激活靶蛋白（亮绿弧线）', en: 'Phosphorylating edge — kinase relays a phosphate group' },
+  'Signal edge · expression': { zh: '转录表达边 · 靶基因被激活开始 mRNA 转录（琥珀弧线）', en: 'Expression edge — target gene begins transcription' },
+  'Signal edge · binding': { zh: '结合/解离边 · 分子间物理相互作用（石板灰弧线）', en: 'Binding/dissociation edge — physical interaction' },
+  'Signal edge · indirect': { zh: '间接效应边 · 经中间分子传导（青色弧线）', en: 'Indirect edge — routed via intermediates' },
 };
 
 /** 目录去重: 同名（zh+latin）多锚点只列一行（悬停层仍用全部锚点扩大感应域） */
@@ -126,8 +141,11 @@ export function OrganelleHoverLayer({ targets, enabled, locate }: {
 }) {
   const { lang } = useLang();
   const [hovered, setHovered] = useState<HoverTarget | null>(null);
+  /** v20 命中捕获半径（像素 —— 视网膜套环尺寸真源） */
+  const [capPx, setCapPx] = useState(48);
   const ray = useRef(new THREE.Ray());
   const tmp = useRef(new THREE.Vector3());
+  const tmp2 = useRef(new THREE.Vector3());
   const lastPtr = useRef({ x: NaN, y: NaN });
   const lastCam = useRef(new THREE.Vector3(NaN, NaN, NaN));
   const lastNonce = useRef(0);
@@ -157,33 +175,44 @@ export function OrganelleHoverLayer({ targets, enabled, locate }: {
     ray.current.origin.copy(state.camera.position);
     tmp.current.set(ptr.x, ptr.y, 0.5).unproject(state.camera).sub(ray.current.origin).normalize();
     ray.current.direction.copy(tmp.current);
+
+    /* v20 屏幕空间像素度量: 半屏宽高 + 焦距像素数（fov → px/world-unit @dist=1） */
+    const size = state.size;
+    const halfW = size.width / 2;
+    const halfH = size.height / 2;
+    const pcam = state.camera as THREE.PerspectiveCamera;
+    const focal = halfH / Math.tan(((pcam.fov ?? 50) * Math.PI) / 360);
+
     let best: HoverTarget | null = null;
+    let bestCap = 48;
     let bestScore = Infinity;
     for (const t of targets) {
       tmp.current.set(t.pos.x, t.pos.y, t.pos.z).sub(ray.current.origin);
       const proj = tmp.current.dot(ray.current.direction);
       if (proj < 1) continue; // 相机背后/过近
       const perp2 = tmp.current.lengthSq() - proj * proj;
-      if (perp2 > t.r * t.r) continue;
-      // v16 相对评分: 垂直距离/感应半径 —— 射线穿过哪个锚点「核心带」更深谁胜出;
-      // v18 用户反馈「重叠时小的细胞器优先, 避免大的完全遮盖小的」:
-      //   相对评分之上再叠加尺寸惩罚项（0.25·r）—— 大感应半径的「区域级」锚点
-      //   （子细胞 r≈3.2 / ER 冠 r≈2.2）在重叠区让位小而精确的细胞器
-      //   锚点（线粒体 r≈1.7 / 核仁 r≈1.6 / 囊泡 r≈1.4）。
-      //   例: 指针在线粒体上（perp 0.6 → 0.35+0.43=0.78）, ER 冠锚点虽也命中
-      //   （perp 1.2 → 0.57+0.53=1.10）—— 线粒体胜出, 与所见一致;
-      //   指针真在 ER 片层上时（perp 0.4 → 0.19+0.53=0.72）ER 仍胜出 —— 平衡不翻转。
-      // v19 深度项（proj·0.015）: 指针所指的「可见结构」通常比射线后方的被遮挡锚点更近 ——
-      //   同等命中质量下近处锚点胜出（射线穿前后多个锚点时不再随机错标后方结构）。
-      //   系数标定: 细胞深度 ~20 单位 → 前后锚点 proj 差 8-12 → 分差 0.12-0.18,
-      //   恰为平局裁决量级, 不压倒 perp/r 主项（典型差 0.2-0.4）。
-      const score = Math.sqrt(perp2) / t.r + 0.25 * t.r + proj * 0.015;
+      if (perp2 > t.r * t.r) continue; // 射线未穿入感应域（穿透质膜/核被膜照常可探）
+      // v20 像素精准: 锚点投影屏幕位 + 像素距离命中 + 捕获半径钳制
+      tmp2.current.set(t.pos.x, t.pos.y, t.pos.z).project(state.camera);
+      if (tmp2.current.z > 1 || tmp2.current.z < -1) continue; // 裁剪面外
+      const dx = (tmp2.current.x - ptr.x) * halfW;
+      const dy = (tmp2.current.y - ptr.y) * halfH;
+      const pixelDist = Math.hypot(dx, dy);
+      const screenR = (t.r * focal) / Math.max(0.5, proj); // 感应半径的屏幕像素换算
+      const cap = THREE.MathUtils.clamp(screenR, 24, 64); // 像素预算: 拉近 ≤64px 精准, 拉远 ≥24px 可发现
+      if (pixelDist > cap) continue;
+      // v16 相对评分: 像素距离/捕获半径 —— 指针落在哪个细胞器「屏幕足迹」更深谁胜出;
+      // v18 尺寸惩罚项（0.22·r）: 大感应半径的「区域级」锚点在重叠区让位小而精确的细胞器锚点;
+      // v19 深度项（proj·0.012）: 同等命中质量下近处（所见结构）胜出后方被遮挡锚点。
+      const score = pixelDist / cap + 0.22 * t.r + proj * 0.012;
       if (score < bestScore) {
         bestScore = score;
         best = t;
+        bestCap = cap;
       }
     }
     if (best !== hovered) setHovered(best);
+    if (best && Math.abs(bestCap - capPx) > 1) setCapPx(bestCap);
   });
 
   // 光标反馈（可交互暗示; 拖拽旋转时 OrbitControls 自身的 grab 光标不受影响）
@@ -195,15 +224,16 @@ export function OrganelleHoverLayer({ targets, enabled, locate }: {
 
   const show = enabled ? hovered : null;
   const info = show ? ORG_INFO[show.latin] : undefined;
+  const accent = show?.accent ?? '#34d399';
 
   return (
     <>
-      {/* 锚点亮斑 + 脉冲环（悬停/定位共有 —— 「就在这里」的空间指示） */}
+      {/* 锚点亮斑 + 脉冲环（v20: 尺寸自适应 —— 大细胞器更大的光点与环） */}
       {show && (
         <>
           <mesh position={[show.pos.x, show.pos.y, show.pos.z]} renderOrder={60}>
-            <sphereGeometry args={[0.085, 10, 8]} />
-            <meshBasicMaterial color="#e2edf7" transparent opacity={0.95} depthWrite={false} fog={false} />
+            <sphereGeometry args={[0.075 + show.r * 0.05, 10, 8]} />
+            <meshBasicMaterial color="#e2edf7" transparent opacity={0.97} depthWrite={false} fog={false} />
           </mesh>
           <PulseRings pos={show.pos} r={show.r} />
         </>
@@ -216,19 +246,25 @@ export function OrganelleHoverLayer({ targets, enabled, locate }: {
           pointerEvents="none"
           style={{ pointerEvents: 'none' }}
         >
+          {/* v20 视网膜套环: 旋转虚线环 + 十字刻度 —— 恒套住细胞器屏幕足迹（尺寸 = 命中捕获半径）,
+              悬停到了哪个结构一眼可辨（用户反馈「高亮效果要更加明显」）; 卡片上移避让环 */}
+          <HoverReticle capPx={capPx} accent={accent} />
           {/* v15 悬停卡样式对齐 pathway 信息卡（用户需求「和 pathway 一样的样式」）:
-              实心 slate-950/95 圆角卡 + emerald 边框 + mono 标题 + 分组徽章 + 拉丁副题 + 科学描述行 */}
-          <div className="anatomy-card">
-            <div className="anatomy-card-head">
-              <span className="anatomy-card-title">{lang === 'zh' ? show.zh : show.latin}</span>
-              {show.group && (
-                <span className="anatomy-card-chip">
-                  {lang === 'zh' ? HOVER_GROUP_LABEL[show.group].zh : HOVER_GROUP_LABEL[show.group].en}
-                </span>
-              )}
+              实心 slate-950/95 圆角卡 + emerald 边框 + mono 标题 + 分组徽章 + 拉丁副题 + 科学描述行
+              v20: 定位包裹层上移出套环（卡自身入场动画的 transform 不受干扰） */}
+          <div style={{ position: 'absolute', left: 0, bottom: 74, transform: 'translateX(-50%)', pointerEvents: 'none' }}>
+            <div className="anatomy-card" style={{ borderColor: `${accent}55` }}>
+              <div className="anatomy-card-head">
+                <span className="anatomy-card-title" style={{ color: accent }}>{lang === 'zh' ? show.zh : show.latin}</span>
+                {show.group && (
+                  <span className="anatomy-card-chip">
+                    {lang === 'zh' ? HOVER_GROUP_LABEL[show.group].zh : HOVER_GROUP_LABEL[show.group].en}
+                  </span>
+                )}
+              </div>
+              <div className="anatomy-card-sub">{lang === 'zh' ? show.latin : show.zh}</div>
+              {info && <div className="anatomy-card-desc">{lang === 'zh' ? info.zh : info.en}</div>}
             </div>
-            <div className="anatomy-card-sub">{lang === 'zh' ? show.latin : show.zh}</div>
-            {info && <div className="anatomy-card-desc">{lang === 'zh' ? info.zh : info.en}</div>}
           </div>
         </Html>
       )}
@@ -236,7 +272,48 @@ export function OrganelleHoverLayer({ targets, enabled, locate }: {
   );
 }
 
-/** 扩散脉冲环（双环相位差 + 中心光晕）—— 就地锚定的空间指示 */
+/** v20 视网膜套环 —— 悬停目标的屏幕空间高亮（旋转虚线环 + 十字刻度 + 中心辉光盘） */
+function HoverReticle({ capPx, accent }: { capPx: number; accent: string }) {
+  const d = Math.round(THREE.MathUtils.clamp(capPx, 24, 64) * 2);
+  const r = d / 2 - 3;
+  const c = d / 2;
+  const tick = 9;
+  return (
+    <svg
+      width={d}
+      height={d}
+      style={{
+        position: 'absolute',
+        left: -d / 2,
+        top: -d / 2,
+        overflow: 'visible',
+        filter: `drop-shadow(0 0 6px ${accent}aa)`,
+      }}
+      aria-hidden
+    >
+      {/* 中心辉光盘 */}
+      <circle cx={c} cy={c} r={r * 0.32} fill={accent} opacity={0.1} />
+      {/* 主环: 旋转虚线 */}
+      <g className="reticle-spin" style={{ transformOrigin: `${c}px ${c}px` }}>
+        <circle cx={c} cy={c} r={r} fill="none" stroke={accent} strokeWidth={2.2} strokeDasharray={`${r * 0.55} ${r * 0.42}`} opacity={0.95} strokeLinecap="round" />
+        {/* 十字刻度（随环旋转） */}
+        {[0, 90, 180, 270].map((a) => {
+          const rad = (a * Math.PI) / 180;
+          const x1 = c + Math.cos(rad) * (r - 1);
+          const y1 = c + Math.sin(rad) * (r - 1);
+          const x2 = c + Math.cos(rad) * (r + tick);
+          const y2 = c + Math.sin(rad) * (r + tick);
+          return <line key={a} x1={x1} y1={y1} x2={x2} y2={y2} stroke={accent} strokeWidth={2.4} strokeLinecap="round" opacity={0.9} />;
+        })}
+      </g>
+      {/* 内细环（静态） */}
+      <circle cx={c} cy={c} r={r * 0.62} fill="none" stroke={accent} strokeWidth={1} opacity={0.45} />
+    </svg>
+  );
+}
+
+/** 扩散脉冲环（双环相位差 + 中心光晕）—— 就地锚定的空间指示
+ *  v20: 翡翠色提亮 + 环尺寸下限提高（高亮更明显） */
 function PulseRings({ pos, r }: { pos: Vec3; r: number }) {
   const s1 = useRef<THREE.Sprite>(null);
   const s2 = useRef<THREE.Sprite>(null);
@@ -248,25 +325,25 @@ function PulseRings({ pos, r }: { pos: Vec3; r: number }) {
       const sp = ref.current;
       if (!sp) continue;
       const k = ((t + phase) % 1.15) / 1.15;
-      sp.scale.setScalar(Math.max(0.3, r * (0.5 + k * 1.6)));
-      (sp.material as THREE.SpriteMaterial).opacity = (1 - k) * 0.55;
+      sp.scale.setScalar(Math.max(0.5, r * (0.5 + k * 1.6)));
+      (sp.material as THREE.SpriteMaterial).opacity = (1 - k) * 0.72;
     }
     if (glow.current) {
       const sp = glow.current as THREE.Sprite;
-      sp.scale.setScalar(Math.max(0.35, r * 0.55));
-      (sp.material as THREE.SpriteMaterial).opacity = 0.55 + Math.sin(t * 3.2) * 0.16;
+      sp.scale.setScalar(Math.max(0.45, r * 0.6));
+      (sp.material as THREE.SpriteMaterial).opacity = 0.62 + Math.sin(t * 3.2) * 0.18;
     }
   });
   return (
     <>
       <sprite ref={s1} position={[pos.x, pos.y, pos.z]} renderOrder={59}>
-        <spriteMaterial map={tex} color="#9ec5da" transparent depthWrite={false} blending={THREE.AdditiveBlending} fog={false} />
+        <spriteMaterial map={tex} color="#5eead4" transparent depthWrite={false} blending={THREE.AdditiveBlending} fog={false} />
       </sprite>
       <sprite ref={s2} position={[pos.x, pos.y, pos.z]} renderOrder={59}>
-        <spriteMaterial map={tex} color="#6d94b8" transparent depthWrite={false} blending={THREE.AdditiveBlending} fog={false} />
+        <spriteMaterial map={tex} color="#34d399" transparent depthWrite={false} blending={THREE.AdditiveBlending} fog={false} />
       </sprite>
       <sprite ref={glow} position={[pos.x, pos.y, pos.z]} renderOrder={58}>
-        <spriteMaterial map={tex} color="#bcd8e8" transparent depthWrite={false} blending={THREE.AdditiveBlending} fog={false} opacity={0.6} />
+        <spriteMaterial map={tex} color="#a7f3d0" transparent depthWrite={false} blending={THREE.AdditiveBlending} fog={false} opacity={0.66} />
       </sprite>
     </>
   );

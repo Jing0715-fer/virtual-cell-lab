@@ -449,6 +449,15 @@
   }
 }
 
+/* v20 悬停视网膜套环 —— 旋转虚线环（悬停高亮显著化） */
+.reticle-spin {
+  animation: reticle-spin 7.5s linear infinite;
+}
+@keyframes reticle-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* 药物抑制状态（紫色 = 催化输出钳制） */
 .mol3d-inh {
   display: none;

@@ -38,6 +38,39 @@ import { useLang } from '@/lib/i18n';
 
 type CamMode = 'free' | 'overview' | 'membrane' | 'nucleus' | 'follow' | 'tour';
 
+/** v20 信号传导边悬停词条映射（「红色的长条是什么」—— 玫红虚线弧线等边类型可悬停识别）
+ *  accent 与 EDGE_COLORS 同源（抑制族玫红 / 激活族翡翠 / 表达琥珀） */
+const EDGE_HOVER_KIND: Record<string, { zh: string; latin: string; accent: string }> = {
+  inhibition: { zh: '信号边 · 抑制', latin: 'Signal edge · inhibition', accent: '#fb7185' },
+  repression: { zh: '信号边 · 转录阻遏', latin: 'Signal edge · repression', accent: '#fb7185' },
+  dephosphorylation: { zh: '信号边 · 去磷酸化', latin: 'Signal edge · inhibition', accent: '#fb7185' },
+  missing: { zh: '信号边 · 缺失关联', latin: 'Signal edge · inhibition', accent: '#fb7185' },
+  activation: { zh: '信号边 · 激活', latin: 'Signal edge · activation', accent: '#34d399' },
+  phosphorylation: { zh: '信号边 · 磷酸化', latin: 'Signal edge · phosphorylation', accent: '#6ee7b7' },
+  expression: { zh: '信号边 · 转录表达', latin: 'Signal edge · expression', accent: '#fbbf24' },
+  binding: { zh: '信号边 · 结合', latin: 'Signal edge · binding', accent: '#94a3b8' },
+  dissociation: { zh: '信号边 · 解离', latin: 'Signal edge · binding', accent: '#94a3b8' },
+  indirect: { zh: '信号边 · 间接效应', latin: 'Signal edge · indirect', accent: '#2dd4bf' },
+  'state-change': { zh: '信号边 · 状态转变', latin: 'Signal edge · indirect', accent: '#2dd4bf' },
+};
+
+/** v20 信号边悬停锚点工厂: 每条边取中段两点（r 0.85）—— 指到弧线上即现「这条线是什么」 */
+function edgeHoverTargets(points: Vec3[], kind: string): HoverTarget[] {
+  const meta = EDGE_HOVER_KIND[kind];
+  if (!meta || points.length < 2) return [];
+  const at = (u: number): Vec3 => {
+    const f = u * (points.length - 1);
+    const i = Math.min(points.length - 2, Math.floor(f));
+    const k = f - i;
+    return {
+      x: points[i].x + (points[i + 1].x - points[i].x) * k,
+      y: points[i].y + (points[i + 1].y - points[i].y) * k,
+      z: points[i].z + (points[i + 1].z - points[i].z) * k,
+    };
+  };
+  return [0.4, 0.72].map((u) => ({ pos: at(u), r: 0.85, zh: meta.zh, latin: meta.latin, accent: meta.accent }));
+}
+
 /** OrbitControls 鼠标交互映射（模块级常量, 避免组件逐 tick 重渲染时重复应用）:
  *  左键旋转 · 中键拖拽平移（用户需求, 原默认缩放） · 右键平移 */
 const MOUSE_MAP = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
@@ -282,6 +315,11 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, cutaway, sim, sna
     () => (baseLayout && snapPlane ? projectLayoutToPlane(baseLayout, snapPlane) : baseLayout),
     [baseLayout, snapPlane],
   );
+  // v20 信号边悬停锚点（每边中段 2 点 —— 「红色的长条是什么」悬停即知; 仅主视图信号层存在时）
+  const edgeHover = useMemo(
+    () => (layout ? layout.edges.flatMap((e) => edgeHoverTargets(e.points, e.kind)) : []),
+    [layout],
+  );
 
   if (!layout) return null;
 
@@ -302,7 +340,7 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, cutaway, sim, sna
         />
       </mesh>
       {/* 剖面贴附模式: 核内部标注让位（核盘自带剖面标注）—— 消除核区标签互叠 */}
-      <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} cutaway={cutaway} locate={locate} onHoverTargets={onHoverTargets} />
+      <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} cutaway={cutaway} locate={locate} onHoverTargets={onHoverTargets} extraHover={edgeHover} />
       <EdgeLayer edges={layout.edges} sim={sim} />
       <MoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />
       {/* 激酶抑制剂 3D 药物分子（球棍模型，结合靶点） */}

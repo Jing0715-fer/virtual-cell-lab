@@ -1025,24 +1025,46 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     kfiberMatRef.opacity = kfiberOpacity;
     const mtOpacity = clamp01(ramp(t, 0.7, 1.6) * (1 - ramp(t, 4.3, 5.3)));
     mtMatRef.opacity = mtOpacity;
-    /* 星体微管（v16 逐帧: 极位 + 定向芽长, 端点钳回当前质膜回转面内 —— 恒「触皮质」不穿膜） */
+    /* 星体微管（v16 逐帧: 极位 + 定向芽长; v20 恒留膜内双保险）
+     * 用户反馈「纺锤丝跑到细胞外」根因: ① 端点钳在 0.93·r(u) —— 与半透质膜仅 7% 间隙,
+     *    纤维端 + 辉光视觉上「戳膜/出膜」; ② 缢裂期膜面内凹（哑铃非凸）—— 直纤维中段
+     *    在缩窄环处可穿出回转面。v20: 端点钳加深至 0.80 + 沿极→端 4 点采样逐点验证膜内。 */
     if (mtOpacity > 0.01) {
       let ai = 0;
       for (const side of [-1, 1]) {
         for (let i = 0; i < astralN; i++) {
           const dir = astralDirs[side < 0 ? i : astralN + i];
           const len = 4.4 + hash01(`asl${side}${i}`) * 1.8; // 4.4-6.2 芽长（有意长于膜面 → 钳制后恒贴皮质）
-          vA.set(0, 0, side * PZ); // 极
+          vA.set(0, 0, side * PZ); // 极（xy≈0 —— 中段采样线性内插的前提）
           vB.copy(dir).multiplyScalar(len).add(vA); // 芽端
-          // 膜面钳制: |z| ≤ 0.93L; 柱面半径 ≤ 0.93·r(u)
-          if (Math.abs(vB.z) > memL * 0.93) vB.z = Math.sign(vB.z) * memL * 0.93;
-          const u = (vB.z / memL + 1) / 2;
-          const rr = Math.max(0.05, rProfile(u)) * 0.93;
-          const rc = Math.hypot(vB.x, vB.y);
-          if (rc > rr) {
-            const kk = rr / rc;
-            vB.x *= kk;
-            vB.y *= kk;
+          // ① 端点钳制（0.93 → 0.80: 与半透质膜留出可辨间隙, 不再读感「戳膜」）
+          if (Math.abs(vB.z) > memL * 0.8) vB.z = Math.sign(vB.z) * memL * 0.8;
+          {
+            const u0 = (vB.z / memL + 1) / 2;
+            const rr0 = Math.max(0.05, rProfile(u0)) * 0.8;
+            const rc = Math.hypot(vB.x, vB.y);
+            if (rc > rr0) {
+              const kk = rr0 / rc;
+              vB.x *= kk;
+              vB.y *= kk;
+            }
+          }
+          // ② 中段采样（缢裂非凸补偿）: 极→端直线纤维的中间点 xy = s·端点 xy,
+          //    任一采样点超出该 z 处回转面 0.82 倍 → 端点 xy 按最大越界比收缩
+          {
+            let shrink = 1;
+            for (const s of [0.35, 0.55, 0.75, 0.95]) {
+              const zs = vA.z + (vB.z - vA.z) * s;
+              if (Math.abs(zs) >= memL * 0.98) continue;
+              const us = (zs / memL + 1) / 2;
+              const allowed = Math.max(0.05, rProfile(us)) * 0.82;
+              const rs = Math.hypot(vB.x * s, vB.y * s);
+              if (rs > allowed) shrink = Math.min(shrink, allowed / rs);
+            }
+            if (shrink < 1) {
+              vB.x *= shrink;
+              vB.y *= shrink;
+            }
           }
           kDir.subVectors(vB, vA);
           const kl = Math.max(0.01, kDir.length());
@@ -1167,6 +1189,9 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       }
     };
     {
+      // QA 探测时逐帧记录线粒体渲染位（锚点一致性验证 —— v20 逐颗锚点跟随）
+      const probe = typeof window !== 'undefined' && (window as { __mitoQaProbe?: boolean }).__mitoQaProbe;
+      const rec: number[][] | null = probe ? [] : null;
       mitoSeeds.forEach((ms, i) => {
         const drift = Math.sin(uTime.value * 0.5 + ms.phase) * 0.35;
         const toZ = ms.side * THREE.MathUtils.lerp(2.2, 7.0, ramp(t, 4.8, 7));
@@ -1176,9 +1201,11 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
           THREE.MathUtils.lerp(0, toZ, part),
         );
         clampCell(pv, 0.85);
+        if (rec) rec.push([pv.x, pv.y, pv.z]);
         mm.compose(pv, qq.setFromEuler(ms.rot), one);
         mitos.setMatrixAt(i, mm);
       });
+      if (rec) (window as unknown as { __mitoQaPos?: number[][] }).__mitoQaPos = rec;
       mitos.instanceMatrix.needsUpdate = true;
       vesSeeds.forEach((vs2, i) => {
         const toZ = vs2.side * THREE.MathUtils.lerp(2.0, 6.6, ramp(t, 4.8, 7));
@@ -1256,15 +1283,54 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     const push = (zh: string, latin: string, lx: number, ly: number, lz: number, r: number) =>
       T.push({ zh, latin, pos: { x: lx * cR + lz * sR, y: ly, z: -lx * sR + lz * cR }, r });
     const PZ = poleZ(Math.min(6, PHASE_BOUNDS[phase] + 0.4));
-    // 常驻: 中心体 ×2（除间期贴核位）/ 线粒体
+    // 常驻: 中心体 ×2（除间期贴核位）
     if (phase >= 1) {
       push('中心体（中心粒对）', 'Centrosome', 0.5, 0, -PZ, 1.8);
       push('中心体（中心粒对）', 'Centrosome', -0.5, 0, PZ, 1.8);
     } else {
       push('中心体（已复制, 贴核）', 'Centrosome', 0.5, 1.1, 1.5, 1.8);
     }
-    push('线粒体（暖古铜）', 'Mitochondrion', 4.8, 1.2, 0, 1.7);
-    push('线粒体（暖古铜）', 'Mitochondrion', -4.2, -1.6, 2.4, 1.7);
+    // v20 线粒体锚点逐颗跟随相位（用户反馈「黄圈里的线粒体悬停无反应」）:
+    //   旧版仅 2 个静态锚（间期位）—— 8 颗线粒体大多不在感应域内; 现按 update 同源运动学
+    //   （去漂移确定性版）逐颗求解当前相位位置 + 膜内/子细胞球双重钳制。
+    {
+      const tA = Math.min(6.9, PHASE_BOUNDS[phase] + 0.4);
+      const { L: aL, r: aR } = membraneProfile(tA);
+      const partA = ramp(tA, 3.4, 5.6);
+      const zD_A = THREE.MathUtils.lerp(5.55, 7.35, ramp(tA, 6.15, 7));
+      const rD_A = THREE.MathUtils.lerp(5.15, 6.45, ramp(tA, 6.15, 6.9));
+      mitoSeeds.forEach((ms) => {
+        const toZ = ms.side * THREE.MathUtils.lerp(2.2, 7.0, ramp(tA, 4.8, 7));
+        let x = Math.cos(ms.ang) * ms.rad * (1 - partA * 0.32);
+        let y = ms.y * (1 - partA * 0.4);
+        let z = THREE.MathUtils.lerp(0, toZ, partA);
+        if (tA < 6.6) {
+          // 单膜哑铃期: 回转面内钳（与 update.clampCell 同语义, 线粒体半长 0.85 计入）
+          if (Math.abs(z) > aL * 0.94) z = Math.sign(z) * aL * 0.94;
+          const u = (z / aL + 1) / 2;
+          const rr = Math.max(0.12, aR(u) * 0.97 - 0.85);
+          const rc = Math.hypot(x, y);
+          if (rc > rr) {
+            const kk = rr / rc;
+            x *= kk;
+            y *= kk;
+          }
+        } else {
+          // 分离期: 归入各自子细胞球
+          const s = z >= 0 ? 1 : -1;
+          const dz = z - s * zD_A;
+          const dd = Math.hypot(x, y, dz);
+          const lim = Math.max(0.3, rD_A - 0.97);
+          if (dd > lim) {
+            const kk = lim / dd;
+            x *= kk;
+            y *= kk;
+            z = s * zD_A + dz * kk;
+          }
+        }
+        push('线粒体（暖古铜）', 'Mitochondrion', x, y, z, 1.25);
+      });
+    }
     if (phase === 0) {
       push('细胞核（核被膜）', 'Nuclear envelope', 0, 0, 0, 3.6);
       push('染色质（松散纤维）', 'Chromatin', 1.2, 0.8, -0.6, 2.4);
@@ -1392,9 +1458,19 @@ export const MitosisStage = ({ playing, speed, seek, onPhaseChange, onEnded, sho
     // 进度回调（宿主直写进度条 DOM —— 零 React 重渲染）
     onProgress?.(clock.current / 7);
     build.update(clock.current, d);
+    // QA 插桩（Task 41 先例: 活体读真实渲染坐标 —— 比像素反推可靠; 零成本, 仅在显式探测时写入）
+    if (typeof window !== 'undefined' && (window as { __mitoQaProbe?: boolean }).__mitoQaProbe) {
+      (window as unknown as { __mitoQa: unknown }).__mitoQa = { t: clock.current, phase };
+    }
   });
 
   const hoverTargets = useMemo(() => build.targets(phase), [build, phase]);
+  // QA 插桩: 悬停目标同步暴露（v20 验证锚点跟随; 探测关闭时零开销）
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window as { __mitoQaProbe?: boolean }).__mitoQaProbe) {
+      (window as unknown as { __mitoQaTargets?: HoverTarget[] }).__mitoQaTargets = hoverTargets;
+    }
+  }, [hoverTargets]);
 
   return (
     <>
