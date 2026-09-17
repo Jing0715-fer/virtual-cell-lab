@@ -1,17 +1,15 @@
 'use client';
 
 /**
- * 细胞器悬停标记系统 v20（用户反馈: 「悬停不精准 · 离很远就弹窗 · 高亮不够明显」）
- *   - v20 屏幕空间像素精准命中: 旧「射线-锚点世界距离 < r」在镜头拉近时角半径暴涨
- *     （r=1.7 的线粒体在距离 5 时角半径 ≈ 19° ≈ 屏上半径 220px —— 指针离细胞器 200px 也弹窗）。
- *     新算法: 锚点投影到屏幕 → 像素距离命中, 捕获半径 = clamp(锚点感应半径的屏幕换算,
- *     24px, 64px) —— 拉近时永远不超过 64px（弹窗只在真正指向细胞器时出现）,
- *     拉远时不小于 24px（小细胞器仍可发现）。
+ * 细胞器悬停标记系统 v21（用户反馈: 「只显示pathway悬停信息 · 边必须放线的中心才显示 · 高亮应是整条线」）
+ *   - v21 双通道命中引擎: 细胞器锤点（v20 像素精准算法保留）与信号边折线（全段任意点可悬停 ——
+ *     每边一个折线命中体, 指针到投影线段的像素距离 <14px 即命中; 「必须放线的中心」根治）分开评分;
+ *     仲裁规则: 边仅在「无细胞器命中」或「边像素距离 < 0.55×细胞器像素距离」时胜出 ——
+ *     指向细胞器本体时永远显示细胞器（「只显示pathway信息」根治）。
+ *   - v21 整线高亮: 悬停边经 onHoverEdge(refId) 上报 → EdgeLayer 全段提亮 + 线宽加倍 + 呼吸脉冲
+ *     （「高亮应该是整个线, 而不是只是线的中心」根治）。
  *   - v20 视网膜套环高亮: 悬停即现「旋转虚线环 + 十字刻度」SVG 套环（尺寸 = 捕获半径,
- *     恒套住细胞器屏幕足迹）+ 脉冲环增强（翡翠色更亮）+ 锚点光点随细胞器尺寸缩放
- *     —— 「悬停到了哪个结构」一眼可辨。
- *   - v20 信号边/分子悬停覆盖: 主视图信号传导边（玫红抑制弧线等）新增可悬停识别
- *     （「红色的长条是什么」—— 现在悬停即知）。
+ *     恒套住细胞器屏幕足迹）+ 脉冲环增强（翡翠色更亮）+ 锚点光点随细胞器尺寸缩放。
  *   - 邻近检测保留「点到相机射线距离」穿透质膜/核被膜照常可悬停（细胞器发现优先）
  *   - 配套目录面板: 列出全部细胞器 → 点击「定位」= 相机飞行 + 脉冲环高亮
  */
@@ -39,6 +37,12 @@ export interface HoverTarget {
   group?: HoverGroupKey;
   /** v20 悬停卡强调色（信号边/分子目标按语义色着色; 默认翡翠） */
   accent?: string;
+  /** v21 折线命中体（信号边）—— 全段任意点可悬停, 不再仅中点两锚 */
+  poly?: Vec3[];
+  /** v21 目标类别: organelle 默认; edge 让位于细胞器（「只显示pathway信息」根治） */
+  kind?: 'organelle' | 'edge';
+  /** v21 外部引用 id（边 id —— 整线高亮联动） */
+  refId?: string;
 }
 
 export type HoverGroupKey = 'nuclear' | 'endomembrane' | 'energy' | 'cytoskeleton' | 'surface' | 'specialized';
@@ -132,12 +136,14 @@ export interface LocateReq {
 
 /* ============ 悬停标记层（画布内） ============ */
 
-export function OrganelleHoverLayer({ targets, enabled, locate }: {
+export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
   targets: HoverTarget[];
   /** 悬停启用（HUD「悬停标记」开关; 关闭时彻底清空） */
   enabled: boolean;
   /** 目录「定位」请求（强制点亮目标 + 相机飞行由 FlyToController 处理） */
   locate: LocateReq | null;
+  /** v21 悬停边 id 上报（整线高亮联动; null = 无边悬停） */
+  onHoverEdge?: (id: string | null) => void;
 }) {
   const { lang } = useLang();
   const [hovered, setHovered] = useState<HoverTarget | null>(null);
@@ -146,15 +152,32 @@ export function OrganelleHoverLayer({ targets, enabled, locate }: {
   const ray = useRef(new THREE.Ray());
   const tmp = useRef(new THREE.Vector3());
   const tmp2 = useRef(new THREE.Vector3());
+  /** v21 折线屏幕投影缓存（每帧重算成本 ~40 边 × 12 点 ≈ 480 投影, 可接受） */
+  const polyScreen = useRef<{ x: number; y: number; z: number }[]>([]);
   const lastPtr = useRef({ x: NaN, y: NaN });
   const lastCam = useRef(new THREE.Vector3(NaN, NaN, NaN));
   const lastNonce = useRef(0);
   /** 定位强制窗口截止时间（飞行期间不被邻近检测覆盖 —— 相机在动, 每帧都会触发重算） */
   const forcedUntil = useRef(0);
+  /** v21 上次上报边 id（去重 setState） */
+  const lastEdgeId = useRef<string | null>(null);
 
   useFrame((state) => {
     // 目录「定位」: 强制点亮该目标 2.4s（即使指针静止/相机飞行中）
     const now = performance.now();
+    // v21 QA 插桩（__cellQaProbe 门控 —— 与分裂演示 __mitoQaProbe 同一方法论; 零常态成本）
+    if (typeof window !== 'undefined' && (window as { __cellQaProbe?: boolean }).__cellQaProbe) {
+      (window as unknown as { __cellQaTargets?: HoverTarget[] }).__cellQaTargets = targets;
+      (window as unknown as { __cellQaState?: Record<string, unknown> }).__cellQaState = {
+        hovered: hovered?.zh ?? null,
+        enabled,
+        locateNonce: locate?.nonce ?? null,
+        lastNonce: lastNonce.current,
+        forcedUntil: forcedUntil.current,
+        now,
+        ptr: [state.pointer.x, state.pointer.y],
+      };
+    }
     if (locate && locate.nonce !== lastNonce.current) {
       lastNonce.current = locate.nonce;
       forcedUntil.current = now + 2400;
@@ -186,7 +209,65 @@ export function OrganelleHoverLayer({ targets, enabled, locate }: {
     let best: HoverTarget | null = null;
     let bestCap = 48;
     let bestScore = Infinity;
+    /** v21 胜者真实像素距离（仲裁用 —— score 含惩罚项不可直接反推） */
+    let bestPixelDist = Infinity;
+    /** v21 双通道仲裁: 细胞器锤点命中（既有算法）与折线命中（信号边全段）分开评分,
+     *  边仅在「明显更近」时胜出 —— 指向细胞器本体时永远显示细胞器（用户反馈「只显示pathway信息」根治） */
+    let bestEdge: HoverTarget | null = null;
+    let bestEdgeDist = Infinity;
+    let bestEdgePos: Vec3 | null = null;
+    /** v21 边命中最近点沿折线参数（0..1 —— 高亮脉冲粒子定位） */
     for (const t of targets) {
+      if (t.poly && t.poly.length >= 2) {
+        /* ---- v21 折线通道: 全段投影 → 指针到各段的像素距离 ---- */
+        const n = t.poly.length;
+        if (polyScreen.current.length < n) polyScreen.current.length = n;
+        const scr = polyScreen.current;
+        let culled = true;
+        for (let i = 0; i < n; i++) {
+          const p = t.poly[i];
+          tmp2.current.set(p.x, p.y, p.z).project(state.camera);
+          scr[i] = { x: tmp2.current.x, y: tmp2.current.y, z: tmp2.current.z };
+          if (tmp2.current.z < 1 && tmp2.current.z > -1) culled = false;
+        }
+        if (culled) continue;
+        // 指针 NDC → 像素坐标
+        const px = ptr.x * halfW + halfW;
+        const py = halfH - ptr.y * halfH;
+        let minD = Infinity;
+        let minI = -1;
+        let minK = 0;
+        for (let i = 0; i < n - 1; i++) {
+          const a = scr[i], b = scr[i + 1];
+          if (a.z > 1 || a.z < -1 || b.z > 1 || b.z < -1) continue;
+          const ax = a.x * halfW + halfW, ay = halfH - a.y * halfH;
+          const bx = b.x * halfW + halfW, by = halfH - b.y * halfH;
+          const dx = bx - ax, dy = by - ay;
+          const lenSq = dx * dx + dy * dy;
+          let k = lenSq > 1e-6 ? ((px - ax) * dx + (py - ay) * dy) / lenSq : 0;
+          k = k < 0 ? 0 : k > 1 ? 1 : k;
+          const cx = ax + dx * k, cy = ay + dy * k;
+          const d = Math.hypot(px - cx, py - cy);
+          if (d < minD) { minD = d; minI = i; minK = k; }
+        }
+        // v21 命中阈值: 14px（线宽 ~2-4px + 手抖余量）; 拉近时按投影尺度微放宽
+        const edgeCap = 14;
+        if (minD > edgeCap || minI < 0) continue;
+        // 折线最近点世界坐标（命中点即套环锚 —— 视网膜环就在指针处）
+        const pA = t.poly[minI], pB = t.poly[minI + 1];
+        const hitPos = {
+          x: pA.x + (pB.x - pA.x) * minK,
+          y: pA.y + (pB.y - pA.y) * minK,
+          z: pA.z + (pB.z - pA.z) * minK,
+        };
+        if (minD < bestEdgeDist) {
+          bestEdgeDist = minD;
+          bestEdge = t;
+          bestEdgePos = hitPos;
+        }
+        continue;
+      }
+      /* ---- 细胞器锤点通道（v20 既有算法） ---- */
       tmp.current.set(t.pos.x, t.pos.y, t.pos.z).sub(ray.current.origin);
       const proj = tmp.current.dot(ray.current.direction);
       if (proj < 1) continue; // 相机背后/过近
@@ -209,10 +290,26 @@ export function OrganelleHoverLayer({ targets, enabled, locate }: {
         bestScore = score;
         best = t;
         bestCap = cap;
+        bestPixelDist = pixelDist;
       }
     }
-    if (best !== hovered) setHovered(best);
-    if (best && Math.abs(bestCap - capPx) > 1) setCapPx(bestCap);
+    /* v21 仲裁: 边胜出仅当 (无细胞器命中) 或 (边像素距离显著更近 —— 指针实际落在线上而非细胞器本体)
+     *  阈值 0.55×: 指向细胞器本体（像素距离小）时边永远让位; 指向穿过细胞器上空的线时边照常可指认 */
+    let winner: HoverTarget | null = best;
+    if (bestEdge) {
+      if (!best || bestEdgeDist < bestPixelDist * 0.55) {
+        winner = { ...bestEdge, pos: bestEdgePos ?? bestEdge.pos };
+        bestCap = 18;
+      }
+    }
+    if (winner !== hovered) setHovered(winner);
+    if (winner && Math.abs(bestCap - capPx) > 1) setCapPx(bestCap);
+    // v21 边 id 上报（整线高亮联动; 去重避免每帧 setState）
+    const edgeId = winner?.kind === 'edge' ? winner.refId ?? null : null;
+    if (edgeId !== lastEdgeId.current) {
+      lastEdgeId.current = edgeId;
+      onHoverEdge?.(edgeId);
+    }
   });
 
   // 光标反馈（可交互暗示; 拖拽旋转时 OrbitControls 自身的 grab 光标不受影响）
@@ -221,6 +318,11 @@ export function OrganelleHoverLayer({ targets, enabled, locate }: {
     document.body.style.cursor = hovered && enabled ? 'pointer' : '';
     return () => { document.body.style.cursor = ''; };
   }, [hovered, enabled]);
+
+  // v21 悬停关闭时同步清空整线高亮
+  useEffect(() => {
+    if (!enabled) onHoverEdge?.(null);
+  }, [enabled, onHoverEdge]);
 
   const show = enabled ? hovered : null;
   const info = show ? ORG_INFO[show.latin] : undefined;

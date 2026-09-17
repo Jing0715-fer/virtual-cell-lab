@@ -660,10 +660,10 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     r: 0.14 + hash01(`vs${i}`) * 0.12,
   }));
   group.add(vesicles);
-  /* ---------- 高尔基体（v17: 复用 golgiCisternaGeometry —— 5 层弓形叠杯堆, 主细胞同款形态标准） ----------
-   * 旧 golgiMini = TorusGeometry 弧堆 —— 与 ER 管系视觉语言混同（用户反馈「更像内质网」）;
-   *  v17: 5 层舒展弓形叠杯栈（cis 宽 → trans 窄弯 + 新月偏移, 顶点色淡藕荷紫梯度）+ trans 出芽囊泡;
-   *  间期核旁一栈 → 前中期碎片化淡出 → 末期双子细胞各重建一栈（核旁位） */
+  /* ---------- 高尔基体（v21: 复用 golgiCisternaGeometry —— 椭圆扁平囊平行堆, 主细胞同款形态标准） ----------
+   * v17 旧「5 层弓形叠杯堆」读感「长条形」（用户反馈）—— v21 改与主细胞同构:
+   *   椭圆扁平囊 ×6 平行叠置（aspect 1.78, 无弓形偏移/无梯骨）; 间期核旁一栈（脱核悬浮）→
+   *   前中期碎片化淡出 → 末期双子细胞各重建一栈（子核旁脱核位）。 */
   const golgiStackMat = mat({
     color: '#ffffff',
     vertexColors: true,
@@ -684,28 +684,27 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4; color?: THREE.Color }[] = [];
     const cisCol = new THREE.Color(REF.golgiCis);
     const transCol = new THREE.Color(REF.golgiTrans);
-    const CIST_N = 5;
-    const step = 0.28 * scale;
-    const diskR = 1.15 * scale;
+    const CIST_N = 6;
+    const step = 0.3 * scale;
+    const semiB = 0.78 * scale; // 短半轴（aspect 拉伸后长半轴 ≈ 1.39·scale）
     const stackH = CIST_N * step;
-    const MIX = [0, 0.18, 0.42, 0.7, 1];
-    const bow = 0.24 * scale; // v17 弓形新月偏移（主细胞同款语义）
+    const MIX = [0, 0.14, 0.34, 0.56, 0.8, 1];
+    const ASPECT = 1.78; // v21 与主细胞同款椭圆纵横比
     for (let i = 0; i < CIST_N; i++) {
-      const t = i / (CIST_N - 1);
       const col = cisCol.clone().lerp(transCol, MIX[i]);
-      const rad = diskR * (1 - i * 0.062);
-      const cup = (0.1 + i * 0.055) * scale;
-      const geo = track(golgiCisternaGeometry(rad, 0.082 * scale, cup, seed + i * 7, perf ? 6 : 8, perf ? 26 : 40));
-      const m = new THREE.Matrix4().makeRotationY(i * 0.16).setPosition(bow * t * t, i * step - stackH * 0.5, 0);
+      const rad = semiB * (1 - i * 0.045);
+      const cup = (0.05 + i * 0.028) * scale;
+      const geo = track(golgiCisternaGeometry(rad, 0.082 * scale, cup, seed + i * 7, perf ? 6 : 8, perf ? 26 : 40, ASPECT));
+      const m = new THREE.Matrix4().makeRotationY(i * 0.09).setPosition(0, i * step - stackH * 0.5, 0);
       parts.push({ geo, matrix: m, color: col });
     }
-    // trans 面出芽囊泡 ×5（顶点色并入同一网格 —— 单 draw call; 跟随弓形偏移）
+    // trans 面出芽囊泡 ×5（顶点色并入同一网格 —— 单 draw call; 沿椭圆轮廓）
     for (let v = 0; v < 5; v++) {
       const r = (0.1 + hash01(`gb${seed}${v}`) * 0.05) * scale;
       const ang = v * (Math.PI * 2 / 5) + hash01(`gba${seed}${v}`) * 0.6;
-      const rr = diskR * (0.5 + hash01(`gbr${seed}${v}`) * 0.42);
+      const rr = semiB * (0.5 + hash01(`gbr${seed}${v}`) * 0.42);
       const sph = track(new THREE.SphereGeometry(r, 8, 6));
-      sph.translate(Math.cos(ang) * rr + bow, stackH * 0.5 + 0.14 * scale, Math.sin(ang) * rr);
+      sph.translate(Math.cos(ang) * rr * ASPECT, stackH * 0.5 + 0.14 * scale, Math.sin(ang) * rr);
       parts.push({ geo: sph, color: new THREE.Color(REF.golgiTrans) });
     }
     const mesh = new THREE.Mesh(track(mergeGeoms(parts)), golgiStackMat);

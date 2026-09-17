@@ -54,21 +54,21 @@ const EDGE_HOVER_KIND: Record<string, { zh: string; latin: string; accent: strin
   'state-change': { zh: '信号边 · 状态转变', latin: 'Signal edge · indirect', accent: '#2dd4bf' },
 };
 
-/** v20 信号边悬停锚点工厂: 每条边取中段两点（r 0.85）—— 指到弧线上即现「这条线是什么」 */
-function edgeHoverTargets(points: Vec3[], kind: string): HoverTarget[] {
-  const meta = EDGE_HOVER_KIND[kind];
-  if (!meta || points.length < 2) return [];
-  const at = (u: number): Vec3 => {
-    const f = u * (points.length - 1);
-    const i = Math.min(points.length - 2, Math.floor(f));
-    const k = f - i;
-    return {
-      x: points[i].x + (points[i + 1].x - points[i].x) * k,
-      y: points[i].y + (points[i + 1].y - points[i].y) * k,
-      z: points[i].z + (points[i + 1].z - points[i].z) * k,
-    };
-  };
-  return [0.4, 0.72].map((u) => ({ pos: at(u), r: 0.85, zh: meta.zh, latin: meta.latin, accent: meta.accent }));
+/** v21 信号边悬停目标: 每边一个折线命中体（全段任意点可悬停 —— 用户反馈「必须放线的中心才能显示」根治）
+ *  kind:'edge' 双通道仲裁让位于细胞器; refId 回传整线高亮 */
+function edgeHoverTarget(edge: { id: string; points: Vec3[]; kind: string }): HoverTarget[] {
+  const meta = EDGE_HOVER_KIND[edge.kind];
+  if (!meta || edge.points.length < 2) return [];
+  return [{
+    pos: edge.points[Math.floor(edge.points.length / 2)],
+    r: 0.6,
+    zh: meta.zh,
+    latin: meta.latin,
+    accent: meta.accent,
+    poly: edge.points,
+    kind: 'edge',
+    refId: edge.id,
+  }];
 }
 
 /** OrbitControls 鼠标交互映射（模块级常量, 避免组件逐 tick 重渲染时重复应用）:
@@ -300,6 +300,9 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, cutaway, sim, sna
   const graph = useLabStore((s) => s.graph);
   const cellId = useLabStore((s) => s.cellId);
   const cell = CELL_TYPE_MAP.get(cellId);
+  /** v21 当前悬停边 id（整线高亮联动 —— 用户需求「高亮应该是整个线」） */
+  const [hoverEdgeId, setHoverEdgeId] = useState<string | null>(null);
+  const onHoverEdge = useCallback((id: string | null) => setHoverEdgeId(id), []);
 
   const morph = cell?.morphology ?? 'hepatocyte';
   // v12 参照图: 类型 tint 向暖中性石板收敛 62%（保留类型色相身份的同时, 细胞"肉质"整体
@@ -315,9 +318,9 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, cutaway, sim, sna
     () => (baseLayout && snapPlane ? projectLayoutToPlane(baseLayout, snapPlane) : baseLayout),
     [baseLayout, snapPlane],
   );
-  // v20 信号边悬停锚点（每边中段 2 点 —— 「红色的长条是什么」悬停即知; 仅主视图信号层存在时）
+  // v21 信号边悬停目标（每边一个折线命中体 —— 全段可悬停; 仅主视图信号层存在时）
   const edgeHover = useMemo(
-    () => (layout ? layout.edges.flatMap((e) => edgeHoverTargets(e.points, e.kind)) : []),
+    () => (layout ? layout.edges.flatMap((e) => edgeHoverTarget(e)) : []),
     [layout],
   );
 
@@ -340,8 +343,8 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, cutaway, sim, sna
         />
       </mesh>
       {/* 剖面贴附模式: 核内部标注让位（核盘自带剖面标注）—— 消除核区标签互叠 */}
-      <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} cutaway={cutaway} locate={locate} onHoverTargets={onHoverTargets} extraHover={edgeHover} />
-      <EdgeLayer edges={layout.edges} sim={sim} />
+      <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} cutaway={cutaway} locate={locate} onHoverTargets={onHoverTargets} extraHover={edgeHover} onHoverEdge={onHoverEdge} />
+      <EdgeLayer edges={layout.edges} sim={sim} hoveredEdgeId={hoverEdgeId} />
       <MoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />
       {/* 激酶抑制剂 3D 药物分子（球棍模型，结合靶点） */}
       <DrugMoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />
@@ -765,8 +768,10 @@ export function VirtualCell3D() {
           ) : (
             <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} cutaway={clipView} sim={sim} snapPlane={snapPlane} locate={locateReq} onHoverTargets={onHoverTargets} />
           )}
-          {/* v14 目录定位 → 相机飞行（1.2s 阻尼聚焦; 用户任何交互立即让位） */}
-          {!mitosis && <FlyToController req={locateReq} />}
+          {/* v14 目录定位 → 相机飞行（1.2s 阻尼聚焦; 用户任何交互立即让位）
+           *  v21: 常驻挂载 —— 旧 {!mitosis && ...} 使分裂演示开启时的原点飞行与卸载同帧发生,
+           *  飞行永不执行（此前定位过细胞器再开分裂 → 舞台偏出画面中心）。 */}
+          <FlyToController req={locateReq} />
           <SceneCapture />
           <SectionClipController
             enabled={clipView && !mitosis}

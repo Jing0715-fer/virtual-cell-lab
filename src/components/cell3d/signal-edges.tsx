@@ -6,6 +6,8 @@
  *   - 抑制/去磷酸化: 玫红虚线（反馈环路可辨）
  *   - 转录表达: 琥珀色
  * 粒子走单 InstancedMesh（每边 2 粒），矩阵逐帧 imperative 更新
+ * v21: 悬停边整线高亮（用户需求「高亮应该是整个线, 而不是只是线的中心」）——
+ *   hoveredEdgeId 命中的边全段提亮 + 线宽加倍 + 呼吸脉冲; 其余边照常。
  */
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
@@ -22,15 +24,19 @@ const EXPRESSIVE = new Set(['expression']);
 interface EdgeProps {
   edge: Edge3D;
   sim: { current: SimSnapshot };
+  /** v21 当前悬停边 id（整线高亮） */
+  hoveredEdgeId: string | null;
 }
 
-function EdgeLine({ edge, sim }: EdgeProps) {
+function EdgeLine({ edge, sim, hoveredEdgeId }: EdgeProps) {
   const lineRef = useRef<Line2 | null>(null);
   const color = EDGE_COLORS[edge.kind] ?? '#34d399';
   const dashed = INHIBITORY.has(edge.kind);
   const key = `${edge.source}>${edge.target}`;
+  const baseWidth = EXPRESSIVE.has(edge.kind) ? 1.6 : 2;
 
-  useFrame(() => {
+  useFrame((state) => {
+    const hovered = hoveredEdgeId === edge.id;
     const flux = Math.abs(sim.current.signalFlux[key] ?? 0);
     const focus = sim.current.focus;
     const tourNode = sim.current.tourNode;
@@ -47,7 +53,11 @@ function EdgeLine({ edge, sim }: EdgeProps) {
     }
     const mat = lineRef.current?.material as THREE.Material | undefined;
     if (mat) {
-      if (tourNode) {
+      if (hovered) {
+        // v21 整线高亮: 恒亮 0.98 + 呼吸脉冲（据悬停时刻相位波动 ±0.12）——「整条线」一眼可辨
+        const t = state.clock.elapsedTime;
+        mat.opacity = 0.86 + Math.sin(t * 4.2) * 0.12;
+      } else if (tourNode) {
         // 教学模式: 仅聚焦分子邻接边高亮，其余压暗
         const isTourEdge = edge.source === tourNode || edge.target === tourNode;
         mat.opacity = isTourEdge ? 0.9 : 0.03;
@@ -55,6 +65,12 @@ function EdgeLine({ edge, sim }: EdgeProps) {
         const base = focus ? 0.05 : 0.16;
         mat.opacity = Math.min(1, (flux > 0.02 ? Math.min(0.92, base + flux * 1.15) : base) + pulseBoost * 0.55);
       }
+    }
+    // v21 悬停线宽加倍（Line2 像素线宽 —— 无需重建几何, 逐帧赋值即可）
+    const l2 = lineRef.current;
+    if (l2) {
+      const w = hovered ? baseWidth * 2.1 : baseWidth;
+      if (l2.material.linewidth !== w) l2.material.linewidth = w;
     }
   });
 
@@ -65,7 +81,7 @@ function EdgeLine({ edge, sim }: EdgeProps) {
       ref={lineRef}
       points={pts}
       color={color}
-      lineWidth={EXPRESSIVE.has(edge.kind) ? 1.6 : 2}
+      lineWidth={baseWidth}
       transparent
       opacity={0.16}
       dashed={dashed}
@@ -130,11 +146,11 @@ export function FlowParticles({ edges, sim }: { edges: Edge3D[]; sim: { current:
   );
 }
 
-export function EdgeLayer({ edges, sim }: { edges: Edge3D[]; sim: { current: SimSnapshot } }) {
+export function EdgeLayer({ edges, sim, hoveredEdgeId = null }: { edges: Edge3D[]; sim: { current: SimSnapshot }; hoveredEdgeId?: string | null }) {
   return (
     <group>
       {edges.map((e) => (
-        <EdgeLine key={e.id} edge={e} sim={sim} />
+        <EdgeLine key={e.id} edge={e} sim={sim} hoveredEdgeId={hoveredEdgeId} />
       ))}
       <FlowParticles edges={edges} sim={sim} />
     </group>
