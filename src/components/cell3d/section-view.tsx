@@ -14,9 +14,11 @@
  *        得到真实相交多边形 —— 填充盘/发光缘带/核盘三件套全部贴合该轮廓
  *      - 核盘同理: 与"核椭球 × 分叶 × FBM"（与 shapedNucleusGeometry 同源）精确求交,
  *        核中心偏移（上皮基底核等）随动
- *   3. 剖面填充纹理（程序化 Canvas 双纹理, 电镜切片风格; UV 径向归一 →
+ *   3. 剖面填充纹理（程序化 Canvas 纹理, 电镜切片风格; UV 径向归一 →
  *      纹理膜线/核被膜线严格落在真实轮廓上）:
- *      - 细胞质纹理: 质膜双层线/糖被/颗粒基质/线粒体剖面/高尔基平行弧堆/ER 波浪线/囊泡
+ *      - v22 去细胞器化: 细胞质纹理仅保留「切面表面」语义（质膜双层线/糖被/颗粒基质底噪）;
+ *        旧版烘焙的 2D 线粒体/高尔基/ER/囊泡贴图退役 —— 细胞器由真 3D 实体经全局裁剪面
+ *        剖开后呈现于剖面窗口（renderOrder > 96, 随剖切深度实时变化 + 可悬停）
  *      - 核纹理: 核被膜双线+核孔/常染色质纤维/异染色质边集/核仁
  *   4. 剖切方位三预设: 正剖 Coronal / 俯剖 Horizontal / 侧剖 Sagittal（解剖学标准切面）
  *   5. 被剖掉的前半分子 DOM 标签同步隐藏（SimSnapshot.clipPlane 快照广播）
@@ -126,120 +128,13 @@ function makeCytoplasmTexture(R: number, seed = 42): THREE.CanvasTexture | null 
     ctx.fillRect(x, y, s, s);
   }
 
-  /* --- 线粒体剖面（长椭圆 rx≈26 ry≈11 · 双层膜 + 4-5 条沿长轴波浪嵴线，对应 3D 长条豆状新形态） --- */
-  const mitoCount = 8;
-  for (let i = 0; i < mitoCount; i++) {
-    const a = rnd() * Math.PI * 2;
-    const rr = rMem * (0.44 + rnd() * 0.48);
-    const x = cx + Math.cos(a) * rr;
-    const y = cy + Math.sin(a) * rr * 0.94;
-    const rx = 22 + rnd() * 7; // 长椭圆（≈2.4:1, 与 2D Mitochondrion 椭圆同构）
-    const ry = rx * 0.42;
-    const rot = rnd() * Math.PI;
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(rot);
-    ctx.beginPath();
-    ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(42, 30, 24, 0.85)';
-    ctx.fill();
-    ctx.lineWidth = 1.6;
-    ctx.strokeStyle = 'rgba(140, 96, 80, 0.6)';
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.ellipse(0, 0, rx - 2.6, ry - 2.6, 0, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(110, 74, 62, 0.5)';
-    ctx.lineWidth = 1.1;
-    ctx.stroke();
-    // 波浪嵴线（沿长轴 4-5 条, 裁剪于椭圆内 —— 与 2D 形态学/3D 板层嵴同构）
-    ctx.save();
-    ctx.beginPath();
-    ctx.ellipse(0, 0, rx - 3, ry - 3, 0, 0, Math.PI * 2);
-    ctx.clip();
-    const lines = 4 + (i % 2);
-    for (let j = 0; j < lines; j++) {
-      const yy = -ry * 0.6 + (j * ry * 1.2) / Math.max(1, lines - 1);
-      ctx.beginPath();
-      for (let xx = -rx + 3; xx <= rx - 3; xx += 3) {
-        const wy = yy + Math.sin(xx * 0.24 + j * 1.9 + i) * ry * 0.3;
-        if (xx === -rx + 3) ctx.moveTo(xx, wy);
-        else ctx.lineTo(xx, wy);
-      }
-      ctx.strokeStyle = 'rgba(101, 70, 54, 0.5)';
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
-    }
-    ctx.restore();
-    ctx.restore();
-  }
-
-  /* --- 高尔基体剖面（v15: 3→1 组弧线堆 —— 真 3D 高尔基现于剖面窗口渲染（renderOrder 100）,
-         纹理仅保留 1 组作远处衬景, 避免「双高尔基」读感冲突）--- v12 参照图: 暖棕金族 */
-  for (let g = 0; g < 1; g++) {
-    const a = rnd() * Math.PI * 2;
-    const rr = rMem * (0.5 + rnd() * 0.4);
-    const x = cx + Math.cos(a) * rr;
-    const y = cy + Math.sin(a) * rr * 0.94;
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(rnd() * Math.PI * 2);
-    const stack = 4; // 每组 4 条平行弧（同半径沿 y 平移 → 平行弧堆）
-    for (let s = 0; s < stack; s++) {
-      ctx.beginPath();
-      ctx.arc(0, -s * 3.1, 13 - s * 0.6, Math.PI * 0.12, Math.PI * 0.88);
-      ctx.strokeStyle = `rgba(154, 144, 180, ${0.55 - s * 0.07})`;
-      ctx.lineWidth = 2.2 - s * 0.3;
-      ctx.stroke();
-    }
-    // 反面出芽小泡（琥珀小点）
-    for (let v = 0; v < 3; v++) {
-      ctx.beginPath();
-      ctx.arc(-13 + v * 5.2, -stack * 3.1 - 3.5, 1.8, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(173, 164, 196, 0.4)';
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
-  /* --- 内质网剖面（波浪长线 + 膜旁核糖体） --- */
-  for (let e = 0; e < 4; e++) {
-    const a = rnd() * Math.PI * 2;
-    const rr = rMem * (0.42 + rnd() * 0.5);
-    ctx.save();
-    ctx.translate(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr * 0.92);
-    ctx.rotate(rnd() * Math.PI);
-    ctx.beginPath();
-    for (let x = -34; x <= 34; x += 4) {
-      const y = Math.sin(x * 0.22 + e * 2) * 5;
-      if (x === -34) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.strokeStyle = 'rgba(90, 106, 126, 0.5)';
-    ctx.lineWidth = 1.8;
-    ctx.stroke();
-    for (let x = -32; x <= 32; x += 6) {
-      const y = Math.sin(x * 0.22 + e * 2) * 5 + 3.4;
-      ctx.fillStyle = 'rgba(138, 106, 74, 0.35)';
-      ctx.fillRect(x - 0.7, y - 0.7, 1.5, 1.5);
-    }
-    ctx.restore();
-  }
-
-  /* --- 转运囊泡（小圆环） --- */
-  for (let v = 0; v < 20; v++) {
-    const a = rnd() * Math.PI * 2;
-    const rr = rMem * (0.3 + rnd() * 0.66);
-    const x = cx + Math.cos(a) * rr;
-    const y = cy + Math.sin(a) * rr * 0.94;
-    const r = 2.2 + rnd() * 2.8;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(87, 83, 78, 0.16)';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(168, 162, 158, 0.4)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-  }
+  /* v22 剖面贴图「去细胞器化」（用户反馈: 「剖面上存在一些 2D 贴图, 不随切片深度变化,
+   * 悬停也无细胞器信息, 需要改成实际 3D 细胞器」）:
+   *   旧版在切面盘上烘焙了 8 颗线粒体 / 1 组高尔基弧 / 4 条 ER 波浪线 / 20 个囊泡的 2D 画作 ——
+   *   ① 静态贴图, 不随剖切深度变化; ② 无悬停信息; ③ 与剖面窗口化渲染的真实 3D 细胞器
+   *   语义冲突（「双细胞器」读感）。现全部退役: 切面盘仅保留「切面本身的表面」语义 ——
+   *   基质颗粒（核糖体/糖原弥散底噪）+ 质膜双层线 + 糖被; 细胞器一律由真 3D 实体经全局
+   *   裁剪面剖开后呈现于剖面窗口（renderOrder > 96 盘后渲染, 同高尔基/ER 既有窗口化手法）。 */
 
   /* --- 质膜剖面（双层磷脂线 + 膜间腔 + 糖被短须） --- v12 参照图: 外缘亮蓝线（实测高光色 145,175,207） */
   ctx.beginPath();

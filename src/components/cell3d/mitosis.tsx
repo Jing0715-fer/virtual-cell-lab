@@ -1022,25 +1022,38 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     /* 动粒微管（逐帧: 极 → 染色体着丝粒） */
     const kfiberOpacity = clamp01(ramp(t, 1.15, 1.8) * (1 - ramp(t, 4.1, 4.9)));
     kfiberMatRef.opacity = kfiberOpacity;
-    const mtOpacity = clamp01(ramp(t, 0.7, 1.6) * (1 - ramp(t, 4.3, 5.3)));
+    /* v22 纺锤解聚加速: 旧版 4.3→5.3 淡出 —— 深缢裂期（furrowK>0.6）仍有 ~15% 残影贴着收缩
+     * 回转面, 半透质膜 + 辉光下读感「纤维戳膜/出膜」。收缩环一旦启动（4.55）, 微管迅速
+     * 去稳而解聚（科学: 末期末星体微管 catastrophically depolymerize, 中间体接管）—— 收缩
+     * 全窗口内纤维可见度单调归零, 不再与深缢裂共存。 */
+    const mtOpacity = clamp01(ramp(t, 0.7, 1.6) * (1 - ramp(t, 4.3, 5.05)));
     mtMatRef.opacity = mtOpacity;
+    /* v22 收缩环联动（用户反馈「收缩过程中纺锤丝没有随着发生变化」）:
+     * 数值上纤维已恒在膜内（v20 双保险钳制 + __spindleQa 实测零越界）—— 但收缩期纤维
+     * 长度/贴边位置不变, 半透膜下视觉上「顶穿」缢裂面。现让纺锤随收缩环主动退场:
+     *   ① 芽长 ×(1−0.5·furrowK) —— 纤维朝两极回缩（解聚读感, 与膜面收缩同步变化）
+     *   ② 端点/中段钳深 0.80/0.82 → 0.58/0.62 —— 皮质附着点随缢裂加深而脱离皮质 */
+    const furrowMT = ramp(t, 4.55, 5.6);
     /* 星体微管（v16 逐帧: 极位 + 定向芽长; v20 恒留膜内双保险）
      * 用户反馈「纺锤丝跑到细胞外」根因: ① 端点钳在 0.93·r(u) —— 与半透质膜仅 7% 间隙,
      *    纤维端 + 辉光视觉上「戳膜/出膜」; ② 缢裂期膜面内凹（哑铃非凸）—— 直纤维中段
      *    在缩窄环处可穿出回转面。v20: 端点钳加深至 0.80 + 沿极→端 4 点采样逐点验证膜内。 */
     if (mtOpacity > 0.01) {
       let ai = 0;
+      const mtShrink = 1 - 0.5 * furrowMT; // v22 芽长回缩系数
+      const endK = 0.8 - 0.22 * furrowMT; // v22 端点钳深（0.80 → 0.58）
+      const midK = 0.82 - 0.2 * furrowMT; // v22 中段钳深（0.82 → 0.62）
       for (const side of [-1, 1]) {
         for (let i = 0; i < astralN; i++) {
           const dir = astralDirs[side < 0 ? i : astralN + i];
-          const len = 4.4 + hash01(`asl${side}${i}`) * 1.8; // 4.4-6.2 芽长（有意长于膜面 → 钳制后恒贴皮质）
+          const len = (4.4 + hash01(`asl${side}${i}`) * 1.8) * mtShrink; // 4.4-6.2 芽长（收缩环启动后朝极回缩）
           vA.set(0, 0, side * PZ); // 极（xy≈0 —— 中段采样线性内插的前提）
           vB.copy(dir).multiplyScalar(len).add(vA); // 芽端
-          // ① 端点钳制（0.93 → 0.80: 与半透质膜留出可辨间隙, 不再读感「戳膜」）
+          // ① 端点钳制（v22: 随缢裂加深 0.80→0.58 —— 皮质附着点同步脱离收缩中的皮质）
           if (Math.abs(vB.z) > memL * 0.8) vB.z = Math.sign(vB.z) * memL * 0.8;
           {
             const u0 = (vB.z / memL + 1) / 2;
-            const rr0 = Math.max(0.05, rProfile(u0)) * 0.8;
+            const rr0 = Math.max(0.05, rProfile(u0)) * endK;
             const rc = Math.hypot(vB.x, vB.y);
             if (rc > rr0) {
               const kk = rr0 / rc;
@@ -1049,14 +1062,15 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
             }
           }
           // ② 中段采样（缢裂非凸补偿）: 极→端直线纤维的中间点 xy = s·端点 xy,
-          //    任一采样点超出该 z 处回转面 0.82 倍 → 端点 xy 按最大越界比收缩
+          //    任一采样点超出该 z 处回转面 midK 倍 → 端点 xy 按最大越界比收缩
+          //    （v22: midK 随缢裂加深 0.82→0.62 —— 纤维中段同步脱离收缩中的回转面）
           {
             let shrink = 1;
             for (const s of [0.35, 0.55, 0.75, 0.95]) {
               const zs = vA.z + (vB.z - vA.z) * s;
               if (Math.abs(zs) >= memL * 0.98) continue;
               const us = (zs / memL + 1) / 2;
-              const allowed = Math.max(0.05, rProfile(us)) * 0.82;
+              const allowed = Math.max(0.05, rProfile(us)) * midK;
               const rs = Math.hypot(vB.x * s, vB.y * s);
               if (rs > allowed) shrink = Math.min(shrink, allowed / rs);
             }
@@ -1117,6 +1131,58 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     centB.rotation.y -= dt * 0.8;
     // 静态微管族跟随极位（组 z 缩放 = 纺锤体拉长）
     spindle.scale.z = PZ / POLE_Z0;
+    /* v22 中央纺锤（极微管重叠区）随收缩环收窄: 旧版 xy 恒定 —— 缢裂腰部回转面半径
+     * 收缩到 ~2-3 时重叠区 ±0.9 的横向跨度读感「顶住膜面」; 现随 furrowMT 收窄 45%
+     * （科学: 极微管随中间体成熟向中央来焦, antiparallel overlap 致密化） */
+    const spindleWaist = 1 - 0.45 * furrowMT;
+    spindle.scale.x = spindleWaist;
+    spindle.scale.y = spindleWaist;
+
+    /* v22 QA 插桩: 纺锤纤维膜外越界测量（__spindleQaProbe 门控 —— 实测实例矩阵逐段采样,
+     * 与渲染像素无关的数值真源; 常态零成本） */
+    if (typeof window !== 'undefined' && (window as { __spindleQaProbe?: boolean }).__spindleQaProbe) {
+      const qa = { t, astral: 0, kfiber: 0, polar: 0, nAstral: 0, nKfiber: 0 };
+      const testPt = (x: number, y: number, z: number): number => {
+        if (Math.abs(z) > memL) return Math.abs(z) - memL + Math.hypot(x, y);
+        const u = (z / memL + 1) / 2;
+        return Math.hypot(x, y) - Math.max(0.05, rProfile(u));
+      };
+      const sampleInst = (im: THREE.InstancedMesh, out: { worst: number; n: number }, isK: boolean) => {
+        if (!im.visible) return;
+        const pa = new THREE.Vector3(), pb = new THREE.Vector3(), pm = new THREE.Vector3();
+        for (let ii = 0; ii < im.count; ii++) {
+          im.getMatrixAt(ii, kM);
+          if (kM.elements[0] === 0 && kM.elements[5] === 0) continue; // 缩没的实例
+          pa.set(0, -0.5, 0).applyMatrix4(kM);
+          pb.set(0, 0.5, 0).applyMatrix4(kM);
+          let worstSeg = 0;
+          for (let ss = 0; ss <= 6; ss++) {
+            pm.lerpVectors(pa, pb, ss / 6);
+            worstSeg = Math.max(worstSeg, testPt(pm.x, pm.y, pm.z));
+          }
+          if (worstSeg > 0.02) { out.n++; out.worst = Math.max(out.worst, worstSeg); }
+        }
+        void isK;
+      };
+      const astralQa = { worst: 0, n: 0 };
+      const kfiberQa = { worst: 0, n: 0 };
+      sampleInst(astrals, astralQa, false);
+      sampleInst(kfibers, kfiberQa, true);
+      qa.astral = astralQa.worst; qa.nAstral = astralQa.n;
+      qa.kfiber = kfiberQa.worst; qa.nKfiber = kfiberQa.n;
+      // 极微管: 静态合并网格 → 世界包围盒 8 角（回变换到组局部坐标 —— 与膜回转面同坐标系）
+      if (spindle.visible && mtMatRef.opacity > 0.02) {
+        spindle.updateWorldMatrix(true, true);
+        const bb = new THREE.Box3().setFromObject(spindle);
+        const wp = new THREE.Vector3();
+        for (let cx = 0; cx <= 1; cx++) for (let cy = 0; cy <= 1; cy++) for (let cz = 0; cz <= 1; cz++) {
+          wp.set(cx ? bb.max.x : bb.min.x, cy ? bb.max.y : bb.min.y, cz ? bb.max.z : bb.min.z);
+          pv.copy(group.worldToLocal(wp.clone()));
+          qa.polar = Math.max(qa.polar, testPt(pv.x, pv.y, pv.z));
+        }
+      }
+      (window as unknown as { __spindleQa?: unknown }).__spindleQa = qa;
+    }
 
     /* 核被膜: 完整 → 崩解碎片 → 双子核重组 */
     const nebd = ramp(t, 1.1, 1.85);

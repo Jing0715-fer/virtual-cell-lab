@@ -1192,7 +1192,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   }
 
   /* ================= 线粒体（双膜 + 板层嵴 + ATP 合酶） ================= */
-  const mitos: { obj: THREE.Group; baseY: number; phase: number }[] = [];
+  const mitos: { obj: THREE.Group; baseY: number; phase: number; pinned?: boolean }[] = [];
   const mitoCount = perf ? Math.max(4, Math.round(spec.mitoCount * 0.6)) : spec.mitoCount;
   // 板层嵴 18 条（perf 9）: v10 深波形密板层 —— 高保真插画中嵴褶皱填满线粒体的读感
   const cristaeN = perf ? 9 : 18;
@@ -1232,17 +1232,30 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   // 成纤维沿应力纤维、上皮沿顶端-基底轴的真实位形）; 圆形细胞保持随机取向
   const MITO_ALIGN: 'x' | 'y' | null =
     SHAPE === 'rod' || SHAPE === 'spindle' ? 'x' : SHAPE === 'columnar' ? 'y' : null;
+  /* v22 剖面示教锚（用户需求: 「线粒体等小细胞器至少需要有一个在 50% section 处展示切开
+   * 内部的细节展示」）: 前 3 颗线粒体改为确定性示教位 —— 分别钉在正剖/俯剖/侧剖的 50%
+   * 切平面（front: z=0 / top: y=0 / side: x=0）内, 长轴沿切面展开:
+   *   剖切深度 50% 时被切平面纵向剖开 → 剖面窗口直读内部板层嵴/基质/ATP 合酶/mtDNA。
+   *   方向均避开核体（insidePos 避核不变）与高尔基象限（后右上 z<0）; pinned 冻结漂移。 */
+  const SHOWCASE_DIRS: THREE.Vector3[] = [
+    new THREE.Vector3(0.83, -0.55, 0).normalize(), // ① 正剖 z=0 · 右下区（默认视图直读）
+    new THREE.Vector3(0.62, -0.04, -0.78).normalize(), // ② 俯剖 y=0 · 右后区
+    new THREE.Vector3(0.03, -0.86, 0.51).normalize(), // ③ 侧剖 x=0 · 下方区
+  ];
+  const SHOWCASE_YAW = [0.22, 0.3, 0.15]; // 长轴沿 X 的微有机偏航（别于呆板平行）
   for (let i = 0; i < mitoCount; i++) {
     const g = new THREE.Group();
     // 外膜（透射）
     const outer = new THREE.Mesh(mitoOuterGeo, mitoOuterMat);
     outer.scale.set(1, 1, 0.82);
-    outer.renderOrder = 46;
+    // v22 剖面窗口化: 切面盘（renderOrder 96）后方的外膜剖开壳体绘制于盘后 ——
+    // 剖面视图下线粒体以真 3D 剖开形态呈现（替代旧版 2D 贴图; 同高尔基 v15 手法）
+    outer.renderOrder = cutaway ? 100 : 46;
     g.add(outer);
     // 基质（随外膜缩小, 与 2.3 长度匹配）
     const matrix = new THREE.Mesh(track(new THREE.CapsuleGeometry(0.35, 1.38, 6, 16)), mitoMatrixMat);
     matrix.scale.set(1, 1, 0.82);
-    matrix.renderOrder = 45;
+    matrix.renderOrder = cutaway ? 99.6 : 45; // v22 剖面窗口化（先于外膜壳绘制）
     g.add(matrix);
     // 板层嵴（合并为单几何）: 12 条 = 6 个 x 槽 × 双排（对应 2D 形态学两行波浪嵴线）
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
@@ -1269,7 +1282,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     }
     const cristae = new THREE.Mesh(track(mergeGeoms(parts)), cristaeMat);
     cristae.scale.set(1, 1, 0.82);
-    cristae.renderOrder = 47;
+    cristae.renderOrder = cutaway ? 100.4 : 47; // v22 剖面窗口化（嵴板层剖开直读）
     g.add(cristae);
     // 嵴膜 ATP 合酶（F1 颗粒, 发光）
     const atpGeo = track(new THREE.SphereGeometry(0.032, 5, 5));
@@ -1287,7 +1300,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         atps.setMatrixAt(k, mm);
       }
       atps.instanceMatrix.needsUpdate = true;
-      atps.renderOrder = 47;
+      atps.renderOrder = cutaway ? 100.6 : 47; // v22 剖面窗口化（嶋膜 F1 颗粒）
     }
     g.add(atps);
     // mtDNA 核样体（基质内 3 个亮斑 —— 母系基因组 + 线粒体核糖体; 低端设备省略）
@@ -1306,19 +1319,24 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       }
       const mtdna = new THREE.Mesh(track(mergeGeoms(mdParts)), mtdnaMat);
       mtdna.scale.set(1, 1, 0.82);
-      mtdna.renderOrder = 47;
+      mtdna.renderOrder = cutaway ? 100.5 : 47; // v22 剖面窗口化（mtDNA 核样体）
       g.add(mtdna);
     }
     // v6 体内形状化采样: 长轴端自动延展、窄轴处自动收缩, 并避开细胞核
-    const mDir = new THREE.Vector3(
+    // v22: 前 3 颗用示教锚方向（钉在 50% 切平面内）; 其余保持随机散布
+    const showcase = i < SHOWCASE_DIRS.length ? SHOWCASE_DIRS[i] : null;
+    const mDir = showcase ?? new THREE.Vector3(
       Math.cos((hash01(`m${i}`, 5) - 0.5) * 2.1) * Math.cos(hash01(`m${i}`, 7) * Math.PI * 2),
       Math.sin((hash01(`m${i}`, 3) - 0.5) * 2.1),
       Math.cos((hash01(`m${i}`, 5) - 0.5) * 2.1) * Math.sin(hash01(`m${i}`, 7) * Math.PI * 2),
     ).normalize();
-    const p = insidePos(mDir, 0.16 + hash01(`m${i}`) * 0.62, 1.15, 0.6);
+    const p = insidePos(mDir, showcase ? 0.14 : 0.16 + hash01(`m${i}`) * 0.62, 1.15, 0.6);
     g.position.set(p.x, p.y, p.z);
     // 取向: 长轴对齐 + 确定性抖动; 圆形细胞保持全随机
-    if (MITO_ALIGN === 'x') {
+    if (showcase) {
+      // v22 示教位: 长轴沿 X 落在切平面内（rotation.z = π/2）+ 微偏航 —— 剖面纵贯剖开
+      g.rotation.set(0.05, SHOWCASE_YAW[i], Math.PI / 2 + 0.05);
+    } else if (MITO_ALIGN === 'x') {
       g.rotation.set(hash01(`m${i}`, 9) * 0.24, hash01(`m${i}`, 11) * 2.1, Math.PI / 2 + (hash01(`m${i}`, 13) - 0.5) * 0.5);
     } else if (MITO_ALIGN === 'y') {
       g.rotation.set((hash01(`m${i}`, 9) - 0.5) * 0.4, hash01(`m${i}`, 11) * 2.1, (hash01(`m${i}`, 13) - 0.5) * 0.4);
@@ -1328,7 +1346,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     // 每颗随机长度 0.85~1.2×（update 动画仅改 position.y/rotation.y, 不覆盖 scale）
     g.scale.set(1, 0.85 + hash01(`ml${i}`) * 0.35, 1);
     group.add(g);
-    mitos.push({ obj: g, baseY: p.y, phase: hash01(`m${i}`, 17) * Math.PI * 2 });
+    mitos.push({ obj: g, baseY: p.y, phase: hash01(`m${i}`, 17) * Math.PI * 2, pinned: !!showcase });
     // v14 悬停锚点: 每颗线粒体各自感应（悬停任一颗即现「线粒体」标记）
     // v16: r 2.0→1.7 —— 线粒体本体半长约 1.15, 1.7 已宽松; 收敛后与 ER/高尔基锚点重叠区不再互扰
     hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: 1.7, zh: '线粒体（板层嵴）', latin: 'Mitochondrion', group: 'energy' });
@@ -1670,7 +1688,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       opacity: 0.45,
       roughness: 0.4,
     }));
-    ser.renderOrder = 45;
+    ser.renderOrder = cutaway ? 97.1 : 45; // v22 剖面窗口化（SER 管网剖开直读）
     group.add(ser);
     // v21 SER 管网多锚承担目录与感应（旧首管 label 派生锚退役）
     {
@@ -1887,7 +1905,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       }
     }
     inst.instanceMatrix.needsUpdate = true;
-    inst.renderOrder = 46;
+    inst.renderOrder = cutaway ? 97.2 : 46; // v22 剖面窗口化（运输囊泡逐颗剖开）
     group.add(inst);
     // v21 逐颗悬停锚承担目录与感应（旧首颗 label 派生锚 r=1.7 退役）
     void v0;
@@ -1949,7 +1967,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
           bodies.setMatrixAt(i, mm);
         }
         bodies.instanceMatrix.needsUpdate = true;
-        bodies.renderOrder = 46;
+        bodies.renderOrder = cutaway ? 97.8 : 46; // v22 剖面窗口化（溶酶体酸性体剖开直读）
         const dir = new THREE.Vector3();
         let si = 0;
         for (let i = 0; i < lysoN; i++) {
@@ -1964,7 +1982,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
           }
         }
         spks.instanceMatrix.needsUpdate = true;
-        spks.renderOrder = 47;
+        spks.renderOrder = cutaway ? 97.9 : 47; // v22 剖面窗口化（腔内水解酶颗粒直读）
       }
       group.add(bodies, spks);
       // v21 逐颗悬停锚（用户反馈「细胞器只能选中线粒体」—— 群体细胞器旧版仅首颗有锚,
@@ -2166,9 +2184,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
           cores.setMatrixAt(i, mm);
         }
         bodies.instanceMatrix.needsUpdate = true;
-        bodies.renderOrder = 46;
+        bodies.renderOrder = cutaway ? 97.4 : 46; // v22 剖面窗口化（过氧化物酶体剖开 + 晶核直读）
         cores.instanceMatrix.needsUpdate = true;
-        cores.renderOrder = 47;
+        cores.renderOrder = cutaway ? 97.5 : 47;
       }
       group.add(bodies, cores);
       // v21 逐颗悬停锚（用户标注「剖面的线粒体」实为过氧化物酶体 —— 椭圆体+致密晶核与线粒体近似,
@@ -2209,7 +2227,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       ).normalize();
       const p = insidePos(ldDir, 0.3 + hash01(`ldp${i}`) * 0.55, r + 0.08, 0.45);
       d.position.set(p.x, p.y, p.z);
-      d.renderOrder = 46;
+      d.renderOrder = cutaway ? 97.6 : 46; // v22 剖面窗口化（脂滴剖开）
       group.add(d);
       // v21 逐颗悬停锚（旧版仅首颗 label 派生锚 —— 指到其余脂滴无响应; 旧 label 退役）
       hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: r + 0.34, zh: '脂滴（中性脂）', latin: 'Lipid droplet', group: 'endomembrane' });
@@ -2425,7 +2443,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       inst.setMatrixAt(i, mm);
     }
     inst.instanceMatrix.needsUpdate = true;
-    inst.renderOrder = 46;
+    inst.renderOrder = cutaway ? 97.3 : 46; // v22 剖面窗口化（糖原玫瑰体剖开）
     group.add(inst);
     // v21 逐玫瑰体悬停锚承担目录与感应（旧首枚 label 派生锚退役）
     void gly0;
@@ -3213,6 +3231,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   const update = (t: number, ulk1 = 0) => {
     uTime.value = t;
     for (const m of mitos) {
+      // v22 示教锚线粒体冻结漂移/自转 —— 恒钉在 50% 切平面（剖开内部细节稳定直读）
+      if (m.pinned) continue;
       m.obj.position.y = m.baseY + Math.sin(t * 0.55 + m.phase) * 0.16;
       m.obj.rotation.y += 0.0016;
     }

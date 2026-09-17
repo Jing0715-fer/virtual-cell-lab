@@ -211,6 +211,12 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
     let bestScore = Infinity;
     /** v21 胜者真实像素距离（仲裁用 —— score 含惩罚项不可直接反推） */
     let bestPixelDist = Infinity;
+    /* v22 剖面模式锚点裁剪: 全局裁剪面（SectionClipController → gl.clippingPlanes）
+     * 前半被剖掉的细胞器视觉已剪除 —— 锚点同步不感应（悬停所见即所指; 用户反馈
+     * 「剖面下悬停不弹信息」的配套: 2D 贴图退役后真 3D 细胞器在剖面窗口可悬停,
+     * 而被剖掉的前半细胞器不再「隐形响应」）。分裂模式/常规模式 clippingPlanes 为空 → 不生效 */
+    const clipPlanes = state.gl.clippingPlanes;
+    const clip0 = clipPlanes && clipPlanes.length > 0 ? clipPlanes[0] : null;
     /** v21 双通道仲裁: 细胞器锤点命中（既有算法）与折线命中（信号边全段）分开评分,
      *  边仅在「明显更近」时胜出 —— 指向细胞器本体时永远显示细胞器（用户反馈「只显示pathway信息」根治） */
     let bestEdge: HoverTarget | null = null;
@@ -268,6 +274,10 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
         continue;
       }
       /* ---- 细胞器锤点通道（v20 既有算法） ---- */
+      if (clip0) {
+        tmp2.current.set(t.pos.x, t.pos.y, t.pos.z);
+        if (clip0.distanceToPoint(tmp2.current) < 0) continue; // v22 被剖掉的前半不感应
+      }
       tmp.current.set(t.pos.x, t.pos.y, t.pos.z).sub(ray.current.origin);
       const proj = tmp.current.dot(ray.current.direction);
       if (proj < 1) continue; // 相机背后/过近
