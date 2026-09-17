@@ -1281,59 +1281,91 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     // RER = 4-7 层连续大面积平滑弧形膜「千层饼」同心层叠包裹核 180°-270°, 层间紧密平行,
     // 顺核轮廓弯曲 + 局部细微皱褶; 核糖体「黄沙」随机满铺胞质面。
     // 旧「窄环带扫掠 + 外周囊池堆」读感为分散碎片/小椭球 —— 整体退役, 换 erLamellaGeometry 球冠壳层体系。
-    // 层数随分泌活性类型化: 肝细胞(分泌之王) 7 层 → 淋巴/神经元 4-5 层。
-    const layers = Math.max(3, perf ? 3 : Math.min(7, spec.erSheets + 3));
+    // v18 用户反馈「肝细胞的内质网没有按照双核来做」: 肝细胞双核 → 逐核实例循环 ——
+    // 每核各自完整的核周 RER 冠（外核膜延续的独立内膜系统, 双核肝细胞超微结构特征）;
+    // 次核冠轴镜像变体（开口同朝前下可读, 层缘花边相位独立; 双冠间片层交叠 = 参照图迷宫读感）。
+    const multi = nucleiInst.length > 1;
     const parts: { geo: THREE.BufferGeometry }[] = [];
     const allRiboPts: THREE.Vector3[] = [];
-    const layerDefs: ErLamellaLayer[] = [];
-    // 冠轴: 朝后上（开口朝前下 —— 默认相机正对核面裸区 + 冠缘层层错落可读, 参照图构图）
-    const crownAxis = new THREE.Vector3(0.16, 0.3, -0.94).normalize();
-    const erOpts: ErLamellaOpts = {
-      radiusAt: (d) => nucSurf(d),
-      center: nucC,
-      clampAt: (d) => cellSurf(d, R, SHAPE, -0.6),
-      vault: { dir: GOLGI_DIR, ang: 0.72, to: GOLGI_OUTER },
-    };
-    for (let L = 0; L < layers; L++) {
-      // 逐层冠轴微错位（±0.1 rad —— 层缘不齐 = 参照图「层叠迷宫」边缘读感）
-      const axis = crownAxis.clone();
-      axis.applyAxisAngle(new THREE.Vector3(0, 1, 0), (hash01(`erax${L}`) - 0.5) * 0.22);
-      axis.applyAxisAngle(new THREE.Vector3(1, 0, 0), (hash01(`eray${L}`) - 0.5) * 0.14);
-      const layer: ErLamellaLayer = {
-        offset: 0.16 + L * 0.155,
-        cone: 2.02 + L * 0.055, // 外层覆盖更广（向细胞质深处延伸）
-        axis: axis.normalize(),
-        seed: 5 + L * 13,
+    const erAnchors: { p: THREE.Vector3; big: boolean; label: boolean }[] = [];
+    nucleiInst.forEach((nucInst) => {
+      const primary = nucInst.tag === 'A';
+      const seedTag = primary ? 'er' : 'erB';
+      // 层数随分泌活性类型化: 肝细胞(分泌之王) 7 层 → 淋巴/神经元 4-5 层（双核时次核略减 1 层）
+      const layers = Math.max(3, perf ? 3 : Math.min(7, spec.erSheets + 3 - (primary || !multi ? 0 : 1)));
+      const nucCK2 = new THREE.Vector3(nucInst.center.x, nucInst.center.y, nucInst.center.z);
+      const Nn2 = N * nucInst.scale;
+      const seed2 = primary ? 7 : 23; // 与该核被膜同一 FBM 种子 —— 冠层严格贴合同一核面起伏
+      /** 该核面半径（与核被膜/核孔同源真源; 不含偏移） */
+      const surf2 = (dir: THREE.Vector3): number => {
+        const d = dir.clone().normalize();
+        return nucleusRadius(d, SHAPE, Nn2) + (fbm3(d.x * NUC_FREQ, d.y * NUC_FREQ, d.z * NUC_FREQ, 3, seed2) - 0.5) * 2 * nucAmp;
       };
-      layerDefs.push(layer);
-      parts.push({ geo: track(erLamellaGeometry({ ...erOpts, layer, thickness: 0.085, latSeg: perf ? 14 : 24, lonSeg: perf ? 30 : 52 })) });
-      // 「黄沙」核糖体: 每层 ~300 随机满铺（perf 减半; 旧带状体系 ~14k 实例 → 现 ~1.8k 大颗粒点彩）
-      const riboN = perf ? 110 : 300;
-      allRiboPts.push(...erLamellaRibosomes({ ...erOpts, layer }, riboN, `erL${L}`));
-    }
-    // 层间连接小管（ER 是单一连续膜系统 —— 少量可见「分支」连接卖连续性语义）
-    for (let c = 0; c < (perf ? 3 : 7); c++) {
-      const L = c % (layers - 1);
-      const layerA = layerDefs[L];
-      const layerB = layerDefs[L + 1];
-      const axis = layerA.axis;
-      const e1 = new THREE.Vector3(0, 1, 0).cross(axis).normalize();
-      const e2 = new THREE.Vector3().crossVectors(axis, e1).normalize();
-      const lon = hash01(`ercl${c}`) * Math.PI * 2;
-      const polar = 0.5 + hash01(`ercp${c}`) * 1.0;
-      const d = axis.clone().multiplyScalar(Math.cos(polar))
-        .addScaledVector(e1, Math.cos(lon) * Math.sin(polar))
-        .addScaledVector(e2, Math.sin(lon) * Math.sin(polar))
-        .normalize();
-      const rA = erLayerRadius(d, layerA, erOpts, e1, e2);
-      const rB = erLayerRadius(d, layerB, erOpts, e1, e2);
-      const a = nucC.clone().addScaledVector(d, rA - 0.04);
-      const b = nucC.clone().addScaledVector(d, rB - 0.04);
-      const mid = a.clone().lerp(b, 0.5).add(
-        new THREE.Vector3(hash01(`ercm${c}`) - 0.5, hash01(`ercm${c}`, 3) - 0.5, hash01(`ercm${c}`, 5) - 0.5).normalize().multiplyScalar(0.12),
+      // 冠轴: 主核朝后上（开口朝前下 —— 默认相机正对核面裸区 + 冠缘层层错落可读, 参照图构图）;
+      // 次核镜像变体 —— 双核冠开口同朝相机侧, 层缘花边相位独立（层叠迷宫读感不重复）
+      const crownAxis = primary
+        ? new THREE.Vector3(0.16, 0.3, -0.94).normalize()
+        : new THREE.Vector3(-0.2, 0.34, -0.92).normalize();
+      const erOpts: ErLamellaOpts = {
+        radiusAt: surf2,
+        center: nucCK2,
+        clampAt: (d) => cellSurf(d, R, SHAPE, -0.6),
+        // 高尔基扇区让位仅主核冠（囊堆挂主核旁）—— 次核方向性错开, 无需 vault
+        vault: primary ? { dir: GOLGI_DIR, ang: 0.72, to: GOLGI_OUTER } : null,
+      };
+      const layerDefs: ErLamellaLayer[] = [];
+      for (let L = 0; L < layers; L++) {
+        // 逐层冠轴微错位（±0.1 rad —— 层缘不齐 = 参照图「层叠迷宫」边缘读感）
+        const axis = crownAxis.clone();
+        axis.applyAxisAngle(new THREE.Vector3(0, 1, 0), (hash01(`${seedTag}ax${L}`) - 0.5) * 0.22);
+        axis.applyAxisAngle(new THREE.Vector3(1, 0, 0), (hash01(`${seedTag}ay${L}`) - 0.5) * 0.14);
+        const layer: ErLamellaLayer = {
+          offset: 0.16 + L * 0.155,
+          cone: 2.02 + L * 0.055, // 外层覆盖更广（向细胞质深处延伸）
+          axis: axis.normalize(),
+          seed: 5 + L * 13 + (primary ? 0 : 60), // 次核层花边相位独立
+        };
+        layerDefs.push(layer);
+        parts.push({ geo: track(erLamellaGeometry({ ...erOpts, layer, thickness: 0.085, latSeg: perf ? 14 : 24, lonSeg: perf ? 30 : multi ? 46 : 52 })) });
+        // 「黄沙」核糖体: 每层随机满铺（双核均摊 —— 总实例量与单核满配持平; perf 减半）
+        const riboN = perf ? 110 : multi ? 210 : 300;
+        allRiboPts.push(...erLamellaRibosomes({ ...erOpts, layer }, riboN, `${seedTag}L${L}`));
+      }
+      // 层间连接小管（ER 是单一连续膜系统 —— 少量可见「分支」连接卖连续性语义）
+      for (let c = 0; c < (perf ? 3 : 7); c++) {
+        const L = c % Math.max(1, layers - 1);
+        const layerA = layerDefs[L];
+        const layerB = layerDefs[Math.min(layers - 1, L + 1)];
+        const axis = layerA.axis;
+        const e1 = new THREE.Vector3(0, 1, 0).cross(axis).normalize();
+        const e2 = new THREE.Vector3().crossVectors(axis, e1).normalize();
+        const lon = hash01(`${seedTag}cl${c}`) * Math.PI * 2;
+        const polar = 0.5 + hash01(`${seedTag}cp${c}`) * 1.0;
+        const d = axis.clone().multiplyScalar(Math.cos(polar))
+          .addScaledVector(e1, Math.cos(lon) * Math.sin(polar))
+          .addScaledVector(e2, Math.sin(lon) * Math.sin(polar))
+          .normalize();
+        const rA = erLayerRadius(d, layerA, erOpts, e1, e2);
+        const rB = erLayerRadius(d, layerB, erOpts, e1, e2);
+        const a = nucCK2.clone().addScaledVector(d, rA - 0.04);
+        const b = nucCK2.clone().addScaledVector(d, rB - 0.04);
+        const mid = a.clone().lerp(b, 0.5).add(
+          new THREE.Vector3(hash01(`${seedTag}cm${c}`) - 0.5, hash01(`${seedTag}cm${c}`, 3) - 0.5, hash01(`${seedTag}cm${c}`, 5) - 0.5).normalize().multiplyScalar(0.12),
+        );
+        parts.push({ geo: track(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(a, mid, b), 8, 0.055, 6)) });
+      }
+      // 每冠悬停锚点: 后左/顶/后右可见缘（剖面视图恒可见象限; 主核顶锚承载标注）
+      const anchorAt = (lat: number, lon: number, ofs: number) => {
+        const dd = new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon));
+        const rr = Math.max(0.1, surf2(dd) + ofs);
+        return new THREE.Vector3(nucCK2.x + dd.x * rr, nucCK2.y + dd.y * rr, nucCK2.z + dd.z * rr);
+      };
+      erAnchors.push(
+        { p: anchorAt(0.62, 3.6, 0.72), big: true, label: primary },
+        { p: anchorAt(0.05, 4.1, 0.62), big: false, label: false },
+        { p: anchorAt(-0.3, 2.6, 0.62), big: false, label: false },
       );
-      parts.push({ geo: track(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(a, mid, b), 8, 0.055, 6)) });
-    }
+    });
     const er = new THREE.Mesh(track(mergeGeoms(parts)), mat({
       // v17 参照图严格还原: 薰衣草紫膜系（像素实测 199,189,218 亮带族）—— 与核同色系 = 内膜系统同源科学叙事
       color: REF.erSheet,
@@ -1375,17 +1407,12 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       ribos.renderOrder = cutaway ? 97.6 : 47;
     }
     group.add(ribos);
-    if (layers) {
-      // 标注/悬停锚点布在冠的后左/顶/后右可见缘（剖面视图恒可见象限）
-      const anchorAt = (lat: number, lon: number, ofs: number) =>
-        nucPoint(new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)), ofs);
-      const pTop = anchorAt(0.62, 3.6, 0.72);
-      labels.push({ pos: { x: pTop.x, y: pTop.y + 0.75, z: pTop.z }, zh: '粗面内质网（核糖体）', latin: 'Rough ER' });
-      hover.push({ pos: { x: pTop.x, y: pTop.y, z: pTop.z }, r: 2.1, zh: '粗面内质网（核糖体）', latin: 'Rough ER', group: 'endomembrane' });
-      const pL = anchorAt(0.05, 4.1, 0.62);
-      hover.push({ pos: { x: pL.x, y: pL.y, z: pL.z }, r: 1.9, zh: '粗面内质网（核糖体）', latin: 'Rough ER', group: 'endomembrane' });
-      const pR = anchorAt(-0.3, 2.6, 0.62);
-      hover.push({ pos: { x: pR.x, y: pR.y, z: pR.z }, r: 1.9, zh: '粗面内质网（核糖体）', latin: 'Rough ER', group: 'endomembrane' });
+    // 悬停锚点落位（每核冠 3 处 —— 双核肝细胞共 6 处; 顶锚 r 2.1/缘锚 1.9）
+    for (const { p, big, label } of erAnchors) {
+      if (label) {
+        labels.push({ pos: { x: p.x, y: p.y + 0.75, z: p.z }, zh: '粗面内质网（核糖体）', latin: 'Rough ER' });
+      }
+      hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: big ? 2.1 : 1.9, zh: '粗面内质网（核糖体）', latin: 'Rough ER', group: 'endomembrane' });
     }
   }
 

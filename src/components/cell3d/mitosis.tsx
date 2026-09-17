@@ -51,8 +51,8 @@ export interface MitosisPhaseInfo {
 export const MITOSIS_PHASES: MitosisPhaseInfo[] = [
   {
     key: 'interphase', zh: '间期', en: 'Interphase', latin: 'Interphase',
-    descZh: 'DNA 已复制（S 期）; 中心体已复制为两对; 染色质松散, 基因表达活跃',
-    descEn: 'DNA replicated (S phase); duplicated centrosomes; diffuse, active chromatin',
+    descZh: 'S 期 DNA 复制：复制叉沿染色质纤维推进，姐妹纤维成对加倍；中心体同步复制',
+    descEn: 'S-phase DNA replication: forks travel along fibers, sister fibers pair up; centrosomes duplicate',
   },
   {
     key: 'prophase', zh: '前期', en: 'Prophase', latin: 'Prophase',
@@ -116,6 +116,10 @@ interface ChromosomeObj {
   /** 姐妹染色单体 A/B（后期分离） */
   cA: THREE.Group;
   cB: THREE.Group;
+  /** 世界空间单体分离量（组缩放补偿后; 动粒微管端点消费同一真源） */
+  cZW: number;
+  /** 臂展局部半径（p/q 臂最大值 + 着丝粒偏移 —— 世界臂展 = armLocal·scl） */
+  armLocal: number;
   /** 赤道板位（metaphase plate, XY 平面） */
   plate: THREE.Vector3;
   /** 前期散布位（间期核内随机） */
@@ -251,6 +255,59 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   })();
   chromatinNet.renderOrder = 44;
   group.add(chromatinNet);
+  /* ---------- v18 S 期 DNA 复制可视化（用户反馈「染色质复制表现不清晰」） ----------
+   * 教科书语义: 间期 S 期 DNA 半保留复制 —— 每条染色质纤维复制出配对的姐妹纤维（双网成对），
+   * 复制叉（PCNA 滑动夹环）沿纤维双向推进 —— 金色光点行进 + 复制窗口发射脉冲 */
+  const chromatinMat2 = mat({
+    // 姐妹纤维（新生 DNA 链）: 更亮薰衣草 + 微暖发射 —— 与母本纤维同色系但明显可辨
+    color: '#bca8d0',
+    emissive: '#8a76a8',
+    emissiveIntensity: 0.62,
+    roughness: 0.5,
+    opacity: 0,
+    sheen: 0.4,
+    sheenColor: REF.sheen,
+  });
+  // 共享 chromatinNet 几何 + 明显偏移/缩放 → 「每条纤维旁多出一条姐妹纤维」的成对读感
+  // （QA 实测: 透过核被膜+质膜双层薄纱后姐妹网需更大偏移才可辨）
+  const chromatinNet2 = new THREE.Mesh(chromatinNet.geometry, chromatinMat2);
+  chromatinNet2.scale.setScalar(1.048);
+  chromatinNet2.rotation.y = 0.22;
+  chromatinNet2.renderOrder = 44;
+  chromatinNet2.visible = false;
+  group.add(chromatinNet2);
+  // 复制叉：沿核内纤维路径行进的亮金光点（perf 减半; QA 实测透过双层薄纱后需更大更亮才清晰）
+  const FORK_N = perf ? 6 : 12;
+  const forkMat = track(new THREE.MeshStandardMaterial({
+    color: '#ffd27a',
+    emissive: '#ffb020',
+    emissiveIntensity: 3.8,
+    roughness: 0.3,
+    transparent: true,
+    opacity: 0,
+  }));
+  const forks = new THREE.InstancedMesh(track(new THREE.SphereGeometry(0.115, 10, 8)), forkMat, FORK_N);
+  const forkCurves: THREE.CatmullRomCurve3[] = [];
+  for (let i = 0; i < FORK_N; i++) {
+    const pts: THREE.Vector3[] = [];
+    const baseLat = (hash01(`fk${i}`) - 0.5) * 2.0;
+    const baseLon = hash01(`fk${i}`, 3) * Math.PI * 2;
+    for (let kk = 0; kk <= 4; kk++) {
+      const tt = kk / 4;
+      const lat = baseLat + Math.sin(tt * 3.6 + i * 1.3) * 0.5;
+      const lon = baseLon + tt * 1.4 + Math.sin(tt * 2.8 + i) * 0.45;
+      const rr = NUC_R * (0.45 + hash01(`fkr${i}${kk}`) * 0.4);
+      pts.push(new THREE.Vector3(
+        Math.cos(lat) * Math.cos(lon) * rr,
+        Math.sin(lat) * rr,
+        Math.cos(lat) * Math.sin(lon) * rr,
+      ));
+    }
+    forkCurves.push(new THREE.CatmullRomCurve3(pts));
+  }
+  forks.visible = false;
+  forks.renderOrder = 47;
+  group.add(forks);
   // 核仁（rRNA 转录中心; 前期解体淡出）
   const nucleolus = new THREE.Mesh(
     track(new THREE.SphereGeometry(0.95, 20, 16)),
@@ -260,6 +317,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   nucleolus.renderOrder = 45;
   group.add(nucleolus);
   const nucleolusMatRef = nucleolus.material as THREE.MeshPhysicalMaterial;
+  const chromatinMat2Ref = chromatinMat2 as THREE.MeshPhysicalMaterial;
 
   /* ---------- 染色体（10 对 × 双姐妹染色单体 X 形） ---------- */
   const CHR_N = perf ? 8 : 10;
@@ -294,6 +352,11 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   for (let ci = 0; ci < CHR_N; ci++) {
     const g = new THREE.Group();
     const chrGeoShared = chromatidGeo(`chr${ci}`); // 姐妹单体共享同一（含臂比变异的）几何
+    // 臂展局部半径（收纳钳消费: 世界臂展 = armLocal·scl）
+    const armLocal = Math.max(
+      0.3 + hash01(`pchr${ci}`) * 0.22 + 0.14,
+      0.6 + hash01(`qchr${ci}`) * 0.5 + 0.14,
+    ) + 0.15;
     const makeChromatid = () => {
       const cg = new THREE.Group();
       const body = new THREE.Mesh(chrGeoShared, chrMat);
@@ -336,7 +399,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       Math.sin(hl) * hr,
       Math.cos(hl) * Math.sin(hn) * hr,
     );
-    chromosomes.push({ group: g, cA, cB, plate, home, spin: hash01(`sp${ci}`) * Math.PI * 2, delay: hash01(`dl${ci}`) * 0.18, kinA, kinB });
+    chromosomes.push({ group: g, cA, cB, cZW: 0.08, armLocal, plate, home, spin: hash01(`sp${ci}`) * Math.PI * 2, delay: hash01(`dl${ci}`) * 0.18, kinA, kinB });
   }
 
   /* ---------- 中心体（两对中心粒; 间期贴核 → 分离至两极） ---------- */
@@ -809,10 +872,11 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     const { L: memL, r: rProfile } = updateMembrane(t);
 
     /* 凝聚/去凝聚与不透明度 */
-    const condense = ramp(t, 0.15, 1.25); // 前期凝聚
+    // v18: 凝聚推迟到 0.42 起 —— 给 S 期复制可视化留出完整间期窗口（0-0.42 纤维态 + 复制叉行进）
+    const condense = ramp(t, 0.42, 1.45); // 前期凝聚
     const decondense = ramp(t, 4.3, 5.5); // 末期去凝聚
-    // 染色体凝聚可见 → 末期大幅淡出（去凝聚染色质融入双子核读感; v16: 0.55→0.7 —— 末/胞质期不悬垂）
-    const chrOpacity = clamp01(ramp(t, 0.1, 0.8) * (1 - ramp(t, 4.4, 5.6) * 0.7));
+    // 染色体凝聚可见（跟随凝聚时序）→ 末期大幅淡出（去凝聚染色质融入双子核读感; v16: 0.55→0.7）
+    const chrOpacity = clamp01(ramp(t, 0.5, 1.25) * (1 - ramp(t, 4.4, 5.6) * 0.7));
     chrMatRef.opacity = chrOpacity;
     centroMatRef.opacity = chrOpacity;
     kinMatRef.opacity = clamp01(ramp(t, 1.2, 1.7) * (1 - ramp(t, 3.05, 3.6)));
@@ -821,6 +885,25 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     nucleolusMatRef.opacity = 0.92 * (1 - ramp(t, 0.5, 1.1));
     chromatinNet.visible = chromatinMatRef.opacity > 0.02;
     nucleolus.visible = nucleolusMatRef.opacity > 0.02;
+    /* v18 S 期 DNA 复制：姐妹纤维成对淡入 + 复制叉行进 + 母本纤维发射脉冲 */
+    const repl = ramp(t, 0.04, 0.42); // 复制进度（间期前段完成）
+    const replWindow = repl * (1 - ramp(t, 0.42, 0.6)); // 复制活跃窗口（复制完成后脉冲退潮）
+    chromatinMat2Ref.opacity = 0.72 * repl * (1 - condense);
+    chromatinNet2.visible = chromatinMat2Ref.opacity > 0.02;
+    chromatinMatRef.emissiveIntensity = 0.42 + replWindow * (0.35 + Math.sin(uTime.value * 5) * 0.18);
+    forkMat.opacity = clamp01(replWindow * 1.6) * Math.min(1, (1 - condense) * 3);
+    forks.visible = forkMat.opacity > 0.03;
+    if (forks.visible) {
+      for (let i = 0; i < FORK_N; i++) {
+        // 复制叉沿纤维推进（相位错开 + 行进中脉冲缩放 —— PCNA 双向合成的动态读感）
+        const fp = clamp01(repl * 1.3 + hash01(`fks${i}`) * 0.22);
+        forkCurves[i].getPoint(fp, pv);
+        const fs = 0.9 + Math.sin(uTime.value * 7 + i * 1.9) * 0.25;
+        mm.compose(pv, qq.identity(), sc.setScalar(fs));
+        forks.setMatrixAt(i, mm);
+      }
+      forks.instanceMatrix.needsUpdate = true;
+    }
 
     /* 染色体运动学 */
     const congress = ramp(t, 1.4, 2.75); // 前中期汇集到赤道板
@@ -828,37 +911,52 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     const clusterTight = ramp(t, 4.0, 4.6); // 后期末聚拢于两极
     chromosomes.forEach((chr, ci) => {
       const g = chr.group;
+      // v18c 尺寸先解算: 组缩放会放大子节点局部偏移 —— 单体 z 偏移的世界量 = local·scl。
+      //   旧版 cZ 直接作 local 偏移 → 世界分离被 ~1.85× 放大（实测 cA 世界 z ±9.2, 戳出极帽 L=9.7）
+      //   —— 用户两轮「染色质飞出细胞外」的真根因; 收纳钳因此必须在世界空间解算后除回 scl。
+      const scl = (1.62 + hash01(`cs${ci}`) * 0.42) * (0.55 + condense * 0.45) * (1 + decondense * 0.12);
+      const armR = chr.armLocal * scl + 0.16; // 臂展世界半径（含着丝粒）
       // 位置: home（间期核内散布）→ plate（赤道板）; 个体微延迟 → 汇集不同步的自然读感
       const k = clamp01(congress + chr.delay * 0.12);
       vA.copy(chr.home).lerp(chr.plate, k);
-      // v16 收纳修复（用户反馈「染色质跑到细胞外」）:
-      //  ① 后期分离即开始 xy 收敛（外周染色体臂长 ~2.7, 不收敛会戳穿侧面膜面）
-      //  ② 末期去凝聚进一步向极区轴线聚拢 —— 配合 cZ 恒驻极区, 染色质团始终在子细胞腔内
       const tightXY = Math.max(0.1, 1 - clusterTight * 0.42 - segregate * 0.34 - decondense * 0.45);
-      // z: home.z → 0（板上; ramp 1.4-2.6 与汇集同步）
+      const yFac = 1 - clusterTight * 0.3 - segregate * 0.18;
       const flatZ = 1 - ramp(t, 1.4, 2.6) * 0.92;
-      g.position.set(vA.x * tightXY, vA.y * (1 - clusterTight * 0.3 - segregate * 0.18), vA.z * flatZ);
-      // 后期: 姐妹染色单体反向拉向两极（cA → −Z, cB → +Z; 群组 z 不动 —— 单体偏移承载极向运动）
+      const gz = vA.z * flatZ;
+      // 后期: 姐妹染色单体反向拉向两极（世界空间分离量; 动粒微管消费同一真源）
       const sepA = clamp01(segregate - chr.delay * 0.3);
       const reach = PZ * 0.92;
-      // v16 末期去向修复: 分离后恒驻极区（旧版 decondense×0.85 回拉向赤道 → 染色质悬垂在缢裂中桥区,
-      // 中桥膜半径仅 ~1.2 而染色质团伸展 ~4.4 —— 戳出膜外的直接根因; 现末期子核在极区包围重组）
-      const cZ = 0.08 + sepA * reach;
+      // v18c 世界空间收纳硬钳: 单体中心+臂展恒留膜内（z 极帽 0.9·L; xy 取单体 z 处回转面半径）
+      const stagW = (0.105 + sepA * 0.1) * scl; // 单体侧向错位世界半径
+      const zCapW = Math.max(0.6, memL * 0.9 - armR);
+      const cZW = Math.min(0.08 + sepA * reach, zCapW);
+      chr.cZW = cZW; // 动粒微管端点消费（世界坐标）
+      const cZ = cZW / Math.max(0.35, scl); // local 偏移 = 世界量 / 组缩放
+      const xyLim = Math.max(0.55, rProfile(((gz + cZW) / memL + 1) / 2) * 0.96 - armR - stagW);
+      const gx = THREE.MathUtils.clamp(vA.x * tightXY, -xyLim, xyLim);
+      const gy = THREE.MathUtils.clamp(vA.y * yFac, -xyLim, xyLim);
+      g.position.set(gx, gy, gz);
       chr.cA.position.z = -cZ;
       chr.cB.position.z = cZ;
       chr.cA.position.x = -0.105 - sepA * 0.1;
       chr.cB.position.x = 0.105 + sepA * 0.1;
-      // 旋转: 前期翻滚 → 中期定向（X 面正对相机, 着丝粒朝极）+ 中期振荡微动
+      // 旋转 v18 极轴对齐（用户反馈「后期染色质飞出细胞外 + 纺锤丝跑到细胞外」的共同根因）:
+      //  旧 rotation.y = spin（随机方位）→ 后期单体沿「随机方位」分离 —— spin≈±π/2 的染色体
+      //  横向（垂直于纺锤轴）戳穿赤道膜面; 且动粒微管端点公式假设局部 z = 世界 z, 与真实单体
+      //  位置脱节（纤维终点悬空 → 读感「纺锤丝跑出细胞」）。
+      //  修复: 中期定向时把每组 Y 旋转就近对齐到 π 的倍数（局部 z → 世界 ±z 纺锤极轴）——
+      //  X 形平面落入赤道板面、姐妹单体严格沿极轴分离、动粒微管端点与真实动粒重合;
+      //  页方位角由 rotation.z（绕板面法线 roll = spin 复用）承载 —— 「书页环绕纺锤轴」的
+      //  教科书中期 rosette 构图, 每条染色体朝向仍多样不呆板。
       const orient = ramp(t, 1.4, 2.4);
       const wobble = Math.sin(uTime.value * 2.4 + chr.spin * 5) * (1 - orient) * 0.9;
       const osc = Math.sin(uTime.value * 1.7 + chr.spin * 7) * 0.1 * orient * (1 - ramp(t, 3, 3.3));
+      const poleYaw = Math.round(chr.spin / Math.PI) * Math.PI; // 就近对齐 ±z（最小旋转行程）
       g.rotation.set(
         wobble * 0.6 + (1 - orient) * Math.sin(chr.spin * 3) * 2.2,
-        (1 - orient) * chr.spin * 4 + orient * chr.spin,
-        osc + wobble * 0.4,
+        (1 - orient) * chr.spin * 4 + orient * poleYaw,
+        (1 - orient) * wobble * 0.4 + orient * chr.spin + osc,
       );
-      // 尺寸: 凝聚收缩变粗 → 末期去凝聚微展舒（v16: 0.35→0.12 —— 舒展过大也会戳膜）
-      const scl = (1.62 + hash01(`cs${ci}`) * 0.42) * (0.55 + condense * 0.45) * (1 + decondense * 0.12);
       g.scale.setScalar(Math.max(0.001, scl * clamp01(ramp(t, 0.05, 0.6))));
     });
 
@@ -907,8 +1005,8 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
         for (const side of [-1, 1]) {
           const pole = vA.set(chr.group.position.x * 0.12, chr.group.position.y * 0.12, side * PZ);
           const centromere = vB.copy(chr.group.position);
-          // side=−1 极连接 cA 单体（z 负向）; side=+1 极连接 cB —— 直接取单体动粒 z
-          centromere.z = gz + (side < 0 ? chr.cA.position.z : chr.cB.position.z) + side * 0.12;
+          // v18c: 端点用世界分离量 cZW（组缩放补偿后的同一真源 —— 与真实动粒位置重合）
+          centromere.z = gz + (side < 0 ? -chr.cZW : chr.cZW) + side * 0.12;
           kDir.subVectors(centromere, pole);
           const len = kDir.length();
           kMid.addVectors(pole, centromere).multiplyScalar(0.5);
@@ -1075,6 +1173,8 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     if (phase === 0) {
       push('细胞核（核被膜）', 'Nuclear envelope', 0, 0, 0, 3.6);
       push('染色质（松散纤维）', 'Chromatin', 1.2, 0.8, -0.6, 2.4);
+      // v18: S 期复制可视化锚点（金色光点行进区 —— 悬停可指认复制叉语义）
+      push('复制叉（DNA 复制中）', 'Replication forks', -1.1, -0.7, 0.9, 2.0);
       push('核仁', 'Nucleolus', 0.6, 0.7, -0.5, 1.6);
       push('游离核糖体', 'Polysomes', 2.6, -2.0, 1.5, 2.4);
       // v16: 间期全套细胞器（用户反馈「分裂细胞没有 RER/高尔基」—— 悬停目录同步补齐）

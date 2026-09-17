@@ -90,6 +90,7 @@ export const ORG_INFO: Record<string, { zh: string; en: string }> = {
   'Terminal web': { zh: '终末网 · 微绒毛根部横行微丝网', en: 'Rootlet actin web of microvilli' },
   Microvilli: { zh: '微绒毛刷状缘 · 吸收面积极化放大', en: 'Brush border amplifying absorptive area' },
   'Binucleate (~25%)': { zh: '约 25% 肝细胞双核 · 胞质分裂未完成所致', en: 'Failed cytokinesis yields binucleation' },
+  'Replication forks': { zh: 'S 期复制叉 · PCNA 滑动夹环双向合成新 DNA 链（姐妹染色单体前体）', en: 'S-phase forks — PCNA clamps synthesizing sister DNA strands' },
 };
 
 /** 目录去重: 同名（zh+latin）多锚点只列一行（悬停层仍用全部锚点扩大感应域） */
@@ -164,11 +165,15 @@ export function OrganelleHoverLayer({ targets, enabled, locate }: {
       if (proj < 1) continue; // 相机背后/过近
       const perp2 = tmp.current.lengthSq() - proj * proj;
       if (perp2 > t.r * t.r) continue;
-      // v16 用户反馈「悬停不准: 有的线粒体不显示/错标为内质网」:
-      // 旧评分用绝对垂直距离 —— 大感应半径的 ER/质膜锚点（r≈2.5）恒抢占小锚点;
-      // 改为相对评分（垂直距离 / 感应半径）→ 射线穿过哪个锚点的「核心带」更深的那个胜出,
-      // 小而精确的细胞器锚点（线粒体 r≈1.7）在重叠区域反超大而模糊的冠层锚点 —— 命中与所见一致。
-      const score = Math.sqrt(perp2) / t.r;
+      // v16 相对评分: 垂直距离/感应半径 —— 射线穿过哪个锚点「核心带」更深谁胜出;
+      // v18 用户反馈「重叠时小的细胞器优先, 避免大的完全遮盖小的」:
+      //   相对评分之上再叠加尺寸惩罚项（0.25·r）—— 大感应半径的「区域级」锚点
+      //   （质膜 r≈2.8 / 子细胞 r≈3.2 / ER 冠 r≈2.2）在重叠区让位小而精确的细胞器
+      //   锚点（线粒体 r≈1.7 / 核仁 r≈1.6 / 囊泡 r≈1.4）。
+      //   例: 指针在线粒体上（perp 0.6 → 0.35+0.43=0.78）, ER 冠锚点虽也命中
+      //   （perp 1.2 → 0.57+0.53=1.10）—— 线粒体胜出, 与所见一致;
+      //   指针真在 ER 片层上时（perp 0.4 → 0.19+0.53=0.72）ER 仍胜出 —— 平衡不翻转。
+      const score = Math.sqrt(perp2) / t.r + 0.25 * t.r;
       if (score < bestScore) {
         bestScore = score;
         best = t;
