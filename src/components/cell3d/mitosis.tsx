@@ -611,8 +611,36 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   const actx = new THREE.InstancedMesh(track(new THREE.CapsuleGeometry(0.02, 0.7, 3, 5)), actxMat, ACTX_N);
   actx.renderOrder = 44;
   group.add(actx);
+  // v26b 子细胞微管阵列（末期双子细胞各绕子中心体重建 —— 「微管蛋白亚库重组装」叙事闭环:
+  //   间期阵列 [1.2,2.0] 退役 → 纺锤三族承载中期-后期 → 末期 [5.6,6.3] 双子阵列重建;
+  //   端点逐帧解算于子细胞球内 rD−0.35, 中心体位 = centA/centB 当前帧位）
+  const dauMTMat = mat({
+    color: REF.microtubule,
+    emissive: '#3f5c4a',
+    emissiveIntensity: 0.46,
+    roughness: 0.45,
+    normalMap: mtStripe,
+    normalScale: 0.5,
+    opacity: 0,
+    sheen: 0.4,
+    sheenColor: REF.sheen,
+  });
+  const DAU_MT_N = perf ? 10 : 16;
+  const dauMTDirs: THREE.Vector3[] = [];
+  for (let i = 0; i < DAU_MT_N * 3 && dauMTDirs.length < DAU_MT_N * 2; i++) {
+    const d = new THREE.Vector3(
+      Math.cos((hash01(`dm${i}`, 3) - 0.5) * 2.4) * Math.cos(hash01(`dm${i}`, 5) * Math.PI * 2),
+      Math.sin((hash01(`dm${i}`, 7) - 0.5) * 2.4),
+      Math.cos((hash01(`dm${i}`, 3) - 0.5) * 2.4) * Math.sin(hash01(`dm${i}`, 5) * Math.PI * 2),
+    ).normalize();
+    dauMTDirs.push(d);
+  }
+  const dauMTs = new THREE.InstancedMesh(track(new THREE.CylinderGeometry(0.028, 0.028, 1, 5)), dauMTMat, Math.max(2, dauMTDirs.length));
+  dauMTs.renderOrder = 43;
+  group.add(dauMTs);
   const interMatRef = interMat as THREE.MeshPhysicalMaterial;
   const actxMatRef = actxMat as THREE.MeshPhysicalMaterial;
+  const dauMTMatRef = dauMTMat as THREE.MeshPhysicalMaterial;
 
   /* ---------- 核被膜（崩解碎片 + 双子核重组） ---------- */
   const neMat = mat({
@@ -1365,6 +1393,45 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       actx.visible = false;
     }
 
+    /* v26b 子细胞微管阵列: 末期双子细胞各绕子中心体重建 [5.6,6.3]（间期阵列退役 →
+     * 纺锤三族 → 双子阵列 —— 微管蛋白亚库重组装叙事闭环; 端点解算于子细胞球内） */
+    const dauMTOp = clamp01(ramp(t, 5.6, 6.3));
+    dauMTMatRef.opacity = dauMTOp * 0.6;
+    if (dauMTOp > 0.01) {
+      const half = Math.floor(dauMTDirs.length / 2);
+      const mtoD: THREE.Vector3[] = [centA.position, centB.position];
+      let dm = 0;
+      for (let side = 0; side < 2; side++) {
+        const mtc = mtoD[side];
+        const ctr = vC.set(side === 0 ? 0 : 0, 0, side === 0 ? -zD : zD); // 子细胞球心
+        for (let i = 0; i < half; i++) {
+          const d = dauMTDirs[side * half + i];
+          // 端点: |mtc + d·len − ctr| ≤ rD−0.35 二次方程正根
+          const rel = vA.copy(mtc).sub(ctr);
+          const b = rel.dot(d);
+          const c = (Math.max(1, rD) - 0.35) ** 2 - rel.lengthSq();
+          const len = Math.max(0.4, -b + Math.sqrt(Math.max(0.01, b * b + c)));
+          vA.copy(mtc);
+          vB.copy(d).multiplyScalar(len).add(vA);
+          kDir.subVectors(vB, vA);
+          const kl = Math.max(0.01, kDir.length());
+          kMid.addVectors(vA, vB).multiplyScalar(0.5);
+          kQuat.setFromUnitVectors(kUp, kDir.normalize());
+          kScale.set(1, kl, 1);
+          kM.compose(kMid, kQuat, kScale);
+          dauMTs.setMatrixAt(dm++, kM);
+        }
+      }
+      for (; dm < dauMTs.count; dm++) {
+        kM.makeScale(0, 0, 0);
+        dauMTs.setMatrixAt(dm, kM);
+      }
+      dauMTs.instanceMatrix.needsUpdate = true;
+      dauMTs.visible = true;
+    } else {
+      dauMTs.visible = false;
+    }
+
     /* v22 QA 插桩: 纺锤纤维膜外越界测量（__spindleQaProbe 门控 —— 实测实例矩阵逐段采样,
      * 与渲染像素无关的数值真源; 常态零成本） */
     if (typeof window !== 'undefined' && (window as { __spindleQaProbe?: boolean }).__spindleQaProbe) {
@@ -1618,6 +1685,12 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       push('微管（间期放射阵列）', 'Interphase microtubules', mtoC.x + 1.4, mtoC.y + 0.6, mtoC.z + 1.1, 2.2);
       const aDir = new THREE.Vector3(0.42, 0.18, 0.89).normalize().multiplyScalar(R_CELL - 0.6);
       push('皮层肌动蛋白网', 'Cortical actin', aDir.x, aDir.y, aDir.z, 2.4);
+    }
+    // v26b 子细胞微管阵列锚点（分离完成相位 —— 双子细胞各自重建的骨架可发现）
+    if (phase >= 7) {
+      const zD7 = THREE.MathUtils.lerp(5.55, 7.35, ramp(Math.min(6.9, PHASE_BOUNDS[phase] + 0.4), 6.15, 7));
+      push('微管（子细胞放射阵列）', 'Daughter cell microtubules', 1.6, 0.4, -zD7 + 1.2, 2.2);
+      push('微管（子细胞放射阵列）', 'Daughter cell microtubules', -1.6, 0.4, zD7 - 1.2, 2.2);
     }
     // v20 线粒体锚点逐颗跟随相位（用户反馈「黄圈里的线粒体悬停无反应」）:
     //   旧版仅 2 个静态锚（间期位）—— 8 颗线粒体大多不在感应域内; 现按 update 同源运动学
