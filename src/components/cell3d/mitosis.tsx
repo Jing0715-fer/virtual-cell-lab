@@ -1395,6 +1395,68 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
         }
         push('线粒体（暖古铜）', 'Mitochondrion', x, y, z, 1.25);
       });
+      // v23 囊泡/核糖体锚点逐颗跟随（与 update 同源运动学去漂移版 —— 旧版仅间期/末期各 1 个
+      // 静态近似锚, 中后期实际位置脱锚; 现取代表颗逐颗求解, 锚点=渲染位恒一致）
+      vesSeeds.forEach((vs2, i) => {
+        if (i >= 7) return; // 代表颗（隔半取; 本体 r 0.14-0.26 → 锚 0.55）
+        const toZ = vs2.side * THREE.MathUtils.lerp(2.0, 6.6, ramp(tA, 4.8, 7));
+        let x = Math.cos(vs2.ang) * vs2.rad * (1 - partA * 0.35);
+        let y = vs2.y * (1 - partA * 0.45);
+        let z = THREE.MathUtils.lerp(0, toZ, partA);
+        if (tA < 6.6) {
+          if (Math.abs(z) > aL * 0.94) z = Math.sign(z) * aL * 0.94;
+          const u = (z / aL + 1) / 2;
+          const rr = Math.max(0.12, aR(u) * 0.97 - 0.3);
+          const rc = Math.hypot(x, y);
+          if (rc > rr) {
+            const kk = rr / rc;
+            x *= kk;
+            y *= kk;
+          }
+        } else {
+          const s = z >= 0 ? 1 : -1;
+          const dz = z - s * zD_A;
+          const dd = Math.hypot(x, y, dz);
+          const lim = Math.max(0.3, rD_A - 0.42);
+          if (dd > lim) {
+            const kk = lim / dd;
+            x *= kk;
+            y *= kk;
+            z = s * zD_A + dz * kk;
+          }
+        }
+        push('运输囊泡', 'Transport vesicle', x, y, z, 0.55);
+      });
+      ribSeeds.forEach((rs2, i) => {
+        if (i % 30 !== 0 || i >= 120) return; // 4 颗代表（i=0/30/60/90; perf 模式 2 颗）
+        const toZ = rs2.side * THREE.MathUtils.lerp(1.5, 6.9, ramp(tA, 4.6, 7));
+        let x = Math.cos(rs2.ang) * rs2.rad * (1 - partA * 0.3);
+        let y = rs2.y * (1 - partA * 0.5);
+        let z = THREE.MathUtils.lerp(0, toZ, partA);
+        if (tA < 6.6) {
+          if (Math.abs(z) > aL * 0.94) z = Math.sign(z) * aL * 0.94;
+          const u = (z / aL + 1) / 2;
+          const rr = Math.max(0.12, aR(u) * 0.97 - 0.2);
+          const rc = Math.hypot(x, y);
+          if (rc > rr) {
+            const kk = rr / rc;
+            x *= kk;
+            y *= kk;
+          }
+        } else {
+          const s = z >= 0 ? 1 : -1;
+          const dz = z - s * zD_A;
+          const dd = Math.hypot(x, y, dz);
+          const lim = Math.max(0.3, rD_A - 0.32);
+          if (dd > lim) {
+            const kk = lim / dd;
+            x *= kk;
+            y *= kk;
+            z = s * zD_A + dz * kk;
+          }
+        }
+        push('游离核糖体', 'Polysomes', x, y, z, 0.5);
+      });
     }
     if (phase === 0) {
       push('细胞核（核被膜）', 'Nuclear envelope', 0, 0, 0, 3.6);
@@ -1402,12 +1464,11 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       // v18: S 期复制可视化锚点（金色光点行进区 —— 悬停可指认复制叉语义）
       push('复制叉（DNA 复制中）', 'Replication forks', -1.1, -0.7, 0.9, 2.0);
       push('核仁', 'Nucleolus', 0.6, 0.7, -0.5, 1.6);
-      push('游离核糖体', 'Polysomes', 2.6, -2.0, 1.5, 2.4);
       // v16: 间期全套细胞器（用户反馈「分裂细胞没有 RER/高尔基」—— 悬停目录同步补齐）
+      // v23: 游离核糖体/运输囊泡改逐颗跟随锚（上方块）—— 静态近似锚退役
       push('粗面内质网（核糖体冠）', 'Rough ER', -2.35, 1.5, -2.9, 2.2);
       push('粗面内质网（核糖体冠）', 'Rough ER', -2.6, -1.7, 2.1, 2.2);
       push('高尔基体（扁平囊堆）', 'Golgi apparatus', 2.72, -0.83, 2.63, 2.0);
-      push('运输囊泡', 'Transport vesicle', -3.1, 2.2, -1.2, 1.6);
     }
     if (phase === 1 || phase === 2) {
       push('凝聚中的染色体', 'Condensing chromosomes', -1.8, 1.4, 0.8, 2.6);
@@ -1441,7 +1502,6 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       const dzT = [0, 0, 0, 0, 4.2, 5.2, 6.2, 7.0][phase] ?? 4.4;
       push('子代核被膜（重组）', 'Daughter envelope', 0, 0, -dzT, 2.4);
       push('子代核被膜（重组）', 'Daughter envelope', 0, 0, dzT, 2.4);
-      push('游离核糖体', 'Polysomes', 2.6, -2.0, 3.0, 2.4);
     }
     if (phase >= 5) {
       // v16: 末期重建的子代 RER 冠 + 高尔基栈（核旁位, 悬停可指认; v19 跟随分离后子细胞中心）

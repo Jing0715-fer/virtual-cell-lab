@@ -1762,3 +1762,70 @@ Stage Summary:
 - 下阶段建议: ①溶酶体/过氧化物酶体也可加 50% 示教锚（晶核/颗粒剖开直读同样精彩）
   ②剖面盘基质底噪可加「切面掠过细胞器」的动态剖面阴影（体积渲染风味）③示教位在剖面
   轴切换时给一次性标注提示（教学引导）④分裂演示游离核糖体/囊泡锚点相位跟随（Task 21 遗留）
+
+---
+Task ID: 24
+Agent: 主协调 Agent (Z.ai Code)
+Task: v23 用户反馈「细胞器中心没有放在 50% depth 上面」根治（剖面示教锚动态吸附真实切平面）+ 项目打磨（溶酶体/过氧化物酶体示教个体 · 分裂演示逐颗锚/seek 暂停 · 信号边源靶分子对）
+
+Work Log:
+- 【根因诊断（v22 静态钉位双缺陷）】
+  · 缺陷①: v22 示教锚按「纯轴向平面」(z=0/y=0/x=0)钉静态位置 —— 但真实切平面法向是倾斜的
+    （SECTION_ORIENTS: front=(0,-0.215,-0.977) 等），50% depth 时平面为过原点的斜面 n·p=0，
+    静态钉位的线粒体中心不在其上（首轮实测仅锚①贴合 -0.014, 其余偏 0.25-0.7）
+  · 缺陷②: 深度滑块拖动时平面扫掠（constant = Rn − depth·2Rn）, 示教锚完全静止
+  · 中间版失误实录（防回归）: 第一版径向核避让/径向膜钳把锚推出平面（50% 平面恰穿过核 ——
+    径向避让必然破坏贴合, 实测偏 1.6）; ±0.62R 平移量钳在浅切层造成脱贴（26% 实测 3.69）
+- 【v23 动态吸附体系（organelles.tsx —— 数学不变量: 所有钳制沿「面内」进行, 中心恒满足 n·p+c=0）】
+  · 单一真源: update(t, ulk1, clip) 每帧读 gl.clippingPlanes[0]（SectionClipController 同源,
+    CellBody useFrame 注入）; 7 步管线: ① home 沿法向投影到平面（无平移量钳 —— 面内钳制体系
+    自然处理极端深度）→ ② 核避让（面内交圆: f=核心垂足, r=√(safe²−δ²) —— 双核跑两轮）→
+    ③ 膜内钳（面内收缩: 沿细胞中心垂足方向收至 ρ=√((r(u)−margin)²−c²)）→ ④ 线粒体长轴端点
+    膜内钳 + ④b 再投影（清除拉回的法向分量）→ ⑤⑥ 位置 lerp 0.22/朝向 slerp 0.2（长轴投影到
+    面内 → 纵贯剖开）→ ⑦ syncRefs 引用同步（悬停锤点+标注锚跟随本体 —— 悬停所指即所在,
+    定位飞行也飞到吸附位）
+  · ShowcaseAnchor 接口: {obj, home, homeQ, longAxis, halfLen, avoidR, syncRefs};
+    无剖面时平滑回归 home 驻位/朝向
+- 【v23 溶酶体/过氧化物酶体剖面示教个体（cutaway-only, 独立建模不入 InstancedMesh）】
+  · 溶酶体: 0.36 球 + 腔内 26 颗水解酶颗粒子组（整体迁移）; 过氧化物酶体: 0.32 球 +
+    尿酸氧化酶晶核（致密芯剖面直读主角）; home 方位避开线粒体三示教位与高尔基象限;
+    常规视图不添加（零回归 —— 关闭剖面重建后 anchors 从 5 → 3 实证）
+- 【hover-labels.tsx v23 配套】
+  · 剖面悬停裁剪容差 -0.12: 示教锚中心恰在切平面上（distance≈0）且拖深度时短暂越面前侧
+    （lerp 追赶中）→ 无容差会闪烁; 被完整剖掉的锚不受影响
+  · HoverTarget.note 副题行: 信号边源/靶分子对（抑制族 ┤ 拦截符 / 激活族 →）+ .anatomy-card-note
+    mono 样式（非斜体分子对读感）
+- 【virtual-cell-3d.tsx v23】edgeHoverTarget 增 source/target → nodeLabelMap（id→label）→
+  note「RAF1 ┤ MAP2K1」; 70 条边全带
+- 【mitosis.tsx v23】囊泡(前 7 颗)/核糖体(每 30 颗取 1 代表)锚点逐颗跟随 —— 与 update 同源
+  运动学去漂移版（膜内钳+子细胞球钳同语义）; 旧静态近似锚（间期/末期各 1 个）退役
+- 【virtual-cell-3d.tsx】seek 即暂停细看: seekMitosis(phase, playing=false)（chip 点击 → 跳转
+  并暂停「翻到某一页细看」语义; openMitosis 传 true 自动开播）
+- QA（agent-browser 交互级+数值级; lint 零错误; tsc cell3d 零错误; dev.log 全 200; 控制台零错误）:
+  · __showcaseQa 活体插桩（anchors pos/home + plane n/c）: 50% depth maxAbs=0.031（5 颗全贴合,
+    含 RAF 节流多轮唤醒收敛方法论）; 26% depth maxAbs=0.013; 俯剖方位切换 maxAbs=0.075;
+  · 关闭剖面: plane=null + 回 home（溶酶体/过氧化物酶体示教个体随 cutaway 重建正确移除）
+  · 定位→悬停→卡: 线粒体/溶酶体/过氧化物酶体三卡全弹出 + 视网膜环 + 定位目标=吸附位
+    （planeDist=0 —— syncRefs 引用同步实证）
+  · 分裂演示: seek 后播放按钮变「播放」（暂停生效）; 逐颗锚库存 ves×7/rib×2/mito×5
+    （perf 模式数量正确）; phase=6 seek 精确
+  · 信号边: canvas PointerEvent 中心悬停 → 「信号边 · 激活」+ note「TRAF2 → MAP3K5」渲染 ✓
+  · 方法论沉淀: ①合成事件必须 dispatch 到 canvas 元素且用 PointerEvent（window MouseEvent
+    只能唤醒 RAF 不能驱动 R3F state.pointer）②SwiftShader RAF 空闲节流 → 「事件+等待交错」
+    多轮唤醒后读数（lerp 收敛类验证必须判定收敛完成, 中间态会误报「脱贴」）③locate 强制窗口
+    2.4s —— 点击后立即唤醒+快读
+- 产出: organelles.tsx（ShowcaseAnchor 体系 + 溶酶体/过氧化物酶体示教个体 + __showcaseQa 插桩）/
+  hover-labels.tsx（裁剪容差 + note 行）/ virtual-cell-3d.tsx（nodeLabelMap + seek 暂停）/
+  mitosis.tsx（囊泡/核糖体逐颗锚）/ globals.css（.anatomy-card-note）
+
+Stage Summary:
+- 用户指名诉求「细胞器中心没有放在 50% depth 上」彻底根治: v22 静态钉位按纯轴向平面设计而真实
+  切平面法向倾斜 + 深度扫掠不跟随 —— v23 动态吸附（面内钳制数学不变量 n·p+c=0）后 5 颗示教
+  个体在 50%/26%/俯剖全场景 maxAbs ≤ 0.075（0.75‰ 细胞半径）
+- 核心架构沉淀: ①「面内钳制」是剖面吸附的正确几何 —— 50% 平面过核, 径向避让/钳制必然破坏
+  贴合, 核避让走「核安全球∩切平面」交圆、膜钳走面内收缩 ②锚点引用同步（syncRefs）让悬停/
+  定位/标注天然跟随动态本体 ③QA 判定收敛完成再读数（RAF 节流中间态误报教训）
+- 遗留/风险: ①SwiftShader QA 帧率慢（用户真实浏览器 60fps 下吸附收敛 ~0.3s）②SimEvent 双语化/
+  PDF EN（Task 22 遗留）③悬停目录「逐颗实例」分组展示（如 过氧化物酶体 ×4 列表）未做
+- 下阶段建议: ①悬停目录面板逐颗实例分组 ②「发表模式」截图按钮 ③减数分裂演示（复用相位时钟
+  + 示教个体手法）④剖面盘「切面掠过细胞器」动态剖面阴影（体积渲染风味）

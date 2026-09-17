@@ -43,6 +43,8 @@ export interface HoverTarget {
   kind?: 'organelle' | 'edge';
   /** v21 外部引用 id（边 id —— 整线高亮联动） */
   refId?: string;
+  /** v23 副题行（信号边源/靶分子对等补充信息 —— 悬停卡 latin 副题下渲染） */
+  note?: string;
 }
 
 export type HoverGroupKey = 'nuclear' | 'endomembrane' | 'energy' | 'cytoskeleton' | 'surface' | 'specialized';
@@ -276,7 +278,9 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
       /* ---- 细胞器锤点通道（v20 既有算法） ---- */
       if (clip0) {
         tmp2.current.set(t.pos.x, t.pos.y, t.pos.z);
-        if (clip0.distanceToPoint(tmp2.current) < 0) continue; // v22 被剖掉的前半不感应
+        // v23 容差 -0.12: 示教锚中心恰在切平面上（distance≈0）且拖深度时短暂越面前侧
+        // （lerp 追赶中）→ 无容差会闪烁消失; 被完整剖掉的锚（distance 很负）不受影响
+        if (clip0.distanceToPoint(tmp2.current) < -0.12) continue; // v22 被剖掉的前半不感应
       }
       tmp.current.set(t.pos.x, t.pos.y, t.pos.z).sub(ray.current.origin);
       const proj = tmp.current.dot(ray.current.direction);
@@ -375,6 +379,7 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
                 )}
               </div>
               <div className="anatomy-card-sub">{lang === 'zh' ? show.latin : show.zh}</div>
+              {show.note && <div className="anatomy-card-sub anatomy-card-note">{show.note}</div>}
               {info && <div className="anatomy-card-desc">{lang === 'zh' ? info.zh : info.en}</div>}
             </div>
           </div>

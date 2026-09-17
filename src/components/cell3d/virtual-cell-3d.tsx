@@ -55,16 +55,22 @@ const EDGE_HOVER_KIND: Record<string, { zh: string; latin: string; accent: strin
 };
 
 /** v21 信号边悬停目标: 每边一个折线命中体（全段任意点可悬停 —— 用户反馈「必须放线的中心才能显示」根治）
- *  kind:'edge' 双通道仲裁让位于细胞器; refId 回传整线高亮 */
-function edgeHoverTarget(edge: { id: string; points: Vec3[]; kind: string }): HoverTarget[] {
+ *  kind:'edge' 双通道仲裁让位于细胞器; refId 回传整线高亮
+ *  v23 note 副题行: 源/靶分子对（如 "RAF1 ┤ MAP2K1" —— 抑制族用 ┤ 拦截符, 激活族用 →） */
+function edgeHoverTarget(edge: { id: string; points: Vec3[]; kind: string; source?: string; target?: string }, labelOf: (id: string) => string | undefined): HoverTarget[] {
   const meta = EDGE_HOVER_KIND[edge.kind];
   if (!meta || edge.points.length < 2) return [];
+  const s = edge.source ? labelOf(edge.source) : undefined;
+  const t = edge.target ? labelOf(edge.target) : undefined;
+  const arrow = edge.kind === 'inhibition' || edge.kind === 'repression' || edge.kind === 'dephosphorylation' ? ' ┤ ' : ' → ';
+  const note = s && t ? `${s}${arrow}${t}` : undefined;
   return [{
     pos: edge.points[Math.floor(edge.points.length / 2)],
     r: 0.6,
     zh: meta.zh,
     latin: meta.latin,
     accent: meta.accent,
+    note,
     poly: edge.points,
     kind: 'edge',
     refId: edge.id,
@@ -319,9 +325,15 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, cutaway, sim, sna
     [baseLayout, snapPlane],
   );
   // v21 信号边悬停目标（每边一个折线命中体 —— 全段可悬停; 仅主视图信号层存在时）
+  // v23 note 源/靶分子对: 节点 id → label 映射（合成配体等无基因名节点回退显示名）
+  const nodeLabelMap = useMemo(() => {
+    const m = new Map<string, string>();
+    if (layout) for (const n of layout.nodes) m.set(n.id, n.label);
+    return m;
+  }, [layout]);
   const edgeHover = useMemo(
-    () => (layout ? layout.edges.flatMap((e) => edgeHoverTarget(e)) : []),
-    [layout],
+    () => (layout ? layout.edges.flatMap((e) => edgeHoverTarget(e, (id) => nodeLabelMap.get(id))) : []),
+    [layout, nodeLabelMap],
   );
 
   if (!layout) return null;
@@ -499,11 +511,13 @@ export function VirtualCell3D() {
     const el = mitoProgressRef.current;
     if (el) el.style.width = `${Math.min(1, Math.max(0, frac)) * 100}%`;
   }, []);
-  const seekMitosis = useCallback((phase: number) => {
+  /** v23 seek 即暂停细看: 相位 chip 点击 → 跳到该相位并暂停（「翻到某一页细看」语义;
+   *  播放按钮继续推进）; openMitosis 打开时传 playing=true 自动开播 */
+  const seekMitosis = useCallback((phase: number, playing = false) => {
     mitoSeekNonce.current += 1;
     setMitoSeek({ phase, nonce: mitoSeekNonce.current });
     setMitoPhase(phase);
-    setMitoPlaying(true);
+    setMitoPlaying(playing);
   }, []);
   const openMitosis = (next: boolean) => {
     setMitosis(next);
@@ -513,7 +527,7 @@ export function VirtualCell3D() {
       setTourOpen(false);
       setOrgIndexOpen(false);
       setCamMode('overview');
-      seekMitosis(0);
+      seekMitosis(0, true);
       // 相机飞近分裂舞台（复用定位飞行: 目标原点, 距离 23 —— 染色体主角可读尺寸）
       locateNonce.current += 1;
       setLocateReq({ nonce: locateNonce.current, target: { pos: { x: 0, y: 0, z: 0 }, r: 3, zh: 'mitosis', latin: 'stage' }, dist: 23 });

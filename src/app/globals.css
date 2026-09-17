@@ -429,6 +429,13 @@
   font-style: italic;
   color: #94a3b8; /* slate-400 —— pathway 卡副题行 */
 }
+/* v23 信号边源/靶分子对副题（非斜体 mono —— 分子对读感与标题同族） */
+.anatomy-card-note {
+  font-style: normal;
+  font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.02em;
+  color: #cbd5e1; /* slate-300 */
+}
 .anatomy-card-desc {
   margin-top: 4px;
   padding-top: 4px;
@@ -551,6 +558,9 @@
   }
   .anatomy-card-sub {
     font-size: 9.5px;
+  }
+  .anatomy-card-note {
+    font-size: 10px;
   }
   .anatomy-card-desc {
     font-size: 9px;

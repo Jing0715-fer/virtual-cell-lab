@@ -57,8 +57,9 @@ export interface AnatomyLabel {
 
 export interface CellBodyBuild {
   group: THREE.Group;
-  /** 帧驱动; ulk1 = 自噬驱动水平（0-1, 缺省 0 —— 无 ULK1 通路自噬系统静默） */
-  update: (t: number, ulk1?: number) => void;
+  /** 帧驱动; ulk1 = 自噬驱动水平（0-1, 缺省 0 —— 无 ULK1 通路自噬系统静默）;
+   *  clip = 全局裁剪平面（剖面模式单一真源 —— v23 示教锚动态吸附） */
+  update: (t: number, ulk1?: number, clip?: THREE.Plane | null) => void;
   labels: AnatomyLabel[];
   /** v14 悬停标记目标（全细胞器 —— 含多锚点同名目标, 感应域并集） */
   hover: HoverTarget[];
@@ -1191,6 +1192,31 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     hover.push({ pos: mid, r: N * 0.55, zh: '双核 ×2（约 25% 肝细胞）', latin: 'Binucleate (~25%)', group: 'nuclear' });
   }
 
+  /* ================= 剖面示教锚体系（v23 —— 用户反馈「细胞器中心没有放在 50% depth 上」根治） =================
+   * v22 缺陷复盘: 旧示教锚按「纯轴向平面」(z=0 / y=0 / x=0)钉静态位置 —— 但真实切平面法向是倾斜的
+   *   （SECTION_ORIENTS: front=(0,-0.22,-1) 等），50% depth 时平面为过原点的斜面 n·p=0，
+   *   静态钉位的线粒体中心不在其上；且深度滑块拖动时平面扫掠（constant = Rn − depth·2Rn），
+   *   示教锚完全静止 —— 用户拖到任何深度，细胞器中心都脱离切平面。
+   * v23 方案: 示教个体每帧读 gl.clippingPlanes[0]（SectionClipController 单一真源），把中心「动态吸附」
+   *   到当前切平面（home 沿法向投影），配套核避让 / 膜内钳 / 长轴对齐面内 / 悬停锚引用同步。
+   *   平滑 lerp 追随 —— 拖深度时示教细胞器「贴着切面滑动」，切到哪层剖到哪层（逐层切片教学语义）。 */
+  interface ShowcaseAnchor {
+    obj: THREE.Object3D;
+    /** 非剖面模式驻位（构建时 insidePos 采样） */
+    home: THREE.Vector3;
+    /** 非剖面模式朝向 */
+    homeQ: THREE.Quaternion;
+    /** 长轴个体（线粒体）：长轴投影到切面内 → 纵贯剖开; 球体（溶酶体/过氧化物酶体）false */
+    longAxis: boolean;
+    /** 长轴半长（端点膜内钳; 球体 0） */
+    halfLen: number;
+    /** 核避让安全半径（本体半宽 + 裕量） */
+    avoidR: number;
+    /** 同步改写的引用（悬停锤点/标注锚 —— 吸附后跟随本体, 悬停所指即所在） */
+    syncRefs: { pos: { x: number; y: number; z: number } }[];
+  }
+  const showcaseAnchors: ShowcaseAnchor[] = [];
+
   /* ================= 线粒体（双膜 + 板层嵴 + ATP 合酶） ================= */
   const mitos: { obj: THREE.Group; baseY: number; phase: number; pinned?: boolean }[] = [];
   const mitoCount = perf ? Math.max(4, Math.round(spec.mitoCount * 0.6)) : spec.mitoCount;
@@ -1232,15 +1258,13 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   // 成纤维沿应力纤维、上皮沿顶端-基底轴的真实位形）; 圆形细胞保持随机取向
   const MITO_ALIGN: 'x' | 'y' | null =
     SHAPE === 'rod' || SHAPE === 'spindle' ? 'x' : SHAPE === 'columnar' ? 'y' : null;
-  /* v22 剖面示教锚（用户需求: 「线粒体等小细胞器至少需要有一个在 50% section 处展示切开
-   * 内部的细节展示」）: 前 3 颗线粒体改为确定性示教位 —— 分别钉在正剖/俯剖/侧剖的 50%
-   * 切平面（front: z=0 / top: y=0 / side: x=0）内, 长轴沿切面展开:
-   *   剖切深度 50% 时被切平面纵向剖开 → 剖面窗口直读内部板层嵴/基质/ATP 合酶/mtDNA。
-   *   方向均避开核体（insidePos 避核不变）与高尔基象限（后右上 z<0）; pinned 冻结漂移。 */
+  /* v22→v23 剖面示教锚: 前 3 颗线粒体为示教个体 —— home 方位互呈 120° 级分离（切平面内投影
+   * 不拥挤），避开核体（insidePos 避核不变）与高尔基象限（后右上 z<0）; 运行时由 update 的
+   * 吸附循环钉到当前切平面（深度/方位任变，中心恒贴面 —— v23 动态吸附替代 v22 静态钉位）。 */
   const SHOWCASE_DIRS: THREE.Vector3[] = [
-    new THREE.Vector3(0.83, -0.55, 0).normalize(), // ① 正剖 z=0 · 右下区（默认视图直读）
-    new THREE.Vector3(0.62, -0.04, -0.78).normalize(), // ② 俯剖 y=0 · 右后区
-    new THREE.Vector3(0.03, -0.86, 0.51).normalize(), // ③ 侧剖 x=0 · 下方区
+    new THREE.Vector3(0.83, -0.55, 0).normalize(), // ① 右下区（默认正剖直读）
+    new THREE.Vector3(0.62, -0.04, -0.78).normalize(), // ② 右后区
+    new THREE.Vector3(0.03, -0.86, 0.51).normalize(), // ③ 下方区
   ];
   const SHOWCASE_YAW = [0.22, 0.3, 0.15]; // 长轴沿 X 的微有机偏航（别于呆板平行）
   for (let i = 0; i < mitoCount; i++) {
@@ -1334,7 +1358,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     g.position.set(p.x, p.y, p.z);
     // 取向: 长轴对齐 + 确定性抖动; 圆形细胞保持全随机
     if (showcase) {
-      // v22 示教位: 长轴沿 X 落在切平面内（rotation.z = π/2）+ 微偏航 —— 剖面纵贯剖开
+      // v23 示教位: 长轴沿 X 落在切平面内（rotation.z = π/2）+ 微偏航 —— 剖面纵贯剖开;
+      //   吸附循环运行时将长轴实时投影到当前切平面（倾斜法向下的精确对齐）
       g.rotation.set(0.05, SHOWCASE_YAW[i], Math.PI / 2 + 0.05);
     } else if (MITO_ALIGN === 'x') {
       g.rotation.set(hash01(`m${i}`, 9) * 0.24, hash01(`m${i}`, 11) * 2.1, Math.PI / 2 + (hash01(`m${i}`, 13) - 0.5) * 0.5);
@@ -1349,13 +1374,25 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     mitos.push({ obj: g, baseY: p.y, phase: hash01(`m${i}`, 17) * Math.PI * 2, pinned: !!showcase });
     // v14 悬停锚点: 每颗线粒体各自感应（悬停任一颗即现「线粒体」标记）
     // v16: r 2.0→1.7 —— 线粒体本体半长约 1.15, 1.7 已宽松; 收敛后与 ER/高尔基锚点重叠区不再互扰
-    hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: 1.7, zh: '线粒体（板层嵴）', latin: 'Mitochondrion', group: 'energy' });
+    // v23: 保留引用 —— 示教颗吸附切平面时锤点同步跟随（悬停所指即所在）
+    const mitoHov: HoverTarget = { pos: { x: p.x, y: p.y, z: p.z }, r: 1.7, zh: '线粒体（板层嵴）', latin: 'Mitochondrion', group: 'energy' };
+    hover.push(mitoHov);
+    // v23 首颗（示教）的标注锚也持引用 —— 吸附时同步跟随（避免标注悬空在旧位）
+    const m0Label = i === 0 ? { pos: { x: p.x, y: p.y, z: p.z }, zh: '线粒体（板层嵴）', latin: 'Mitochondrion' } : null;
+    if (m0Label) labels.push(m0Label);
+    if (showcase) {
+      showcaseAnchors.push({
+        obj: g,
+        home: g.position.clone(),
+        homeQ: g.quaternion.clone(),
+        longAxis: true,
+        halfLen: 1.04 * g.scale.y, // 胶囊半长（半径 0.4 + 圆柱半长 0.69）× 长度缩放
+        avoidR: 0.62,
+        syncRefs: m0Label ? [mitoHov, m0Label] : [mitoHov],
+      });
+    }
   }
-  if (mitos.length) {
-    // v19 锚点归位: 线粒体标注位即首颗本体位（每颗已有精确锚点, 此处补首颗同位标签锚; 旧 1.4×+0.85 外飘错位）
-    const m0 = mitos[0].obj.position;
-    labels.push({ pos: { x: m0.x, y: m0.y, z: m0.z }, zh: '线粒体（板层嵴）', latin: 'Mitochondrion' });
-  }
+  // v23: 线粒体标注锚统一由首颗（示教颗）承担 —— m0Label 持引用, 吸附切平面时同步跟随
 
   /* ================= 粗面内质网（v17 参照图严格还原: 千层饼核周层叠囊冠 + 「黄沙」核糖体） ================= */
   // 核糖体: 大小亚基哑铃形（60S 大亚基 + 40S 小亚基 —— 电镜双亚基剪影）
@@ -1991,6 +2028,67 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       for (let i = 0; i < lysoN; i++) {
         hover.push({ pos: { x: centers[i].x, y: centers[i].y, z: centers[i].z }, r: 0.5 * scales[i] + 0.3, zh: '溶酶体（pH≈4.5）', latin: 'Lysosome', group: 'endomembrane' });
       }
+      /* v23 溶酶体剖面示教个体（cutaway-only, 独立建模不入 InstancedMesh —— 颗粒子组随本体整体迁移）:
+       * 一颗大溶酶体动态吸附当前切平面 → 剖面窗口半球剖开, 腔内酸性水解酶颗粒群直读。
+       * 常规视图不添加（零回归）; home 方位避开线粒体三示教位与高尔基象限。 */
+      if (cutaway) {
+        const lg = new THREE.Group();
+        const bodyGeo = track(new THREE.SphereGeometry(0.36, 18, 14));
+        const bodyMat = mat({
+          color: REF.lyso,
+          transmission: transOn ? 0.22 : 0,
+          thickness: 0.28,
+          emissive: REF.lysoHi,
+          emissiveIntensity: 0.3,
+          roughness: 0.34,
+          clearcoat: 0.4,
+          normalMap: coatNormal,
+          normalScale: 0.5,
+          opacity: 0.9,
+          flow: { color: REF.lysoHi, strength: 0.14, scale: 1.2, speed: 0.08, rim: 0.24 },
+        });
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.renderOrder = 97.8; // 与群体溶酶体同窗口化序列
+        lg.add(body);
+        // 腔内水解酶颗粒（酸性磷酸酶/组织蛋白酶 —— 26 颗散布腔内）
+        const grainGeo = track(new THREE.SphereGeometry(0.05, 6, 5));
+        const grainMat = track(new THREE.MeshStandardMaterial({
+          color: REF.lysoGranule,
+          emissive: '#6a4426',
+          emissiveIntensity: 0.34 * dim,
+          transparent: true,
+          opacity: 0.7 * dim,
+          depthWrite: false,
+        }));
+        const grains = new THREE.InstancedMesh(grainGeo, grainMat, 26);
+        {
+          const gm = new THREE.Matrix4();
+          const gv = new THREE.Vector3();
+          for (let k = 0; k < 26; k++) {
+            gv.set(hash01(`lsg${k}`) - 0.5, hash01(`lsg${k}`, 3) - 0.5, hash01(`lsg${k}`, 5) - 0.5).normalize();
+            gv.multiplyScalar(0.08 + hash01(`lsgr${k}`) * 0.2);
+            gm.makeTranslation(gv.x, gv.y, gv.z);
+            grains.setMatrixAt(k, gm);
+          }
+          grains.instanceMatrix.needsUpdate = true;
+          grains.renderOrder = 97.9;
+        }
+        lg.add(grains);
+        const lp = insidePos(new THREE.Vector3(-0.68, -0.42, 0.6).normalize(), 0.3, 0.55, 0.5);
+        lg.position.copy(lp);
+        group.add(lg);
+        const lysoHov: HoverTarget = { pos: { x: lp.x, y: lp.y, z: lp.z }, r: 0.68, zh: '溶酶体（pH≈4.5）', latin: 'Lysosome', group: 'endomembrane' };
+        hover.push(lysoHov);
+        showcaseAnchors.push({
+          obj: lg,
+          home: lg.position.clone(),
+          homeQ: lg.quaternion.clone(),
+          longAxis: false,
+          halfLen: 0,
+          avoidR: 0.5,
+          syncRefs: [lysoHov],
+        });
+      }
     }
   }
 
@@ -2193,6 +2291,52 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       //   旧版仅首颗有锚 → 指到即无响应; 本体 0.42×s → 锚半径紧贴合。旧首颗 label 派生锚退役。）
       for (let i = 0; i < pxN; i++) {
         hover.push({ pos: { x: pxCenters[i].x, y: pxCenters[i].y, z: pxCenters[i].z }, r: 0.52, zh: '过氧化物酶体', latin: 'Peroxisome', group: 'endomembrane' });
+      }
+      /* v23 过氧化物酶体剖面示教个体（cutaway-only）: 一颗大过氧化物酶体动态吸附切平面 →
+       * 半球剖开直读尿酸氧化酶晶核（电镜致密芯）+ 基质; 与溶酶体示教个体同理。 */
+      if (cutaway) {
+        const pg = new THREE.Group();
+        const pBodyGeo = track(new THREE.SphereGeometry(0.32, 16, 12));
+        const pBodyMat = mat({
+          color: REF.peroxi,
+          transmission: transOn ? 0.28 : 0,
+          thickness: 0.3,
+          emissive: '#33404e',
+          emissiveIntensity: 0.2,
+          roughness: 0.32,
+          opacity: transOn ? 1 : 0.55,
+          clearcoat: 0.35,
+        });
+        const pBody = new THREE.Mesh(pBodyGeo, pBodyMat);
+        pBody.renderOrder = 97.4;
+        pg.add(pBody);
+        // 尿酸氧化酶晶核（致密芯 —— 剖面直读的主角）
+        const pCoreGeo = track(new THREE.OctahedronGeometry(0.13, 0));
+        const pCoreMat = track(new THREE.MeshStandardMaterial({
+          color: REF.peroxiCore,
+          emissive: '#7a6420',
+          emissiveIntensity: 0.4 * dim,
+          transparent: true,
+          opacity: 0.85 * dim,
+        }));
+        const pCore = new THREE.Mesh(pCoreGeo, pCoreMat);
+        pCore.rotation.set(0.5, 0.8, 0);
+        pCore.renderOrder = 97.5;
+        pg.add(pCore);
+        const pp = insidePos(new THREE.Vector3(-0.64, -0.52, -0.57).normalize(), 0.34, 0.5, 0.5);
+        pg.position.copy(pp);
+        group.add(pg);
+        const pHov: HoverTarget = { pos: { x: pp.x, y: pp.y, z: pp.z }, r: 0.6, zh: '过氧化物酶体', latin: 'Peroxisome', group: 'endomembrane' };
+        hover.push(pHov);
+        showcaseAnchors.push({
+          obj: pg,
+          home: pg.position.clone(),
+          homeQ: pg.quaternion.clone(),
+          longAxis: false,
+          halfLen: 0,
+          avoidR: 0.46,
+          syncRefs: [pHov],
+        });
       }
     }
   }
@@ -3228,10 +3372,141 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       q * q * a.z + 2 * q * k * b.z + k * k * c.z,
     );
   };
-  const update = (t: number, ulk1 = 0) => {
+  /* ---- v23 剖面示教锚吸附（单一真源 = gl.clippingPlanes[0]，由 SectionClipController 每帧更新） ----
+   * 数学不变量: 所有钳制均沿「面内」进行 —— 中心恒满足 n·p + c = 0（用户诉求「细胞器中心放在
+   * 50% depth 上」的精确保证; 50% 时平面过核, 径向避让必然破坏贴合 → 面内避让是唯一正确解）:
+   *   ① home 沿法向投影到平面（无平移量钳 —— 面内钳制体系自然处理极端深度: 平面贴近膜缘时
+   *     面内可用盘收缩, 锚点收到垂足附近仍恒贴面; 旧 ±0.62R 钳会在浅/深切层造成脱贴）
+   *   ② 核避让（面内）: 推到「核安全球 ∩ 切平面」交圆上 —— f=核心垂足, r=√(safe²−δ²）, δ=核心面距
+   *   ③ 膜内钳（面内）: 沿 o(细胞中心垂足)→target 方向收缩到 ρ=√((r(u)−margin)²−c²)
+   *   ④ 长轴端点膜内钳（线粒体, 沿轴拉回）+ ④b 再投影（消除拉回的法向分量）
+   *   ⑤⑥ 位置/朝向平滑逼近（lerp/slerp —— 拖深度时「贴面滑动」）+ ⑦ syncRefs 引用同步 */
+  const scTmp = new THREE.Vector3();
+  const scAxis = new THREE.Vector3();
+  const scAxisProj = new THREE.Vector3();
+  const scU = new THREE.Vector3();
+  const scQ = new THREE.Quaternion();
+  const LOCAL_LONG = new THREE.Vector3(0, 1, 0); // 胶囊长轴局部向（线粒体）
+  const applyShowcase = (clip: THREE.Plane | null) => {
+    for (const sa of showcaseAnchors) {
+      if (clip) {
+        const n = clip.normal;
+        qaPlane = { n: [n.x, n.y, n.z], c: clip.constant };
+        // ① home 沿法向投影到平面: target = home − n·(n·home + c)（平移量不钳 ——
+        //   面内钳制体系自然处理极端深度, 锚点恒贴面 = 用户「50% depth」诉求的精确保证）
+        const d = n.dot(sa.home) + clip.constant;
+        scTmp.copy(sa.home).addScaledVector(n, -d);
+        // ② 核避让（面内交圆 —— 保贴合）; 双核跑两轮（第二核推出可能压回第一核）
+        const avoidNucleus = () => {
+          for (const nuc of nucleiInst) {
+            const safe = N * nuc.scale * 1.06 + sa.avoidR;
+            const dx = scTmp.x - nuc.center.x;
+            const dy = scTmp.y - nuc.center.y;
+            const dz = scTmp.z - nuc.center.z;
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            if (dist >= safe || dist < 1e-4) continue;
+            // 核心到平面带符号距离 δ; 面内交圆心 f = 核心 − n·δ; 半径 r = √(safe²−δ²)
+            const delta = n.x * nuc.center.x + n.y * nuc.center.y + n.z * nuc.center.z + clip.constant;
+            const dd = safe * safe - delta * delta;
+            if (dd <= 0.01) continue; // 平面不切核安全球（理论不达 —— dist<safe 蕴含 |δ|<safe）
+            const rr = Math.sqrt(dd);
+            const fx = nuc.center.x - n.x * delta;
+            const fy = nuc.center.y - n.y * delta;
+            const fz = nuc.center.z - n.z * delta;
+            let ax = scTmp.x - fx;
+            let ay = scTmp.y - fy;
+            let az = scTmp.z - fz;
+            const al = Math.sqrt(ax * ax + ay * ay + az * az);
+            if (al < 1e-4) {
+              ax = 1; ay = 0; az = 0; // 恰在垂足的退化方向
+            } else {
+              ax /= al; ay /= al; az /= al;
+            }
+            scTmp.set(fx + ax * rr, fy + ay * rr, fz + az * rr);
+          }
+        };
+        avoidNucleus();
+        // ③ 膜内钳（面内收缩）: o = −n·c（细胞中心垂足）; 沿 o→target 收缩到交线保守半径
+        {
+          const ox = -n.x * clip.constant;
+          const oy = -n.y * clip.constant;
+          const oz = -n.z * clip.constant;
+          const wx = scTmp.x - ox;
+          const wy = scTmp.y - oy;
+          const wz = scTmp.z - oz;
+          const wl = Math.sqrt(wx * wx + wy * wy + wz * wz);
+          if (wl > 1e-4) {
+            scU.set(wx / wl, wy / wl, wz / wl);
+            const r3 = cellSurf(scU, R, SHAPE, -0.6);
+            const cAbs = Math.min(Math.abs(clip.constant), Math.max(0.1, Math.abs(r3) - 0.25));
+            const rho = Math.sqrt(Math.max(0.04, r3 * r3 - cAbs * cAbs));
+            if (wl > rho) scTmp.set(ox + scU.x * rho, oy + scU.y * rho, oz + scU.z * rho);
+          }
+        }
+        avoidNucleus(); // 二轮（膜钳收缩朝心向可能重新压核）
+        // ④ 长轴端点膜内钳（线粒体: 两端点贴回膜内 —— 切平面近膜缘时切口不出窗）
+        if (sa.longAxis && sa.halfLen > 0) {
+          scAxis.copy(LOCAL_LONG).applyQuaternion(sa.obj.quaternion);
+          for (let e = 0; e < 2; e++) {
+            const sign = e === 0 ? 1 : -1;
+            const ex = scTmp.x + scAxis.x * sa.halfLen * sign;
+            const ey = scTmp.y + scAxis.y * sa.halfLen * sign;
+            const ez = scTmp.z + scAxis.z * sa.halfLen * sign;
+            const el = Math.sqrt(ex * ex + ey * ey + ez * ez);
+            if (el > 1e-4) {
+              const maxE = cellSurf(scU.set(ex / el, ey / el, ez / el), R, SHAPE, -0.06);
+              if (el > maxE) {
+                const pull = (el - maxE) * sign;
+                scTmp.addScaledVector(scAxis, -pull);
+              }
+            }
+          }
+          // ④b 再投影（端点拉回引入的法向分量清除 —— 恢复严格贴合）
+          scTmp.addScaledVector(n, -(n.x * scTmp.x + n.y * scTmp.y + n.z * scTmp.z + clip.constant));
+        }
+        // ⑤ 平滑逼近（lerp 0.22 → ~150ms 收敛; 拖深度时「贴面滑动」教学读感）
+        sa.obj.position.lerp(scTmp, 0.22);
+        // ⑥ 长轴对齐切平面（线粒体: 长轴投影到面内 → 纵贯剖开; 球体跳过）
+        if (sa.longAxis) {
+          scAxis.copy(LOCAL_LONG).applyQuaternion(sa.obj.quaternion);
+          scAxisProj.copy(scAxis).addScaledVector(n, -n.dot(scAxis));
+          if (scAxisProj.lengthSq() > 1e-4) {
+            scAxisProj.normalize();
+            scQ.setFromUnitVectors(LOCAL_LONG, scAxisProj);
+            sa.obj.quaternion.slerp(scQ, 0.2);
+          }
+        }
+      } else {
+        qaPlane = null;
+        // 无剖面: 回 home 驻位/朝向
+        sa.obj.position.lerp(sa.home, 0.15);
+        sa.obj.quaternion.slerp(sa.homeQ, 0.15);
+      }
+      // ⑦ syncRefs 同步（悬停锤点/标注锚跟随本体 —— 悬停所指即所在）
+      for (const ref of sa.syncRefs) {
+        ref.pos.x = sa.obj.position.x;
+        ref.pos.y = sa.obj.position.y;
+        ref.pos.z = sa.obj.position.z;
+      }
+    }
+  };
+  // v23 QA 插桩: 暴露示教锚实时位姿 + 平面参数（agent-browser 活体验证「中心恰在平面上」）
+  let qaPlane: { n: number[]; c: number } | null = null;
+  if (typeof window !== 'undefined') {
+    (window as unknown as Record<string, unknown>).__showcaseQa = () => ({
+      anchors: showcaseAnchors.map((sa) => ({
+        pos: [sa.obj.position.x, sa.obj.position.y, sa.obj.position.z],
+        home: [sa.home.x, sa.home.y, sa.home.z],
+      })),
+      plane: qaPlane,
+    });
+  }
+  const update = (t: number, ulk1 = 0, clip: THREE.Plane | null = null) => {
     uTime.value = t;
+    // v23 剖面示教锚动态吸附（先于漂移循环 —— pinned 颗位置由吸附循环接管）
+    if (showcaseAnchors.length > 0) applyShowcase(clip);
     for (const m of mitos) {
-      // v22 示教锚线粒体冻结漂移/自转 —— 恒钉在 50% 切平面（剖开内部细节稳定直读）
+      // v22 示教锚线粒体冻结漂移/自转（v23: 位置由 applyShowcase 接管 —— 无剖面时回 home 驻位）
       if (m.pinned) continue;
       m.obj.position.y = m.baseY + Math.sin(t * 0.55 + m.phase) * 0.16;
       m.obj.rotation.y += 0.0016;
@@ -3447,7 +3722,15 @@ export const CellBody = ({ spec, tint, dim, showAnatomy, perf, cutaway, locate, 
   );
 
   // 帧驱动: 传入 ULK1 自噬驱动水平（无 ULK1 通路 → 0 → 自噬系统静默）
-  useFrame((state) => build.update(state.clock.elapsedTime, autophagyLevel(useLabStore.getState().nodeStates)));
+  // v23: 同时传全局裁剪平面（剖面模式单一真源 —— 示教锚动态吸附切平面）
+  useFrame((state) => {
+    const planes = state.gl.clippingPlanes;
+    build.update(
+      state.clock.elapsedTime,
+      autophagyLevel(useLabStore.getState().nodeStates),
+      planes && planes.length > 0 ? planes[0] : null,
+    );
+  });
 
   return (
     <>
