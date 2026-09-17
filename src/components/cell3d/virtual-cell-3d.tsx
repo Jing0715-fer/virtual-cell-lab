@@ -1067,7 +1067,7 @@ export function VirtualCell3D() {
               <Split className="h-3.5 w-3.5 shrink-0 text-teal-400" />
               <span className="text-[12px] font-semibold text-slate-100">{t('mit.title')}</span>
               <span className="shrink-0 rounded border border-teal-500/30 bg-teal-500/10 px-1.5 py-px font-mono text-[8px] leading-tight text-teal-300">
-                {Math.min(mitoPhase + 1, 7)} / 7
+                {Math.min(mitoPhase + 1, MITOSIS_PHASES.length)} / {MITOSIS_PHASES.length}
               </span>
               <span className="hidden font-mono text-[8px] italic text-slate-500 sm:inline">
                 {MITOSIS_PHASES[mitoPhase]?.latin}

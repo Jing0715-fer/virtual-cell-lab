@@ -84,16 +84,23 @@ export const MITOSIS_PHASES: MitosisPhaseInfo[] = [
     descZh: '收缩环缢裂 → 中间体胞质桥 → 两个子细胞（各自获得完整细胞器分配）',
     descEn: 'The ring constricts to a midbody bridge, yielding two daughter cells',
   },
+  {
+    // v19 用户反馈「没有进行到完全分开成两个独立细胞的步骤」—— 补齐第 8 相位:
+    // ESCRT-III 内切断离 → 单膜哑铃 crossfade 为两个独立子细胞膜 → 两细胞拉开各自进入 G1
+    key: 'abscission', zh: '分离完成', en: 'Abscission', latin: 'Abscission',
+    descZh: 'ESCRT-Ⅲ 螺旋在中间体中央内切 → 质膜融合密封 → 两个独立子细胞拉开距离, 各自进入 G1 期',
+    descEn: 'ESCRT-III spirals cut and seal the midbody — two independent daughter cells part into G1',
+  },
 ];
 
-/** 每单位相位时钟时长（秒, × speed 播放; 总周期 = 6 单位 × 7s = 42s） */
+/** 每单位相位时钟时长（秒, × speed 播放; 总周期 = 8 相位 7 单位 × 7s = 49s） */
 export const MITOSIS_PHASE_SECONDS = 7;
 
-/** 相位边界（t ∈ [0,6] 不等分 —— 生物学时长: 间期展示较短, 中/后期事件紧凑） */
-const PHASE_BOUNDS = [0, 0.78, 1.62, 2.42, 3.32, 4.22, 5.1, 6];
+/** 相位边界（t ∈ [0,7] 不等分 —— 生物学时长: 间期展示较短, 中/后期事件紧凑; v19 增第 8 相位分离完成） */
+const PHASE_BOUNDS = [0, 0.78, 1.62, 2.42, 3.32, 4.22, 5.0, 5.72, 7];
 const phaseOf = (t: number): number => {
   for (let i = PHASE_BOUNDS.length - 1; i >= 1; i--) {
-    if (t >= PHASE_BOUNDS[i]) return Math.min(6, i);
+    if (t >= PHASE_BOUNDS[i]) return Math.min(MITOSIS_PHASES.length - 1, i);
   }
   return 0;
 };
@@ -185,6 +192,36 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   const membrane = new THREE.Mesh(memGeo, memMat);
   membrane.renderOrder = 50;
   group.add(membrane);
+  /* ---------- v19 子细胞膜（分离完成相位: 单膜哑铃 crossfade → 两个独立子细胞拉开） ----------
+   * 单球拓扑无法真正断开成两体 —— 用「双子球淡入 + 单膜淡出」交接: 初期双子球恰好覆叠哑铃两叶
+   * （无缝交接）, 随后两球各自收圆并拉开距离 = 完全分开的两个独立细胞（体积守恒 r≈8.5/∛2≈6.5） */
+  const memDauParams = {
+    color: '#4e5a55',
+    transmission: 0,
+    thickness: 0.55,
+    roughness: 0.07,
+    normalMap: memNormal,
+    normalScale: 0.3,
+    clearcoat: 0.8,
+    clearcoatRoughness: 0.18,
+    iridescence: 0.25,
+    sheen: 0.4,
+    sheenColor: REF.sheen,
+    opacity: 0,
+    emissive: '#2a3438',
+    emissiveIntensity: 0.1,
+    flow: { color: '#5a7a84', strength: 0.14, scale: 0.8, speed: 0.06, rim: 0.2 },
+  } as const;
+  const memDauGeo = track(new THREE.SphereGeometry(1, perf ? 36 : 56, perf ? 24 : 36));
+  const memDauMatA = mat({ ...memDauParams });
+  const memDauMatB = mat({ ...memDauParams });
+  const memDauA = new THREE.Mesh(memDauGeo, memDauMatA);
+  const memDauB = new THREE.Mesh(memDauGeo, memDauMatB);
+  memDauA.renderOrder = 50;
+  memDauB.renderOrder = 50;
+  memDauA.visible = false;
+  memDauB.visible = false;
+  group.add(memDauA, memDauB);
   const memPos = memGeo.attributes.position as THREE.BufferAttribute;
   const memDir = new Float32Array(memPos.count * 3);
   for (let i = 0; i < memPos.count; i++) {
@@ -192,18 +229,20 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     memDir[i * 3] = v.x; memDir[i * 3 + 1] = v.y; memDir[i * 3 + 2] = v.z;
   }
 
-  /** 形态学: 半长 L 与纬向轮廓 r(u)（u: 0=−Z 极, 1=+Z 极） */
+  /** 形态学: 半长 L 与纬向轮廓 r(u)（u: 0=−Z 极, 1=+Z 极）
+   *  v19 scission: ESCRT-Ⅲ 内切 —— 窄 σ 深度叠加, 中间体桥半径 → 0.02（针状缩窄）; elong 续增两叶拉开 */
   const membraneProfile = (t: number): { L: number; r: (u: number) => number } => {
-    const elong = ramp(t, 2.9, 4.4) * 0.14 + ramp(t, 4.4, 6) * 0.18; // 后期拉长 + 末/胞质继续
+    const elong = ramp(t, 2.9, 4.4) * 0.14 + ramp(t, 4.4, 6) * 0.18 + ramp(t, 5.9, 6.9) * 0.52;
     const L = R_CELL * (1 + elong);
     const furrowK = ramp(t, 4.55, 5.95);
+    const scission = ramp(t, 5.85, 6.45);
     const shrink = 1 - 0.1 * furrowK; // 体积近似守恒
     const rFn = (u: number) => {
       const base = R_CELL * shrink * Math.pow(Math.max(1e-4, Math.sin(Math.PI * u)), 0.92);
-      const dip = furrowK * R_CELL * 0.8 * Math.exp(-((u - 0.5) ** 2) / (2 * 0.13 ** 2));
-      let rr = base - dip;
-      if (furrowK > 0.5) rr = Math.max(0.3, rr); // 中间体桥半径
-      return rr;
+      const dip = furrowK * R_CELL * 0.8 * Math.exp(-((u - 0.5) ** 2) / (2 * 0.13 ** 2))
+        + scission * R_CELL * 1.1 * Math.exp(-((u - 0.5) ** 2) / (2 * 0.06 ** 2));
+      const bridge = 0.3 * (1 - scission) + 0.02 * scission; // 中间体桥半径 → 针状
+      return Math.max(bridge, base - dip);
     };
     return { L, r: rFn };
   };
@@ -837,8 +876,11 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   midbody.renderOrder = 48;
   group.add(midbody);
 
-  /* ---------- 逐帧更新（t: 0-6 连续相位时钟） ---------- */
+  /* ---------- 逐帧更新（t: 0-7 连续相位时钟） ---------- */
   const chrMatRef = chrMat as THREE.MeshPhysicalMaterial;
+  const memMatRef = memMat as THREE.MeshPhysicalMaterial;
+  const memDauMatARef = memDauMatA as THREE.MeshPhysicalMaterial;
+  const memDauMatBRef = memDauMatB as THREE.MeshPhysicalMaterial;
   const centroMatRef = centroMat as THREE.MeshPhysicalMaterial;
   const kinMatRef = kinMat as THREE.MeshPhysicalMaterial;
   const mtMatRef = mtMat as THREE.MeshPhysicalMaterial;
@@ -870,6 +912,24 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
 
     /* 质膜形态学（v16: 同时返回当前回转面参数 —— 星体微管逐帧钳制消费） */
     const { L: memL, r: rProfile } = updateMembrane(t);
+
+    /* v19 分离完成（abscission）: 单膜哑铃淡出 + 双子细胞球膜淡入 → 两独立子细胞拉开
+     * 交接窗口内双子球恰好覆叠哑铃两叶（无缝 crossfade）; 之后 zD 5.55→7.35 / rD 5.15→6.45（体积守恒收圆）
+     * 内容物（子核/高尔基/RER 冠/细胞器）同步随 ramp 后移至各自子细胞中心 */
+    const dauFade = ramp(t, 6.2, 6.65);
+    const memFade = 1 - ramp(t, 6.3, 6.75);
+    const zD = THREE.MathUtils.lerp(5.55, 7.35, ramp(t, 6.15, 7));
+    const rD = THREE.MathUtils.lerp(5.15, 6.45, ramp(t, 6.15, 6.9));
+    memMatRef.opacity = (perf ? 0.5 : 0.42) * memFade;
+    membrane.visible = memFade > 0.02;
+    memDauA.visible = dauFade > 0.02;
+    memDauB.visible = dauFade > 0.02;
+    memDauA.position.set(0, 0, -zD);
+    memDauB.position.set(0, 0, zD);
+    memDauA.scale.setScalar(Math.max(0.001, rD));
+    memDauB.scale.setScalar(Math.max(0.001, rD));
+    memDauMatARef.opacity = (perf ? 0.5 : 0.42) * dauFade;
+    memDauMatBRef.opacity = (perf ? 0.5 : 0.42) * dauFade;
 
     /* 凝聚/去凝聚与不透明度 */
     // v18: 凝聚推迟到 0.42 起 —— 给 S 期复制可视化留出完整间期窗口（0-0.42 纤维态 + 复制叉行进）
@@ -1063,44 +1123,76 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     } else {
       frags.visible = false;
     }
-    // 双子核: 末期在两极染色体团处重组
+    // 双子核: 末期在两极染色体团处重组（v19: 分离期跟随子细胞中心后移至 ±7.0）
     const neReform = ramp(t, 4.15, 5.15);
     dauNeMatRef.opacity = neReform;
-    const dauZ = THREE.MathUtils.lerp(3.1, 5.9, ramp(t, 5.0, 6));
+    const dauZ = THREE.MathUtils.lerp(3.1, 7.0, ramp(t, 5.0, 7));
     dauNeA.position.set(0, 0, -dauZ);
     dauNeB.position.set(0, 0, dauZ);
-    const dauS = Math.max(0.001, 0.3 + neReform * 0.7) * (1 + ramp(t, 5, 6) * 0.06);
+    const dauS = Math.max(0.001, 0.3 + neReform * 0.7) * (1 + ramp(t, 5, 7) * 0.1);
     dauNeA.scale.setScalar(dauS);
     dauNeB.scale.setScalar(dauS);
     dauNeA.visible = neReform > 0.02;
     dauNeB.visible = neReform > 0.02;
 
-    /* 细胞器分配 */
+    /* 细胞器分配（v19 全量膜面钳制: 旧版线粒体/囊泡/核糖体 xy 半径达 4.7-5.3,
+     * 末/胞质期缢裂回转面在该 z 处仅 ~4.0-4.5 —— 条形线粒体戳出膜外 ~1.6 单位
+     * = 用户「条形细胞器跑到细胞外」根因; 钳制计入线粒体胶囊半长 0.85; 分离期追加子细胞球内钳） */
     const part = ramp(t, 3.4, 5.6); // 后期-末期: 向双子室迁移
+    const clampCell = (v: THREE.Vector3, margin: number) => {
+      if (memFade > 0.05) {
+        const zLim = memL * 0.94;
+        if (Math.abs(v.z) > zLim) v.z = Math.sign(v.z) * zLim;
+        const u = (v.z / memL + 1) / 2;
+        const rr = Math.max(0.12, rProfile(u) * 0.97 - margin);
+        const rc = Math.hypot(v.x, v.y);
+        if (rc > rr) {
+          const kk = rr / rc;
+          v.x *= kk;
+          v.y *= kk;
+        }
+      }
+      if (dauFade > 0.05) {
+        // 分离期: 各细胞器归入各自子细胞球（离哪极近归哪室）
+        const s = v.z >= 0 ? 1 : -1;
+        const dz = v.z - s * zD;
+        const dd = Math.hypot(v.x, v.y, dz);
+        const lim = Math.max(0.3, rD - margin - 0.12);
+        if (dd > lim) {
+          const kk = lim / dd;
+          v.x *= kk;
+          v.y *= kk;
+          v.z = s * zD + dz * kk;
+        }
+      }
+    };
     {
       mitoSeeds.forEach((ms, i) => {
         const drift = Math.sin(uTime.value * 0.5 + ms.phase) * 0.35;
-        const toZ = ms.side * THREE.MathUtils.lerp(2.2, 5.6, ramp(t, 4.8, 6));
+        const toZ = ms.side * THREE.MathUtils.lerp(2.2, 7.0, ramp(t, 4.8, 7));
         pv.set(
           Math.cos(ms.ang) * ms.rad * (1 - part * 0.32) + drift,
           ms.y * (1 - part * 0.4) + drift * 0.6,
           THREE.MathUtils.lerp(0, toZ, part),
         );
+        clampCell(pv, 0.85);
         mm.compose(pv, qq.setFromEuler(ms.rot), one);
         mitos.setMatrixAt(i, mm);
       });
       mitos.instanceMatrix.needsUpdate = true;
       vesSeeds.forEach((vs2, i) => {
-        const toZ = vs2.side * THREE.MathUtils.lerp(2.0, 5.2, ramp(t, 4.8, 6));
+        const toZ = vs2.side * THREE.MathUtils.lerp(2.0, 6.6, ramp(t, 4.8, 7));
         pv.set(Math.cos(vs2.ang) * vs2.rad * (1 - part * 0.35), vs2.y * (1 - part * 0.45), THREE.MathUtils.lerp(0, toZ, part));
+        clampCell(pv, 0.3);
         sc.setScalar(vs2.r);
         mm.compose(pv, qq.identity(), sc);
         vesicles.setMatrixAt(i, mm);
       });
       vesicles.instanceMatrix.needsUpdate = true;
       ribSeeds.forEach((rs2, i) => {
-        const toZ = rs2.side * THREE.MathUtils.lerp(1.5, 5.4, ramp(t, 4.6, 6));
+        const toZ = rs2.side * THREE.MathUtils.lerp(1.5, 6.9, ramp(t, 4.6, 7));
         pv.set(Math.cos(rs2.ang) * rs2.rad * (1 - part * 0.3), rs2.y * (1 - part * 0.5), THREE.MathUtils.lerp(0, toZ, part));
+        clampCell(pv, 0.2);
         sc.setScalar(0.8 + hash01(`rsz${i}`) * 0.5);
         mm.compose(pv, qq.identity(), sc);
         ribos.setMatrixAt(i, mm);
@@ -1114,7 +1206,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     golgiMain.visible = golgiFadeOut > 0.02;
     golgiDauA.visible = golgiReform > 0.02;
     golgiDauB.visible = golgiReform > 0.02;
-    const golgiZ = THREE.MathUtils.lerp(3.4, 6.1, ramp(t, 5, 6));
+    const golgiZ = THREE.MathUtils.lerp(3.4, 7.3, ramp(t, 5, 7));
     golgiDauA.position.set(1.62, -1.05, -golgiZ + 0.35);
     golgiDauB.position.set(-1.62, -1.05, golgiZ - 0.35);
     /* 粗面内质网（v16 核周囊池冠）: 间期 → 前期 ER 重构管网化回缩 → 末期双子核重建双冠 */
@@ -1132,10 +1224,10 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     rerDauB.mesh.position.set(0, 0, dauZ);
     rerDauA.ribos.position.set(0, 0, -dauZ);
     rerDauB.ribos.position.set(0, 0, dauZ);
-    // 外周 ER: 前期回缩 → 末期重建
-    erMatRef.opacity = clamp01((1 - ramp(t, 0.8, 1.8)) + ramp(t, 4.9, 5.9)) * 0.5;
+    // 外周 ER: 前期回缩 → 末期重建（v19: 分离期随单膜淡出 —— ER 回收入核周冠, 两子细胞各自独立）
+    erMatRef.opacity = clamp01((1 - ramp(t, 0.8, 1.8)) + ramp(t, 4.9, 5.9)) * 0.5 * (1 - ramp(t, 6.3, 6.8));
     erNet.visible = erMatRef.opacity > 0.02;
-    erNet.scale.z = 1 + ramp(t, 5, 6) * 0.55;
+    erNet.scale.z = 1 + ramp(t, 5, 6.6) * 0.55;
 
     /* 收缩环 + 中间体 */
     const furrowK = ramp(t, 4.55, 5.95);
@@ -1147,10 +1239,13 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     furrowRing.scale.x *= squeeze;
     furrowRing.scale.y *= squeeze;
     // 中间体（深缢裂后的致密胞质桥）
-    midbodyMatRef.opacity = ramp(t, 5.5, 5.95) * 0.95;
-    // 中间体: 仅深缢裂后可见; 半径跟随胞质桥, 长度（局部 Y → 世界 Z）恒定
-    const mbR = Math.max(0.3, Math.min(1.1, eqR));
+    // v19: ESCRT-Ⅲ 内切时随 scission 收细淡出（桥断离后残余迅速降解）
+    const scissionK = ramp(t, 5.85, 6.45);
+    midbodyMatRef.opacity = ramp(t, 5.5, 5.95) * 0.95 * (1 - ramp(t, 6.0, 6.4));
+    // 中间体: 仅深缢裂后可见; 半径跟随胞质桥并随内收缩细, 长度（局部 Y → 世界 Z）恒定
+    const mbR = Math.max(0.3, Math.min(1.1, eqR)) * (1 - scissionK * 0.55);
     midbody.scale.set(mbR / 0.3, 1, mbR / 0.3);
+    midbody.visible = midbodyMatRef.opacity > 0.02;
   };
 
   /* ---------- 相位感知悬停目标 ---------- */
@@ -1211,16 +1306,19 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       push('纺锤体拉长（极分离）', 'Spindle elongation', 0, 0, 0, 2.4);
     }
     if (phase >= 4) {
-      push('子代核被膜（重组）', 'Daughter envelope', 0, 0, -4.4, 2.4);
-      push('子代核被膜（重组）', 'Daughter envelope', 0, 0, 4.4, 2.4);
+      // v19: 子代核被膜锚跟随 dauZ 相位推进（4.2 → 5.2 → 6.2 → 7.0）
+      const dzT = [0, 0, 0, 0, 4.2, 5.2, 6.2, 7.0][phase] ?? 4.4;
+      push('子代核被膜（重组）', 'Daughter envelope', 0, 0, -dzT, 2.4);
+      push('子代核被膜（重组）', 'Daughter envelope', 0, 0, dzT, 2.4);
       push('游离核糖体', 'Polysomes', 2.6, -2.0, 3.0, 2.4);
     }
     if (phase >= 5) {
-      // v16: 末期重建的子代 RER 冠 + 高尔基栈（核旁位, 悬停可指认）
-      push('粗面内质网（子代重建）', 'Rough ER', 0, 0.6, -5.3, 2.0);
-      push('粗面内质网（子代重建）', 'Rough ER', 0, 0.6, 5.3, 2.0);
-      push('高尔基体（重建）', 'Golgi apparatus', 1.62, -1.05, -5.35, 1.7);
-      push('高尔基体（重建）', 'Golgi apparatus', -1.62, -1.05, 5.35, 1.7);
+      // v16: 末期重建的子代 RER 冠 + 高尔基栈（核旁位, 悬停可指认; v19 跟随分离后子细胞中心）
+      const rzT = [0, 0, 0, 0, 0, 5.3, 6.1, 7.0][phase] ?? 5.3;
+      push('粗面内质网（子代重建）', 'Rough ER', 0, 0.6, -rzT, 2.0);
+      push('粗面内质网（子代重建）', 'Rough ER', 0, 0.6, rzT, 2.0);
+      push('高尔基体（重建）', 'Golgi apparatus', 1.62, -1.05, -(rzT + 0.35), 1.7);
+      push('高尔基体（重建）', 'Golgi apparatus', -1.62, -1.05, rzT + 0.35, 1.7);
     }
     if (phase === 5 || phase === 6) {
       push('收缩环（actomyosin）', 'Contractile ring', 3.6, 0, 0, 2.2);
@@ -1229,6 +1327,11 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       push('中间体（胞质桥）', 'Midbody', 0, 0, 0, 1.6);
       push('子细胞 ×2', 'Daughter cells', 0, 0, -6.4, 3.2);
       push('子细胞 ×2', 'Daughter cells', 0, 0, 6.4, 3.2);
+    }
+    if (phase === 7) {
+      // v19 分离完成: 两个独立子细胞（各自完整细胞器 + 质膜密封）
+      push('子细胞（独立 ×2）', 'Daughter cells', 0, 0, -7.3, 3.4);
+      push('子细胞（独立 ×2）', 'Daughter cells', 0, 0, 7.3, 3.4);
     }
     return T;
   };
@@ -1275,8 +1378,8 @@ export const MitosisStage = ({ playing, speed, seek, onPhaseChange, onEnded, sho
       onPhaseChange(seek.phase);
     }
     if (playing) {
-      clock.current = Math.min(6, clock.current + (d * speed) / MITOSIS_PHASE_SECONDS);
-      if (clock.current >= 6) {
+      clock.current = Math.min(7, clock.current + (d * speed) / MITOSIS_PHASE_SECONDS);
+      if (clock.current >= 7) {
         onEnded();
       }
     }
@@ -1287,7 +1390,7 @@ export const MitosisStage = ({ playing, speed, seek, onPhaseChange, onEnded, sho
       onPhaseChange(p);
     }
     // 进度回调（宿主直写进度条 DOM —— 零 React 重渲染）
-    onProgress?.(clock.current / 6);
+    onProgress?.(clock.current / 7);
     build.update(clock.current, d);
   });
 

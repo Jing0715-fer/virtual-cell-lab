@@ -285,6 +285,13 @@ export interface ErLamellaOpts {
   clampAt?: (dir: THREE.Vector3) => number | null;
   /** 高尔基让位扇区: 扇区内层半径外跃至囊堆上空 */
   vault?: { dir: THREE.Vector3; ang: number; to: number } | null;
+  /** v19 同伴核避让球（双核肝细胞）: 冠层沿射线不进入该球 —— 两冠互不侵犯对方核体;
+   *  半径建议 = 同伴核半径×1.06+0.16（含 FBM 起伏余量） */
+  avoid?: { center: THREE.Vector3; radius: number } | null;
+  /** v19 冠缘缺口（避让扇区内收）: 该方位角附近覆盖锥角收窄 depth rad ——
+   *  同伴核/高尔基让位用「缺口」而非外跃气泡（v19 教训: vault 外跃层拱起脱离核面,
+   *  正是用户「其中一个内质网没有贴紧细胞核」的根因） */
+  cuts?: { dir: THREE.Vector3; w: number; depth: number }[] | null;
   /** 膜厚 */
   thickness?: number;
   /** 极向分段 × 环向分段 */
@@ -319,7 +326,45 @@ function erLayerRadius(
     const lim = opts.clampAt(d);
     if (lim !== null && r > lim) r = lim;
   }
+  // v19 同伴核避让硬钳: 该方向射线与避让球的最近交点即层半径上限（无交 → 不限制）。
+  //   双核肝细胞: 旧版两冠深层片在核间隙互相穿插甚至刺入对方核体（用户「双核 ER 有重叠」根因）;
+  //   钳后各冠片层以对方核面为界自然贴靠, 下限保护不压入自身核面 0.1 内。
+  if (opts.avoid) {
+    const ox = opts.avoid.center.x - opts.center.x;
+    const oy = opts.avoid.center.y - opts.center.y;
+    const oz = opts.avoid.center.z - opts.center.z;
+    const b = d.x * ox + d.y * oy + d.z * oz;
+    const cc = ox * ox + oy * oy + oz * oz - opts.avoid.radius * opts.avoid.radius;
+    const disc = b * b - cc;
+    if (disc > 0) {
+      const tEnter = b - Math.sqrt(disc);
+      if (tEnter > 0 && r > tEnter) {
+        r = Math.max(opts.radiusAt(d) + 0.1, tEnter);
+      }
+    }
+  }
   return r;
+}
+/** v19 冠缘缺口应用（几何/核糖体两个 rimAt 副本共用）: 避让扇区方位角附近覆盖锥角收窄 */
+function erRimCuts(
+  rim: number,
+  lon: number,
+  cuts: { dir: THREE.Vector3; w: number; depth: number }[] | null | undefined,
+  e1: THREE.Vector3,
+  e2: THREE.Vector3,
+): number {
+  if (!cuts) return rim;
+  for (const c of cuts) {
+    const cLon = Math.atan2(c.dir.dot(e2), c.dir.dot(e1));
+    let dLon = lon - cLon;
+    dLon = Math.atan2(Math.sin(dLon), Math.cos(dLon)); // wrap [-π, π]
+    const a = Math.abs(dLon);
+    if (a < c.w) {
+      const kk = Math.cos((a / c.w) * Math.PI * 0.5);
+      rim -= c.depth * kk * kk;
+    }
+  }
+  return rim;
 }
 /** 核周层叠囊冠单层几何（球冠壳: 外/内双面 + 缘带缝合） */
 export function erLamellaGeometry(opts: ErLamellaOpts & { layer: ErLamellaLayer }): THREE.BufferGeometry {
@@ -340,9 +385,12 @@ export function erLamellaGeometry(opts: ErLamellaOpts & { layer: ErLamellaLayer 
   const lobe2Amp = lobeAmp * 0.42;
   const p2 = hash01(`erq${seed}`) * Math.PI * 2;
   const band = 0.3; // 花边带宽度（自锥缘向内）
-  /** 环向 lon 处的边缘极角轮廓（中心圆整 → 边缘波浪） */
+  /** 环向 lon 处的边缘极角轮廓（中心圆整 → 边缘波浪; v19 再叠加冠缘缺口内收） */
   const rimAt = (lon: number): number =>
-    opts.layer.cone - band + lobeAmp * (0.58 * Math.sin(lobes * lon + p1) + 0.42 * Math.sin(lobes2 * lon + p2));
+    erRimCuts(
+      opts.layer.cone - band + lobeAmp * (0.58 * Math.sin(lobes * lon + p1) + 0.42 * Math.sin(lobes2 * lon + p2)),
+      lon, opts.cuts, e1, e2,
+    );
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
@@ -354,7 +402,7 @@ export function erLamellaGeometry(opts: ErLamellaOpts & { layer: ErLamellaLayer 
     const th = thickness * (0.55 + 0.45 * Math.sin(Math.PI * Math.min(1, t * 1.15)));
     for (let j = 0; j <= lonSeg; j++) {
       const lon = (j / lonSeg) * Math.PI * 2;
-      const polar = rimAt(lon) * t;
+      const polar = Math.max(0.02, rimAt(lon) * t);
       d.copy(U).multiplyScalar(Math.cos(polar))
         .addScaledVector(e1, Math.cos(lon) * Math.sin(polar))
         .addScaledVector(e2, Math.sin(lon) * Math.sin(polar))
@@ -411,12 +459,15 @@ export function erLamellaRibosomes(
   const p2 = hash01(`erq${opts.layer.seed}`) * Math.PI * 2;
   const band = 0.3;
   const rimAt = (lon: number): number =>
-    opts.layer.cone - band + lobeAmp * (0.58 * Math.sin(lobes * lon + p1) + 0.42 * Math.sin(lobes2 * lon + p2));
+    erRimCuts(
+      opts.layer.cone - band + lobeAmp * (0.58 * Math.sin(lobes * lon + p1) + 0.42 * Math.sin(lobes2 * lon + p2)),
+      lon, opts.cuts, e1, e2,
+    );
   const pts: THREE.Vector3[] = [];
   const d = new THREE.Vector3();
   for (let k = 0; k < count; k++) {
     const lon = hash01(`${seedTag}lo${k}`) * Math.PI * 2;
-    const rim = rimAt(lon) * 0.965;
+    const rim = Math.max(0.05, rimAt(lon) * 0.965);
     // 帽面均匀采样: cos(polar) ∈ [cos(rim), 1] 均匀
     const cosP = 1 - (1 - Math.cos(rim)) * hash01(`${seedTag}cp${k}`);
     const polar = Math.acos(THREE.MathUtils.clamp(cosP, -1, 1));
@@ -644,12 +695,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     tmps.renderOrder = 58;
     membraneGroup.add(tmps);
   }
-  labels.push({ pos: sph(R * 1.14, 0.62, 0.4), zh: '质膜（脂双层）', latin: 'Plasma membrane' });
-  // v14 悬停锚点: 膜面环带 6 点感应（悬停任一处膜缘即现「质膜」标记）
-  for (let hi = 0; hi < 6; hi++) {
-    const hp = sph(R * 1.02, 0.28, 0.55 + hi * 1.05);
-    hover.push({ pos: hp, r: 2.8, zh: '质膜（脂双层）', latin: 'Plasma membrane', group: 'surface' });
-  }
+  // v19 用户反馈「指到很多位置都显示质膜」: 质膜 7 个 r=2.8 环带锚点的感应并集覆盖全细胞 ——
+  // 大量「空白胞质」区域被质膜抢占, 且与所有内部细胞器错标竞争。彻底移除质膜悬停目标
+  // （质膜本身包围全细胞, 悬停语义无信息量; 目录同步不再列出）。
 
   // 糖萼（胞外多糖-糖蛋白绒被 —— 真实细胞表面的 fuzzy coat; 随膜流动缓转）
   {
@@ -682,7 +730,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       gc.renderOrder = 62;
     }
     membraneGroup.add(gc);
-    labels.push({ pos: sph(R * 1.3, 1.78, 1.1), zh: '糖萼（多糖绒被）', latin: 'Glycocalyx' });
+    // v19 锚点归位: 糖萼本体就在膜面外侧 0.02R 处（旧标签位 R·1.3 悬在胞外空域 → 指空显标错位）
+    labels.push({ pos: sph(R * 1.03, 1.78, 1.1), zh: '糖萼（多糖绒被）', latin: 'Glycocalyx' });
   }
 
   // 网格蛋白衣被小窝（质膜胞质面内吞点位 —— 穹窿 + 刺突衣被剪影; 低端设备省略）
@@ -982,8 +1031,16 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     }
     if (primary) {
       labels.push({ pos: nucPointK(new THREE.Vector3(Math.cos(0.35) * Math.cos(1.9), Math.sin(0.35), Math.cos(0.35) * Math.sin(1.9)), 0.42), zh: '核孔复合体', latin: 'Nuclear pore complex' });
-      const topP = nucPointK(new THREE.Vector3(0, 1, 0), 0.2);
-      labels.push({ pos: { x: topP.x, y: topP.y + 0.55, z: topP.z }, zh: '核被膜（双层）', latin: 'Nuclear envelope' });
+    }
+    // v19 逐核悬停锚点（双核肝细胞的次核此前无任何核区锚点 —— 指到次核只能命中 ER/双核错标）:
+    //   核被膜（顶面贴面）/ 核仁（本体位）/ 异染色质（边集带）各核独立感应; 半径随核尺寸缩放。
+    {
+      const neDir = new THREE.Vector3((primary ? 0.18 : -0.18), 1, (primary ? 0.32 : -0.32)).normalize();
+      const neP = nucPointK(neDir, 0.05);
+      hover.push({ pos: { x: neP.x, y: neP.y, z: neP.z }, r: Nn * 0.66, zh: '核被膜（双层）', latin: 'Nuclear envelope', group: 'nuclear' });
+      const hcDir = new THREE.Vector3(Math.cos(-1.0 + (primary ? 0 : 1.3)) * Math.cos(2.2), Math.sin(-1.0), Math.cos(-1.0 + (primary ? 0 : 1.3)) * Math.sin(2.2));
+      const hcP = nucPointK(hcDir, -0.15);
+      hover.push({ pos: { x: hcP.x, y: hcP.y, z: hcP.z }, r: Nn * 0.42, zh: '异染色质（边集）', latin: 'Heterochromatin', group: 'nuclear' });
     }
 
     // 外周异染色质（致密, 贴内层核膜 —— 真实核型边集化）
@@ -1103,20 +1160,21 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       nucleolusSpeckles.push(spk);
     }
     nucleoli.push(...instNucleoli);
-    if (primary && instNucleoli.length > 0) {
+    // v19 核仁锚点归位: 旧标签位在核仁外飘 0.6-1.0（指者未见核仁却显示核仁/反之）; 逐核锚在本体上
+    if (instNucleoli.length > 0) {
       const n0 = instNucleoli[0].position;
-      labels.push({ pos: { x: n0.x + (n0.x - nucCK.x) * 0.7, y: n0.y + 0.62, z: n0.z }, zh: '核仁', latin: 'Nucleolus' });
-      labels.push({ pos: nucPointK(new THREE.Vector3(Math.cos(-1.0) * Math.cos(2.2), Math.sin(-1.0), Math.cos(-1.0) * Math.sin(2.2)), -0.1), zh: '异染色质（边集）', latin: 'Heterochromatin' });
+      hover.push({ pos: { x: n0.x, y: n0.y, z: n0.z }, r: Nn * 0.42, zh: '核仁', latin: 'Nucleolus', group: 'nuclear' });
     }
   }
   // v8 双核教学标注（仅多核时添加 —— 真实肝板约 25% 肝细胞为双核）
+  // v19 锚点归位: 旧位悬在双核上方 N·0.95 空域; 新位 = 两核之间赤道面（指认「双核」特征未体）
   if (nucleiInst.length > 1) {
     const mid = {
       x: (nucleiInst[0].center.x + nucleiInst[1].center.x) / 2,
       y: (nucleiInst[0].center.y + nucleiInst[1].center.y) / 2,
       z: (nucleiInst[0].center.z + nucleiInst[1].center.z) / 2,
     };
-    labels.push({ pos: { x: mid.x, y: mid.y + N * 0.95, z: mid.z }, zh: '双核 ×2（约 25% 肝细胞）', latin: 'Binucleate (~25%)' });
+    hover.push({ pos: mid, r: N * 0.55, zh: '双核 ×2（约 25% 肝细胞）', latin: 'Binucleate (~25%)', group: 'nuclear' });
   }
 
   /* ================= 线粒体（双膜 + 板层嵴 + ATP 合酶） ================= */
@@ -1262,8 +1320,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: 1.7, zh: '线粒体（板层嵴）', latin: 'Mitochondrion', group: 'energy' });
   }
   if (mitos.length) {
+    // v19 锚点归位: 线粒体标注位即首颗本体位（每颗已有精确锚点, 此处补首颗同位标签锚; 旧 1.4×+0.85 外飘错位）
     const m0 = mitos[0].obj.position;
-    labels.push({ pos: { x: m0.x * 1.4, y: m0.y + 0.85, z: m0.z * 1.4 }, zh: '线粒体（板层嵴）', latin: 'Mitochondrion' });
+    labels.push({ pos: { x: m0.x, y: m0.y, z: m0.z }, zh: '线粒体（板层嵴）', latin: 'Mitochondrion' });
   }
 
   /* ================= 粗面内质网（v17 参照图严格还原: 千层饼核周层叠囊冠 + 「黄沙」核糖体） ================= */
@@ -1282,8 +1341,14 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     // 顺核轮廓弯曲 + 局部细微皱褶; 核糖体「黄沙」随机满铺胞质面。
     // 旧「窄环带扫掠 + 外周囊池堆」读感为分散碎片/小椭球 —— 整体退役, 换 erLamellaGeometry 球冠壳层体系。
     // v18 用户反馈「肝细胞的内质网没有按照双核来做」: 肝细胞双核 → 逐核实例循环 ——
-    // 每核各自完整的核周 RER 冠（外核膜延续的独立内膜系统, 双核肝细胞超微结构特征）;
-    // 次核冠轴镜像变体（开口同朝前下可读, 层缘花边相位独立; 双冠间片层交叠 = 参照图迷宫读感）。
+    //   每核各自完整的核周 RER 冠（外核膜延续的独立内膜系统, 双核肝细胞超微结构特征）。
+    // v19 用户反馈「双核 ER 有重叠, 且其中一个没有贴紧核」双根因根治:
+    //   根因①「重叠」: 双核间距仅 0.48 单位, 两冠深层片各自外伸 1.09 → 核间隙互穿甚至刺入对方核体
+    //     → avoid 同伴核排除球硬钳（层片以对方核面为界）+ 朝同伴方位角冠缘缺口 + 冠轴左右镜像外倾
+    //     （旧两冠轴均指向彼此 → 加剧中侧交叠; 镜像后开口朝前下偏外侧, 双冠呈「背靠背」分布）。
+    //   根因②「不贴紧」: 主核冠 vault 外跃层在高尔基扇区把片层拱到核面外 2.8 单位 —— 拱形气泡
+    //     恰从主核伸向次核方向（读感=一段脱离核体的自由 ER）→ 双核时 vault 退役, 改用冠缘「缺口」
+    //     让位（覆盖内收而非半径外跃; 单核细胞保留 vault —— v17 已验证构图）。
     const multi = nucleiInst.length > 1;
     const parts: { geo: THREE.BufferGeometry }[] = [];
     const allRiboPts: THREE.Vector3[] = [];
@@ -1301,17 +1366,43 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         const d = dir.clone().normalize();
         return nucleusRadius(d, SHAPE, Nn2) + (fbm3(d.x * NUC_FREQ, d.y * NUC_FREQ, d.z * NUC_FREQ, 3, seed2) - 0.5) * 2 * nucAmp;
       };
-      // 冠轴: 主核朝后上（开口朝前下 —— 默认相机正对核面裸区 + 冠缘层层错落可读, 参照图构图）;
-      // 次核镜像变体 —— 双核冠开口同朝相机侧, 层缘花边相位独立（层叠迷宫读感不重复）
-      const crownAxis = primary
+      // 冠轴: 单核 → 后上原版（开口朝前下, v17 已验证构图 + vault 让位）;
+      // v19 双核 → 左右镜像外倾（左核轴偏 -x / 右核轴偏 +x）—— 双冠「背靠背」互让核间隙,
+      //   开口仍朝前下（相机正对双核裸面, 参照图构图保留）。
+      const crownAxis = !multi
         ? new THREE.Vector3(0.16, 0.3, -0.94).normalize()
-        : new THREE.Vector3(-0.2, 0.34, -0.92).normalize();
+        : new THREE.Vector3(primary ? -0.36 : 0.36, 0.28, -0.89).normalize();
+      // v19 同伴核实例（双核避让数据源）
+      const sibling = multi ? nucleiInst[primary ? 1 : 0] : null;
       const erOpts: ErLamellaOpts = {
         radiusAt: surf2,
         center: nucCK2,
         clampAt: (d) => cellSurf(d, R, SHAPE, -0.6),
-        // 高尔基扇区让位仅主核冠（囊堆挂主核旁）—— 次核方向性错开, 无需 vault
-        vault: primary ? { dir: GOLGI_DIR, ang: 0.72, to: GOLGI_OUTER } : null,
+        // 高尔基让位: 单核保留 v17 vault 外跃; 双核退役（外跃拱起气泡 = 「不贴核」根因②）,
+        //   主核冠改用 cuts 冠缘缺口内收 —— 高尔基方位角覆盖收窄 0.55 rad, 囊堆栖身冠缘凹口。
+        vault: !multi ? { dir: GOLGI_DIR, ang: 0.72, to: GOLGI_OUTER } : null,
+        // v19 同伴核排除球: 半径 = 同伴核径×1.06 + 0.16（FBM 起伏余量）—— 深层片不再刺入对方核体
+        avoid: sibling
+          ? {
+              center: new THREE.Vector3(sibling.center.x, sibling.center.y, sibling.center.z),
+              radius: N * sibling.scale * 1.06 + 0.16,
+            }
+          : null,
+        // v19 冠缘缺口: ①朝同伴方位角内收 0.62 rad（核间隙片层不堆叠）②主核冠高尔基方位角内收 0.55 rad
+        cuts: sibling
+          ? [
+              {
+                dir: new THREE.Vector3(
+                  sibling.center.x - nucCK2.x,
+                  sibling.center.y - nucCK2.y,
+                  sibling.center.z - nucCK2.z,
+                ).normalize(),
+                w: 1.05,
+                depth: 0.62,
+              },
+              ...(primary ? [{ dir: GOLGI_DIR.clone(), w: 1.0, depth: 0.55 }] : []),
+            ]
+          : null,
       };
       const layerDefs: ErLamellaLayer[] = [];
       for (let L = 0; L < layers; L++) {
@@ -1410,7 +1501,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     // 悬停锚点落位（每核冠 3 处 —— 双核肝细胞共 6 处; 顶锚 r 2.1/缘锚 1.9）
     for (const { p, big, label } of erAnchors) {
       if (label) {
-        labels.push({ pos: { x: p.x, y: p.y + 0.75, z: p.z }, zh: '粗面内质网（核糖体）', latin: 'Rough ER' });
+        // v19 锚点归位: 标注锚即冠顶可见缘木位（旧 +0.75 上飘 → 指认错位）
+        labels.push({ pos: { x: p.x, y: p.y, z: p.z }, zh: '粗面内质网（核糖体）', latin: 'Rough ER' });
       }
       hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: big ? 2.1 : 1.9, zh: '粗面内质网（核糖体）', latin: 'Rough ER', group: 'endomembrane' });
     }
@@ -1567,7 +1659,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     }));
     ser.renderOrder = 45;
     group.add(ser);
-    labels.push({ pos: { x: serFirst.x * 1.25, y: serFirst.y + 0.6, z: serFirst.z * 1.25 }, zh: '滑面内质网', latin: 'Smooth ER' });
+    // v19 锚点归位: SER 首管本体位（旧 1.25×+0.6 外飘）
+    labels.push({ pos: { x: serFirst.x, y: serFirst.y, z: serFirst.z }, zh: '滑面内质网', latin: 'Smooth ER' });
   }
 
   /* ================= 高尔基体（v15 重建: 扁平囊堆「叠杯」+ 核旁定位 + 出芽囊泡） ================= */
@@ -1723,7 +1816,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     group.add(g);
     const topOff = new THREE.Vector3(GOLGI_DIR.x, GOLGI_DIR.y, GOLGI_DIR.z).multiplyScalar(GOLGI_STACK_H * 0.5 + 0.45 * GOLGI_SCALE);
     labels.push({
-      pos: { x: p.x + topOff.x, y: p.y + topOff.y + 0.35, z: p.z + topOff.z },
+      // v19 锚点归位: 囊堆中层面（旧 topOff+0.35 外飘; 精确 hover 锚已在堆中心 p —— 标签锚同步对齐）
+      pos: { x: p.x + topOff.x * 0.4, y: p.y + topOff.y * 0.4, z: p.z + topOff.z * 0.4 },
       zh: '高尔基体（顺→反）', latin: 'Golgi apparatus',
     });
     hover.push({
@@ -1769,7 +1863,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     inst.instanceMatrix.needsUpdate = true;
     inst.renderOrder = 46;
     group.add(inst);
-    labels.push({ pos: { x: v0.x * 1.2, y: v0.y + 0.5, z: v0.z * 1.2 }, zh: '运输囊泡', latin: 'Transport vesicle' });
+    // v19 锚点归位: 首囊本体位（旧 1.2×+0.5 外飘）
+    labels.push({ pos: { x: v0.x, y: v0.y, z: v0.z }, zh: '运输囊泡', latin: 'Transport vesicle' });
   }
 
   /* ================= 溶酶体（酸性水解酶细胞器, pH≈4.5-5） ================= */
@@ -1846,8 +1941,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         spks.renderOrder = 47;
       }
       group.add(bodies, spks);
-      const l0 = centers[0];
-      labels.push({ pos: { x: l0.x * 1.45, y: l0.y + 0.55, z: l0.z * 1.45 }, zh: '溶酶体（pH≈4.5）', latin: 'Lysosome' });
+      // v19 锚点归位: 首颗溶酶体本体位（旧 1.45×+0.55 大幅外飘 —— 错标重灾区）
+      labels.push({ pos: { x: lysoCenters[0].x, y: lysoCenters[0].y, z: lysoCenters[0].z }, zh: '溶酶体（pH≈4.5）', latin: 'Lysosome' });
     }
   }
 
@@ -1982,7 +2077,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     if (lysoCenters.length > 0) {
       const auDir = new THREE.Vector3(Math.cos(-0.5) * Math.cos(2.2), Math.sin(-0.5), Math.cos(-0.5) * Math.sin(2.2));
       const auPos = insidePos(auDir, 0.42, 0.8, 0.55);
-      labels.push({ pos: { x: auPos.x * 1.26, y: auPos.y + 0.6, z: auPos.z * 1.26 }, zh: '自噬体（ULK1 启动）', latin: 'Autophagosome', when: 'autophagy' });
+      // v19 锚点归位: 自噬体本体位（旧 1.26×+0.6 外飘）
+      labels.push({ pos: { x: auPos.x, y: auPos.y, z: auPos.z }, zh: '自噬体（ULK1 启动）', latin: 'Autophagosome', when: 'autophagy' });
     }
   }
 
@@ -2046,7 +2142,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       }
       group.add(bodies, cores);
       const px0 = pxCenters[0];
-      labels.push({ pos: { x: px0.x * 1.5, y: px0.y - 0.6, z: px0.z * 1.5 }, zh: '过氧化物酶体', latin: 'Peroxisome' });
+      // v19 锚点归位: 过氧化物酶体本体位（旧 1.5×-0.6 大幅外飘）
+      labels.push({ pos: { x: px0.x, y: px0.y, z: px0.z }, zh: '过氧化物酶体', latin: 'Peroxisome' });
     }
   }
 
@@ -2084,7 +2181,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       d.renderOrder = 46;
       group.add(d);
     }
-    labels.push({ pos: { x: ld0.x * 1.2, y: ld0.y - 0.5, z: ld0.z * 1.2 }, zh: '脂滴（中性脂）', latin: 'Lipid droplet' });
+    // v19 锚点归位: 脂滴本体位（旧 1.2×-0.5 外飘）
+    labels.push({ pos: { x: ld0.x, y: ld0.y, z: ld0.z }, zh: '脂滴（中性脂）', latin: 'Lipid droplet' });
   }
 
   /* ================= 细胞骨架 ================= */
@@ -2119,10 +2217,12 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     cent2.renderOrder = 44;
     group.add(cent1, cent2);
     // v14 中心体标注 + 悬停锚点（旧版无标注 —— 微管标注不能代表 MTOC 本体）
-    labels.push({ pos: { x: c.x, y: c.y + 0.6, z: c.z }, zh: '中心体（中心粒对）', latin: 'Centrosome' });
+    // v19 锚点归位: 标注位 = 中心粒对本体位（旧 +0.6 上飘）
+    labels.push({ pos: { x: c.x, y: c.y, z: c.z }, zh: '中心体（中心粒对）', latin: 'Centrosome' });
     hover.push({ pos: { x: c.x, y: c.y, z: c.z }, r: 1.7, zh: '中心体（中心粒对）', latin: 'Centrosome', group: 'cytoskeleton' });
     // 中心体放射微管（合并, 原纤维条纹法线）—— v6: 终点贴类型化膜面（旧球形 0.96R 会在窄轴穿出膜外）
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
+    let mtMid = new THREE.Vector3();
     for (let i = 0; i < spec.microtubules; i++) {
       const mtDir = new THREE.Vector3(
         Math.cos((hash01(`t${i}`) - 0.5) * 2.4) * Math.cos(hash01(`t${i}`, 3) * Math.PI * 2),
@@ -2134,6 +2234,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       const ctrl = c.clone().lerp(end, 0.6);
       ctrl.y += (hash01(`t${i}`, 9) - 0.5) * 1.6;
       const curve = new THREE.QuadraticBezierCurve3(c, ctrl, end);
+      if (i === 0) curve.getPoint(0.42, mtMid); // v19: 微管锚点取首根微管中段真实管位（旧 c·2.5 悬空）
       parts.push({ geo: track(new THREE.TubeGeometry(curve, 26, 0.03, 8)) });
     }
     const mts = new THREE.Mesh(track(mergeGeoms(parts)), mat({
@@ -2188,10 +2289,12 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       }));
       ifs.renderOrder = 44;
       group.add(ifs);
-      labels.push({ pos: { x: ifMid.x * 1.15, y: ifMid.y, z: ifMid.z * 1.15 }, zh: '中间丝（波形蛋白）', latin: 'Intermediate filaments' });
+      // v19 锚点归位: 中间丝首丝中段本体位（旧 1.15× 外飘）
+      labels.push({ pos: { x: ifMid.x, y: ifMid.y, z: ifMid.z }, zh: '中间丝（波形蛋白）', latin: 'Intermediate filaments' });
     }
 
-    labels.push({ pos: { x: c.x * 2.5, y: c.y - 0.5, z: c.z * 2.5 }, zh: '微管（中心体放射）', latin: 'Microtubules' });
+    // v19 锚点归位: 首根微管中段真实管位（旧 c·2.5-0.5 悬空在胞质空域）
+    labels.push({ pos: { x: mtMid.x, y: mtMid.y, z: mtMid.z }, zh: '微管（中心体放射）', latin: 'Microtubules' });
 
     // 皮层肌动蛋白网 —— v6: 贴类型化膜面内 0.45-0.8（旧球形 R-0.5 会在窄轴穿出膜外）
     const actGeo = track(new THREE.CapsuleGeometry(0.017, 0.9, 3, 6));
@@ -2287,7 +2390,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     inst.instanceMatrix.needsUpdate = true;
     inst.renderOrder = 46;
     group.add(inst);
-    labels.push({ pos: { x: gly0.x * 1.3, y: gly0.y + 0.4, z: gly0.z * 1.3 }, zh: '糖原玫瑰体', latin: 'Glycogen rosette' });
+    // v19 锚点归位: 首枚玫瑰体中心（旧 1.3×+0.4 外飘）
+    labels.push({ pos: { x: gly0.x, y: gly0.y, z: gly0.z }, zh: '糖原玫瑰体', latin: 'Glycogen rosette' });
   }
 
   if (spec.microvilli) {
@@ -3215,8 +3319,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
    * 多锚点同名目标 = 感应域并集, 目录面板按 zh+latin 去重。 */
   {
     // 感应半径表（latin 前缀匹配 —— 大尺度细胞器给更远的作用范围）
+    // v19: 质膜条目移除（悬停目标已整体退役）; 糖萼 2.4→1.9（表面结构, 收敛捕获域）
     const R_TABLE: [string, number][] = [
-      ['Plasma membrane', 2.8], ['Glycocalyx', 2.4], ['Nuclear envelope', 2.7], ['Nuclear pore complex', 1.7],
+      ['Glycocalyx', 1.9], ['Nuclear pore complex', 1.7],
       ['Nucleolus', 1.9], ['Heterochromatin', 1.8], ['Mitochondrion', 1.8], ['Rough ER', 2.2], ['Smooth ER', 2.0],
       ['Golgi apparatus', 2.6], ['Transport vesicle', 1.7], ['Lysosome', 1.8], ['Autophagosome', 1.7],
       ['Peroxisome', 1.6], ['Lipid droplet', 1.6], ['Microtubules', 2.4], ['Intermediate filaments', 2.0],
@@ -3229,7 +3334,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       ['Mitochondrion', 'energy'], ['Glycogen', 'energy'],
       ['Microtubule', 'cytoskeleton'], ['filament', 'cytoskeleton'], ['actin', 'cytoskeleton'], ['Myofibril', 'cytoskeleton'],
       ['Stress fiber', 'cytoskeleton'], ['Centrosome', 'cytoskeleton'], ['Polysomes', 'cytoskeleton'], ['Terminal web', 'cytoskeleton'],
-      ['Plasma membrane', 'surface'], ['Glycocalyx', 'surface'], ['junction', 'surface'], ['Microvilli', 'surface'],
+      ['Glycocalyx', 'surface'], ['junction', 'surface'], ['Microvilli', 'surface'],
       ['lamina', 'surface'], ['blebbing', 'surface'], ['TCR', 'surface'],
     ];
     for (const l of labels) {
