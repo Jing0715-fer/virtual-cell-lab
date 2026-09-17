@@ -32,7 +32,7 @@ import { useFrame } from '@react-three/fiber';
 import { organelleMaterial, REF, createTimeUniform, type TimeUniform } from './materials';
 import { mergeGeoms, hash01 } from './procedural';
 import { organicNormalMap, stripeNormalMap } from './textures';
-import { erLamellaGeometry, erLamellaRibosomes, golgiCisternaGeometry, type ErLamellaOpts, type ErLamellaLayer } from './organelles';
+import { erLamellaGeometry, erLamellaRibosomes, golgiCisternaGeometry, cristaeLamellaeGeometry, type ErLamellaOpts, type ErLamellaLayer } from './organelles';
 import { OrganelleHoverLayer, type HoverTarget } from './hover-labels';
 import { useLang } from '@/lib/i18n';
 
@@ -620,19 +620,20 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   group.add(dauNeA, dauNeB);
 
   /* ---------- 细胞器（分配到双子细胞） ---------- */
-  // 线粒体（豆状 + 嵴纹理）
+  // 线粒体（豆状 + 真板层嵴 v24 —— 与主细胞同一形态标准）
   const mitoGeo = track(new THREE.CapsuleGeometry(0.4, 0.8, 4, 10));
   const mitoMat = mat({
     color: REF.mitoOuter,
     emissive: '#3e2c26',
     emissiveIntensity: 0.34,
     roughness: 0.28,
-    transmission: perf ? 0 : 0.3,
+    // v24 透射 0.3→0.45 + 条纹法线 0.7→0.35: 嵴板层从「法线贴图伪装」升级为真几何直读
+    transmission: perf ? 0 : 0.45,
     thickness: 0.4,
     opacity: 1,
     clearcoat: 0.5,
     normalMap: mtStripe,
-    normalScale: 0.7,
+    normalScale: 0.35,
     sheen: 0.4,
     sheenColor: REF.sheen,
   });
@@ -647,6 +648,23 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     phase: hash01(`mp${i}`) * Math.PI * 2,
   }));
   group.add(mitos);
+  // v24 板层嵴（非 perf）: 横贯斜置波浪板层堆 ×6 —— 共享线粒体实例矩阵（同一运动学）;
+  // 嵴随线粒体整体分向双子细胞, 透射外壳下「斜带横贯」读感与主细胞一致
+  let mitoCristae: THREE.InstancedMesh | null = null;
+  if (!perf) {
+    const { geometry: mcGeo } = cristaeLamellaeGeometry(77, 6, 0.34, 0.34, 0.32, false);
+    const mcMat = mat({
+      color: REF.mitoCristae,
+      emissive: '#7a5548',
+      emissiveIntensity: 0.55,
+      roughness: 0.4,
+      opacity: 0.85,
+      sheen: 0.5,
+      sheenColor: '#a8826e',
+    });
+    mitoCristae = new THREE.InstancedMesh(track(mcGeo), mcMat, MITO_N);
+    group.add(mitoCristae);
+  }
   // 运输囊泡
   const vesGeo = track(new THREE.SphereGeometry(1, 10, 8));
   const vesMat = mat({ color: REF.vesicle, emissive: '#3e4a58', emissiveIntensity: 0.3, roughness: 0.35, clearcoat: 0.3, opacity: 0.9 });
@@ -1269,9 +1287,11 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
         if (rec) rec.push([pv.x, pv.y, pv.z]);
         mm.compose(pv, qq.setFromEuler(ms.rot), one);
         mitos.setMatrixAt(i, mm);
+        if (mitoCristae) mitoCristae.setMatrixAt(i, mm); // v24 嵴板层与本体同一矩阵
       });
       if (rec) (window as unknown as { __mitoQaPos?: number[][] }).__mitoQaPos = rec;
       mitos.instanceMatrix.needsUpdate = true;
+      if (mitoCristae) mitoCristae.instanceMatrix.needsUpdate = true;
       vesSeeds.forEach((vs2, i) => {
         const toZ = vs2.side * THREE.MathUtils.lerp(2.0, 6.6, ramp(t, 4.8, 7));
         pv.set(Math.cos(vs2.ang) * vs2.rad * (1 - part * 0.35), vs2.y * (1 - part * 0.45), THREE.MathUtils.lerp(0, toZ, part));

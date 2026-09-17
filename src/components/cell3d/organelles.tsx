@@ -10,7 +10,7 @@
  *   5. 细胞器精雕:
  *      - 核孔复合体: 胞质环 + 核质环 + 中央栓 + 核篮（八重对称近似）
  *      - 染色质: 外周异染色质（边集化, 符合真实核型）+ 常染色质纤维 + 核仁（纤维中心 + 颗粒组分）
- *      - 线粒体: 长条豆状外膜（2.9:1, 对应 2D 椭圆形态语言）+ 12 条低频波浪板层嵴 + 嵴膜 ATP 合酶发光点
+ *      - 线粒体: 长条豆状外膜（2.9:1, 对应 2D 椭圆形态语言）+ v24 横贯斜置波浪板层嵴（片缘贴壁 = 嵴连接）+ 嵴膜 ATP 合酶发光点
  *      - RER: 核旁连续囊池网 + 连接管 + 膜旁核糖体 + 游离多聚核糖体
  *      - 高尔基: 顺→反 5 池梯度（非线性顶点色极性, 层叠扁平囊剪影）+ 反面出芽囊泡 + 顺面运输小泡
  *      - 细胞骨架: 中心体放射微管（原纤维条纹法线）+ 皮层肌动蛋白网 + 中间丝（波形蛋白笼）
@@ -27,7 +27,7 @@
  *        T 细胞表面微褶皱 / 肝胆小管（微绒毛环 + 胆汁微粒）
  *      - 全部表面贴附结构（脂双层/跨膜蛋白/糖萼/小窝/微绒毛/出芽/紧密连接）经 cellSurf 严格贴合类型化膜面
  *   8. 保真度 v10（参照用户高保真科学插画基准）:
- *      - 线粒体: 18 条深波形板层嵴 + 更有机的豆状外膜 + 透射加深（嵴腔可见性）
+ *      - 线粒体: v24 横贯斜置波浪板层嵴（旧「沿长轴纵贯管道」解剖学错误退役）+ 更有机的豆状外膜 + 透射加深
  *      - ER: 外周迷宫管网（三通节点 + 膜旁核糖体）—— "ER 遍布胞质"读感
  *      - 高尔基: 7 层扁平囊「叠杯」栈（参数化弯透镜盘 + 花边缘）+ 池间小管 + trans 出芽/TGN + cis COPII 小泡
  *      - 核孔复合体八重对称轮辐花冠; 异染色质双色调密集团块（38 丛 ×8-12 珠）
@@ -521,6 +521,136 @@ function shapedNucleusGeometry(
   pos.needsUpdate = true;
   geo.computeVertexNormals();
   return geo;
+}
+
+/* ============ 线粒体板层嵴几何（v24 —— 参照图「横贯斜置波浪板层」严格还原） ============
+ * 参照图（像素分析: 斜带横贯囊腔、端部亮缘连接膜壁）+ 2D 形态语言（morphologies.tsx
+ * Mitochondrion 两行 ±14/22 深波浪线）双重核实 —— 嵴的正确形态学:
+ *   · 每片板层横贯线粒体横截面（片法向 ≈ 长轴方向）, 沿长轴逐片堆叠;
+ *   · 每片绕深度轴倾斜 ~26°-32°（参照图斜带「//////」节奏, 全栈同向微抖）;
+ *   · 低频波浪褶皱沿片长（幅 0.05-0.08; 全栈共享波节律 + 逐片 ±0.12 相位微抖 → 防互穿）;
+ *   · 片缘深度包络逐列跟随横截面圆（嵴连接 crista junction —— 内膜延续语义）;
+ *   · 片厚 ~0.075（插画语言下嵴膜双层厚度的可读夸张）;
+ *   · 胶囊端帽径向钳 → 端部板层顺冠面内收（嵴弯入线粒体端的读感）。
+ * 旧实现（18 条沿长轴纵贯管道, 嵴平行于长轴）解剖学错误 —— v24 整体退役。
+ * 剖面语义: 示教线粒体长轴贴切平面 → 切平面沿片堆扫过, 每片以波浪斜带呈现
+ * （切到哪层剖到哪片）; ATP 合酶 F1 颗粒配套重定位到片表面（嵴膜才是氧化磷酸化主场）。 */
+export const CRISTA_WAVES = 1.7;
+export const CRISTA_PHASE = 0.63 * Math.PI;
+export const CRISTA_THICK = 0.075;
+
+export interface CristaLamella {
+  /** 沿长轴堆叠位（线粒体局部 Y） */
+  yC: number;
+  /** 绕深度轴倾角（rad） */
+  tilt: number;
+  /** 片半长（贴合基质壁） */
+  halfLen: number;
+  /** 波浪褶皱幅（沿片法向） */
+  amp: number;
+  /** 逐片波相位微抖（±0.12 —— 与几何同源, ATP 定位复用） */
+  jit: number;
+  /** 基质胶囊半径（深度包络基准） */
+  Rm: number;
+}
+
+/** 板层片表面取点（几何构建与 ATP 合酶贴片定位共用同一真源）
+ *  u ∈ [-1,1] 片长参数; dn 沿片法向偏移（±厚/2 → 两宽面）; dz 深度比例（±1 → 片缘） */
+export function cristaPoint(lm: CristaLamella, u: number, dn: number, dz: number): THREE.Vector3 {
+  const cosT = Math.cos(lm.tilt), sinT = Math.sin(lm.tilt);
+  const wv = Math.sin(u * Math.PI * CRISTA_WAVES + CRISTA_PHASE + lm.jit) * lm.amp;
+  const cx = u * lm.halfLen * cosT - wv * sinT;
+  const cy = lm.yC + u * lm.halfLen * sinT + wv * cosT;
+  const dEnv = Math.sqrt(Math.max(0.002, lm.Rm * lm.Rm - Math.min(cx * cx, lm.Rm * lm.Rm * 0.96)));
+  return new THREE.Vector3(cx - dn * sinT, cy + dn * cosT, dz * dEnv);
+}
+
+/** 生成整组板层嵴（单几何合并; 返回片参数表供 ATP 定位） */
+export function cristaeLamellaeGeometry(
+  seed: number,
+  count: number,
+  Rm: number,
+  cylHalf: number,
+  halfSpan: number,
+  perf = false,
+): { geometry: THREE.BufferGeometry; lamellae: CristaLamella[] } {
+  const S = perf ? 9 : 13; // 沿片长采样段
+  const P = perf ? 10 : 14; // 截面环点（薄片椭圆 —— 每宽面 P/2 点）
+  const lamellae: CristaLamella[] = [];
+  const parts: THREE.BufferGeometry[] = [];
+  for (let c = 0; c < count; c++) {
+    const t01 = count > 1 ? c / (count - 1) : 0.5;
+    const lm: CristaLamella = {
+      yC: -halfSpan + t01 * 2 * halfSpan,
+      tilt: 0.46 + hash01(`crt${seed}${c}`) * 0.1,
+      halfLen: Rm * (0.96 + hash01(`chl${seed}${c}`) * 0.05),
+      amp: 0.05 + hash01(`cam${seed}${c}`) * 0.03,
+      jit: (hash01(`cph${seed}${c}`) - 0.5) * 0.24,
+      Rm,
+    };
+    lamellae.push(lm);
+    const cosT = Math.cos(lm.tilt), sinT = Math.sin(lm.tilt);
+    const pos: number[] = [];
+    const idx: number[] = [];
+    for (let s = 0; s <= S; s++) {
+      const u = (s / S) * 2 - 1;
+      const wv = Math.sin(u * Math.PI * CRISTA_WAVES + CRISTA_PHASE + lm.jit) * lm.amp;
+      const cx = u * lm.halfLen * cosT - wv * sinT;
+      const cy = lm.yC + u * lm.halfLen * sinT + wv * cosT;
+      // 深度包络: 列 |cx| 处横截面圆内最大 |z|（片缘贴基质壁 —— 嵴连接）
+      const dEnv = Math.sqrt(Math.max(0.002, Rm * Rm - Math.min(cx * cx, Rm * Rm * 0.96)));
+      for (let p = 0; p < P; p++) {
+        const th = (p / P) * Math.PI * 2;
+        const dn = Math.cos(th) * CRISTA_THICK * 0.5;
+        const dz = Math.sin(th) * dEnv;
+        let x = cx - dn * sinT;
+        let y = cy + dn * cosT;
+        let z = dz;
+        // 胶囊端帽径向钳（|y| 超圆柱段 → 按冠球面收进 —— 端部板层顺冠面内收）
+        const ay = Math.abs(y);
+        if (ay > cylHalf) {
+          const dy = ay - cylHalf;
+          const cap = Math.sqrt(Math.max(0.0009, Rm * Rm - dy * dy));
+          const r = Math.hypot(x, z);
+          if (r > cap) { const k = cap / r; x *= k; z *= k; }
+        }
+        pos.push(x, y, z);
+      }
+    }
+    // 闭合管网格（法向外）
+    for (let s = 0; s < S; s++) {
+      for (let p = 0; p < P; p++) {
+        const a = s * P + p;
+        const b = s * P + ((p + 1) % P);
+        const cA = (s + 1) * P + p;
+        const cB = (s + 1) * P + ((p + 1) % P);
+        idx.push(a, b, cA, b, cB, cA);
+      }
+    }
+    // 两端扇形帽（片端圆润收口; col=0 面向 -片长向, col=S 面向 +片长向）
+    for (const col of [0, S]) {
+      const ci = pos.length / 3;
+      let sx = 0, sy = 0, sz = 0;
+      for (let p = 0; p < P; p++) {
+        sx += pos[(col * P + p) * 3];
+        sy += pos[(col * P + p) * 3 + 1];
+        sz += pos[(col * P + p) * 3 + 2];
+      }
+      pos.push(sx / P, sy / P, sz / P);
+      for (let p = 0; p < P; p++) {
+        const a = col * P + p;
+        const b = col * P + ((p + 1) % P);
+        if (col === 0) idx.push(ci, b, a);
+        else idx.push(ci, a, b);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    parts.push(geo);
+  }
+  return { geometry: mergeGeoms(parts.map((g) => ({ geo: g }))), lamellae };
 }
 
 /** 方向 dir 处的细胞器表面半径（位移场, 球状基底） */
@@ -1220,8 +1350,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   /* ================= 线粒体（双膜 + 板层嵴 + ATP 合酶） ================= */
   const mitos: { obj: THREE.Group; baseY: number; phase: number; pinned?: boolean }[] = [];
   const mitoCount = perf ? Math.max(4, Math.round(spec.mitoCount * 0.6)) : spec.mitoCount;
-  // 板层嵴 18 条（perf 9）: v10 深波形密板层 —— 高保真插画中嵴褶皱填满线粒体的读感
-  const cristaeN = perf ? 9 : 18;
+  // v24 板层嵴 12 片（perf 7）: 横贯斜置波浪板层堆（间距 ~0.14 —— 参照图斜带密度）
+  const cristaeN = perf ? 7 : 12;
   // 外膜: 总长 2.3 / 半径 0.4 ≈ 2.9:1 长条豆状（对应 2D Mitochondrion 椭圆 rx54/ry22 ≈ 2.45:1）
   // v10: FBM 幅度 0.05 + 频率 3.1 —— 有机豆状轮廓更明显（近似电镜下不规则线粒体外形）
   const mitoOuterGeo = track(displaceGeometry(new THREE.CapsuleGeometry(0.4, 1.5, 12, 28), 3.1, 0.05, 17));
@@ -1281,50 +1411,45 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     matrix.scale.set(1, 1, 0.82);
     matrix.renderOrder = cutaway ? 99.6 : 45; // v22 剖面窗口化（先于外膜壳绘制）
     g.add(matrix);
-    // 板层嵴（合并为单几何）: 12 条 = 6 个 x 槽 × 双排（对应 2D 形态学两行波浪嵴线）
-    const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
-    for (let c = 0; c < cristaeN; c++) {
-      const ph = hash01(`cr${c}`, i * 31);
-      const slots = Math.ceil(cristaeN / 2);
-      const slot = Math.floor(c / 2);
-      const xSlot = (slot / Math.max(1, slots - 1) - 0.5) * 0.44; // 相邻板层间距拉开（v10 加宽嵴带）
-      const zRow = c % 2 === 0 ? -0.09 : 0.09;
-      const pts: THREE.Vector3[] = [];
-      for (let k = 0; k <= 10; k++) {
-        const t = k / 10;
-        // 波形频率调低（约 0.55~0.95 个全长波形）→ "板层"感更强; v10 波幅 0.16 深褶皱
-        pts.push(new THREE.Vector3(
-          Math.sin(t * Math.PI * (0.6 + ph * 0.5)) * 0.035,
-          (t - 0.5) * 1.5,
-          zRow + Math.cos(t * Math.PI * (1.1 + ph * 0.8)) * 0.16,
-        ));
-      }
-      const tube = track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.075, 7));
-      // 压扁 0.5 → 板层; T·S 顺序使 x 槽平移不受压扁缩放
-      const m = new THREE.Matrix4().makeTranslation(xSlot, 0, 0).multiply(new THREE.Matrix4().makeScale(0.5, 1, 1));
-      parts.push({ geo: tube, matrix: m });
-    }
-    const cristae = new THREE.Mesh(track(mergeGeoms(parts)), cristaeMat);
+    // v24 板层嵴: 横贯斜置波浪板层堆（12 片 perf 7 —— 参照图「//////」斜带节奏;
+    // 片缘贴基质壁 = 嵴连接; 胶囊端帽钳 → 端部板层顺冠面内收）
+    const { geometry: cristaeGeo, lamellae } = cristaeLamellaeGeometry(i * 31, cristaeN, 0.345, 0.69, 0.75, perf);
+    const cristae = new THREE.Mesh(track(cristaeGeo), cristaeMat);
     cristae.scale.set(1, 1, 0.82);
     cristae.renderOrder = cutaway ? 100.4 : 47; // v22 剖面窗口化（嵴板层剖开直读）
     g.add(cristae);
-    // 嵴膜 ATP 合酶（F1 颗粒, 发光）
+    // 嵴膜 ATP 合酶（F1 颗粒, 发光）—— v24 重定位: 贴板层表面分布（嵴膜才是
+    // 氧化磷酸化主场; 旧「基质内随机漂浮」与膜系统无关联读感退役）+ 内膜内缘余量
     const atpGeo = track(new THREE.SphereGeometry(0.032, 5, 5));
-    const atpCount = Math.round(26 * q) + 5;
+    const atpCount = lamellae.length * (perf ? 1 : 2) + 2;
     const atps = new THREE.InstancedMesh(atpGeo, atpMat, atpCount);
     {
       const mm = new THREE.Matrix4();
-      for (let k = 0; k < atpCount; k++) {
-        const t = k / atpCount;
-        const yy = (t - 0.5) * 1.4;
-        const xx = Math.sin(t * Math.PI * 3.2) * 0.24;
-        const zz = Math.cos(t * Math.PI * 2.6) * 0.16;
-        mm.makeScale(0.8 + hash01(`atp${i}${k}`) * 0.6, 0.8 + hash01(`atp${i}${k}`) * 0.6, 0.8 + hash01(`atp${i}${k}`) * 0.6);
-        mm.setPosition(xx + (hash01(`atp${i}${k}`, 3) - 0.5) * 0.1, yy, zz + (hash01(`atp${i}${k}`, 5) - 0.5) * 0.08);
+      let k = 0;
+      for (let c = 0; c < lamellae.length && k < atpCount - 2; c++) {
+        const per = perf ? 1 : 2;
+        for (let j = 0; j < per; j++, k++) {
+          const lm = lamellae[c];
+          // 片长向左右分置 + 交替贴正/反面（跨片表面均匀散布）
+          const u = (j === 0 ? -1 : 1) * (0.3 + hash01(`atpu${i}${c}${j}`) * 0.45);
+          const side = (c + j) % 2 === 0 ? 1 : -1;
+          const pt = cristaPoint(lm, u, side * (CRISTA_THICK * 0.5 + 0.014), (hash01(`atpz${i}${c}${j}`) - 0.5) * 1.3);
+          const sc = 0.8 + hash01(`atp${i}${k}`) * 0.6;
+          mm.makeScale(sc, sc, sc);
+          mm.setPosition(pt.x, pt.y, pt.z);
+          atps.setMatrixAt(k, mm);
+        }
+      }
+      // 余量 2 颗贴内膜内缘（boundary membrane 区亦有小密度分布 —— 两栖真实性）
+      for (; k < atpCount; k++) {
+        const ang = hash01(`atpb${i}${k}`) * Math.PI * 2;
+        const yy = (hash01(`atpby${i}${k}`) - 0.5) * 1.3;
+        mm.makeScale(0.9, 0.9, 0.9);
+        mm.setPosition(Math.cos(ang) * 0.3, yy, Math.sin(ang) * 0.26);
         atps.setMatrixAt(k, mm);
       }
       atps.instanceMatrix.needsUpdate = true;
-      atps.renderOrder = cutaway ? 100.6 : 47; // v22 剖面窗口化（嶋膜 F1 颗粒）
+      atps.renderOrder = cutaway ? 100.6 : 47; // v22 剖面窗口化（嵴膜 F1 颗粒）
     }
     g.add(atps);
     // mtDNA 核样体（基质内 3 个亮斑 —— 母系基因组 + 线粒体核糖体; 低端设备省略）
@@ -2232,7 +2357,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   {
     const pxN = perf ? Math.max(1, Math.round(spec.peroxisomeCount * 0.6)) : spec.peroxisomeCount;
     if (pxN > 0) {
-      const bodyGeo = track(new THREE.SphereGeometry(0.26, 12, 10));
+      // v24 有机轮廓: 完美球体 → 位移球（与溶酶体同语言 —— 电镜下过氧化物酶体外形微不规则）
+      const bodyGeo = track(displacedSphere(0.26, 2, 3.2, 0.03, 211));
       const bodyMat = mat({
         // v12 参照图: 过氧化物酶体冷灰蓝族
         color: REF.peroxi,
@@ -2296,7 +2422,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
        * 半球剖开直读尿酸氧化酶晶核（电镜致密芯）+ 基质; 与溶酶体示教个体同理。 */
       if (cutaway) {
         const pg = new THREE.Group();
-        const pBodyGeo = track(new THREE.SphereGeometry(0.32, 16, 12));
+        // v24 有机轮廓（与群体过氧化物酶体同语言）
+        const pBodyGeo = track(displacedSphere(0.32, 2, 3.0, 0.035, 212));
         const pBodyMat = mat({
           color: REF.peroxi,
           transmission: transOn ? 0.28 : 0,
