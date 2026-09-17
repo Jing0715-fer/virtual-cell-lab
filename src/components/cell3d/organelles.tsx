@@ -523,21 +523,21 @@ function shapedNucleusGeometry(
   return geo;
 }
 
-/* ============ 线粒体板层嵴几何（v24 —— 参照图「横贯斜置波浪板层」严格还原） ============
- * 参照图（像素分析: 斜带横贯囊腔、端部亮缘连接膜壁）+ 2D 形态语言（morphologies.tsx
- * Mitochondrion 两行 ±14/22 深波浪线）双重核实 —— 嵴的正确形态学:
+/* ============ 线粒体板层嵴几何（v26 —— 参照图「满腔密集近垂直蛇形板层」严格还原） ============
+ * 参照图 VLM 实测双重核实（2024-09 会话: 「板层垂直于长轴、紧密均匀填满整个内部、
+ * 轮廓平滑U形/蛇形弯曲、嵴色比外膜深」）:
  *   · 每片板层横贯线粒体横截面（片法向 ≈ 长轴方向）, 沿长轴逐片堆叠;
- *   · 每片绕深度轴倾斜 ~26°-32°（参照图斜带「//////」节奏, 全栈同向微抖）;
- *   · 低频波浪褶皱沿片长（幅 0.05-0.08; 全栈共享波节律 + 逐片 ±0.12 相位微抖 → 防互穿）;
+ *   · v26 倾角 26°-32° → 6°-11°: 参照图嵴「大致垂直」主导读感（v24 的明显斜置是旧像素
+ *     分析的过判读）—— 仅保留微量倾斜 + 逐片正负交替 → 有机不失呆板;
+ *   · v26 波浪 1.7 → 2.6 节 + 幅 0.06-0.09: 「平滑蛇形弯曲」的连续波纹轮廓（非生硬直线）;
+ *   · v26 密度 12 → 16 片 + halfSpan 0.78: 「紧密均匀填满整个内部」;
  *   · 片缘深度包络逐列跟随横截面圆（嵴连接 crista junction —— 内膜延续语义）;
- *   · 片厚 ~0.075（插画语言下嵴膜双层厚度的可读夸张）;
- *   · 胶囊端帽径向钳 → 端部板层顺冠面内收（嵴弯入线粒体端的读感）。
- * 旧实现（18 条沿长轴纵贯管道, 嵴平行于长轴）解剖学错误 —— v24 整体退役。
- * 剖面语义: 示教线粒体长轴贴切平面 → 切平面沿片堆扫过, 每片以波浪斜带呈现
+ *   · 片厚 0.07（均匀偏薄）; 胶囊端帽径向钳 → 端部板层顺冠面内收。
+ * 剖面语义: 示教线粒体长轴贴切平面 → 切平面沿片堆扫过, 每片以蛇形斜带呈现
  * （切到哪层剖到哪片）; ATP 合酶 F1 颗粒配套重定位到片表面（嵴膜才是氧化磷酸化主场）。 */
-export const CRISTA_WAVES = 1.7;
+export const CRISTA_WAVES = 2.6;
 export const CRISTA_PHASE = 0.63 * Math.PI;
-export const CRISTA_THICK = 0.075;
+export const CRISTA_THICK = 0.07;
 
 export interface CristaLamella {
   /** 沿长轴堆叠位（线粒体局部 Y） */
@@ -582,9 +582,10 @@ export function cristaeLamellaeGeometry(
     const t01 = count > 1 ? c / (count - 1) : 0.5;
     const lm: CristaLamella = {
       yC: -halfSpan + t01 * 2 * halfSpan,
-      tilt: 0.46 + hash01(`crt${seed}${c}`) * 0.1,
+      // v26: 近垂直主导（6°-11°）+ 逐片正负交替 → 参照图「嵴大致垂直于长轴」的有机微噪
+      tilt: (0.105 + hash01(`crt${seed}${c}`) * 0.09) * (c % 2 === 0 ? 1 : -1),
       halfLen: Rm * (0.96 + hash01(`chl${seed}${c}`) * 0.05),
-      amp: 0.05 + hash01(`cam${seed}${c}`) * 0.03,
+      amp: 0.062 + hash01(`cam${seed}${c}`) * 0.03,
       jit: (hash01(`cph${seed}${c}`) - 0.5) * 0.24,
       Rm,
     };
@@ -1350,8 +1351,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   /* ================= 线粒体（双膜 + 板层嵴 + ATP 合酶） ================= */
   const mitos: { obj: THREE.Group; baseY: number; phase: number; pinned?: boolean }[] = [];
   const mitoCount = perf ? Math.max(4, Math.round(spec.mitoCount * 0.6)) : spec.mitoCount;
-  // v24 板层嵴 12 片（perf 7）: 横贯斜置波浪板层堆（间距 ~0.14 —— 参照图斜带密度）
-  const cristaeN = perf ? 7 : 12;
+  // v26 嵴密度: 12 → 16 片（perf 9）—— 参照图「紧密均匀填满整个内部」
+  const cristaeN = perf ? 9 : 16;
   // 外膜: 总长 2.3 / 半径 0.4 ≈ 2.9:1 长条豆状（对应 2D Mitochondrion 椭圆 rx54/ry22 ≈ 2.45:1）
   // v10: FBM 幅度 0.05 + 频率 3.1 —— 有机豆状轮廓更明显（近似电镜下不规则线粒体外形）
   const mitoOuterGeo = track(displaceGeometry(new THREE.CapsuleGeometry(0.4, 1.5, 12, 28), 3.1, 0.05, 17));
@@ -1385,10 +1386,11 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     sheenColor: '#a8826e',
     flow: { color: '#8a6a58', strength: 0.18, scale: 2.0, speed: 0.14, rim: 0.3 },
   });
+  // v26 嵴材质: 参照图「嵴色比外膜深（深红棕）+ 内外层次对比」—— 加深加亮发射（透射外壳下蛇形板层直读）
   const cristaeMat = mat({
     color: REF.mitoCristae,
-    emissive: '#7a5548',
-    emissiveIntensity: 0.62,
+    emissive: '#9a5a42',
+    emissiveIntensity: 0.72,
     roughness: 0.4,
     opacity: 0.82,
     sheen: 0.6,
@@ -1431,9 +1433,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     inner.scale.set(1, 1, 0.82);
     inner.renderOrder = cutaway ? 100.2 : 46.5; // v22 体系: 外膜壳 100 → 内膜 100.2 → 嵴 100.4
     g.add(inner);
-    // v24 板层嵴: 横贯斜置波浪板层堆（12 片 perf 7 —— 参照图「//////」斜带节奏;
-    // 片缘贴基质壁 = 嵴连接; 胶囊端帽钳 → 端部板层顺冠面内收）
-    const { geometry: cristaeGeo, lamellae } = cristaeLamellaeGeometry(i * 31, cristaeN, 0.345, 0.69, 0.75, perf);
+    // v26 板层嵴: 满腔密集近垂直蛇形板层堆（16 片 perf 9, halfSpan 0.78 —— 参照图
+    // 「紧密均匀填满整个内部」; 片缘贴基质壁 = 嵴连接; 胶囊端帽钳 → 端部板层顺冠面内收）
+    const { geometry: cristaeGeo, lamellae } = cristaeLamellaeGeometry(i * 31, cristaeN, 0.345, 0.69, 0.78, perf);
     const cristae = new THREE.Mesh(track(cristaeGeo), cristaeMat);
     cristae.scale.set(1, 1, 0.82);
     cristae.renderOrder = cutaway ? 100.4 : 47; // v22 剖面窗口化（嵴板层剖开直读）
@@ -2562,10 +2564,13 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     // v19 锚点归位: 标注位 = 中心粒对本体位（旧 +0.6 上飘）
     labels.push({ pos: { x: c.x, y: c.y, z: c.z }, zh: '中心体（中心粒对）', latin: 'Centrosome' });
     hover.push({ pos: { x: c.x, y: c.y, z: c.z }, r: 1.7, zh: '中心体（中心粒对）', latin: 'Centrosome', group: 'cytoskeleton' });
-    // 中心体放射微管（合并, 原纤维条纹法线）—— v6: 终点贴类型化膜面（旧球形 0.96R 会在窄轴穿出膜外）
+    // v26 微管阵列全面升级（参照图: 「粗壮绿色管道、放射状贯穿胞质、最显眼骨架成分」）:
+    //   密度 ×2.2+6（旧 8-14 根在暗背景下不可读 —— 用户「细胞骨架没有体现」根因）、
+    //   管径 0.03 → 0.042、发射 0.24 → 0.46、不透明度 0.5 → 0.62 —— sage 绿主骨架直读
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
     let mtMid = new THREE.Vector3();
-    for (let i = 0; i < spec.microtubules; i++) {
+    const mtTotal = Math.round(spec.microtubules * (perf ? 1.2 : 2.2)) + (perf ? 4 : 6);
+    for (let i = 0; i < mtTotal; i++) {
       const mtDir = new THREE.Vector3(
         Math.cos((hash01(`t${i}`) - 0.5) * 2.4) * Math.cos(hash01(`t${i}`, 3) * Math.PI * 2),
         Math.sin((hash01(`t${i}`) - 0.5) * 2.4),
@@ -2577,14 +2582,14 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       ctrl.y += (hash01(`t${i}`, 9) - 0.5) * 1.6;
       const curve = new THREE.QuadraticBezierCurve3(c, ctrl, end);
       if (i === 0) curve.getPoint(0.42, mtMid); // v19: 微管锚点取首根微管中段真实管位（旧 c·2.5 悬空）
-      parts.push({ geo: track(new THREE.TubeGeometry(curve, 26, 0.03, 8)) });
+      parts.push({ geo: track(new THREE.TubeGeometry(curve, 26, 0.042, 8)) });
     }
     const mts = new THREE.Mesh(track(mergeGeoms(parts)), mat({
-      // v12 参照图: 微管亮石板族（左主光高光读感）
+      // v26 参照图: 微管 sage 绿族（旧石板蓝灰在暗背景下不可见）
       color: REF.microtubule,
-      emissive: '#4a5a6e',
-      emissiveIntensity: 0.24,
-      opacity: 0.5,
+      emissive: '#3f5c4a',
+      emissiveIntensity: 0.46,
+      opacity: 0.62,
       roughness: 0.45,
       normalMap: mtStripe,
       normalScale: 0.55,
@@ -2596,8 +2601,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
 
     // 中间丝（核周波形蛋白笼 —— 核被膜到质膜的力学支架, 与微管正交的第三套骨架）
     // v6: 严格自成形核面拉到类型化膜面（旧球形插值在窄轴穿膜、长轴悬空）
+    // v26: 亮度提升（0.38 → 0.46, 石板族亮化）—— 参照图灰白细丝可辨读
     {
-      const ifN = perf ? 6 : 12;
+      const ifN = perf ? 8 : 14;
       const ifParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
       let ifMid = new THREE.Vector3();
       for (let i = 0; i < ifN; i++) {
@@ -2620,11 +2626,11 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         ifParts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 22, 0.02, 5)) });
       }
       const ifs = new THREE.Mesh(track(mergeGeoms(ifParts)), mat({
-        // v12 参照图: 中间丝石板族
+        // v26 参照图: 中间丝石板族亮化
         color: REF.interFil,
-        emissive: '#4a5a6e',
-        emissiveIntensity: 0.18,
-        opacity: 0.38,
+        emissive: '#525e70',
+        emissiveIntensity: 0.26,
+        opacity: 0.46,
         roughness: 0.5,
         sheen: 0.6,
         sheenColor: REF.sheen,
@@ -2639,9 +2645,10 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     labels.push({ pos: { x: mtMid.x, y: mtMid.y, z: mtMid.z }, zh: '微管（中心体放射）', latin: 'Microtubules' });
 
     // 皮层肌动蛋白网 —— v6: 贴类型化膜面内 0.45-0.8（旧球形 R-0.5 会在窄轴穿出膜外）
-    const actGeo = track(new THREE.CapsuleGeometry(0.017, 0.9, 3, 6));
-    const actMat = mat({ color: REF.actin, emissive: '#5a6a7e', emissiveIntensity: 0.2, opacity: 0.4, roughness: 0.4 });
-    const actCount = Math.round(72 * q) + 10;
+    // v26 参照图: 橙黄细丝（REF.actin 琥珀化）+ 密度 96q+16 + 亮度提升 —— 暗背景下可读
+    const actGeo = track(new THREE.CapsuleGeometry(0.02, 0.9, 3, 6));
+    const actMat = mat({ color: REF.actin, emissive: '#8a6a3e', emissiveIntensity: 0.34, opacity: 0.55, roughness: 0.4, sheen: 0.45, sheenColor: '#d8b88a' });
+    const actCount = Math.round(96 * q) + 16;
     const actins = new THREE.InstancedMesh(actGeo, actMat, actCount);
     {
       const mm = new THREE.Matrix4();
@@ -2669,6 +2676,60 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       const aDir = new THREE.Vector3(0.42, 0.18, 0.89).normalize();
       const ar = cellSurf(aDir, R, SHAPE, -0.62);
       hover.push({ pos: { x: aDir.x * ar, y: aDir.y * ar, z: aDir.z * ar }, r: 2.3, zh: '皮层肌动蛋白网', latin: 'Cortical actin', group: 'cytoskeleton' });
+    }
+
+    // v26 胞质肌动蛋白网（参照图: 「橙黄细丝数量非常多、密度很高, 缠绕细胞器、
+    // 与微管交叉的致密背景网络」—— 填补「细胞内部空旷」的真实感缺口）:
+    //   少数粗束（0.028 —— 应力纤维样锚定读感）+ 多数细丝（0.013）— CatmullRom 波浪轨迹
+    //   穿插于细胞器之间（insidePos 避核 + 形状化采样）, 琥珀微光
+    {
+      const netN = perf ? 14 : 26;
+      const netParts: { geo: THREE.BufferGeometry }[] = [];
+      const SEGS = 4;
+      const wD = new THREE.Vector3();
+      const wPrev = new THREE.Vector3(
+        Math.cos(hash01('an0', 3) * Math.PI * 2) * 0.8,
+        (hash01('an0', 5) - 0.5) * 1.2,
+        Math.sin(hash01('an0', 3) * Math.PI * 2) * 0.8,
+      ).normalize();
+      for (let i = 0; i < netN; i++) {
+        wPrev.set(
+          Math.cos(hash01(`an${i}`, 3) * Math.PI * 2),
+          (hash01(`an${i}`, 5) - 0.5) * 1.4,
+          Math.sin(hash01(`an${i}`, 3) * Math.PI * 2),
+        ).normalize();
+        const pts: THREE.Vector3[] = [];
+        for (let k = 0; k <= SEGS; k++) {
+          // 蛇形抖动方向（相邻段转折 ≤ 65° —— 柔韧缠络读感）
+          wD.set(
+            wPrev.x + (hash01(`aw${i}${k}`) - 0.5) * 1.1,
+            wPrev.y + (hash01(`aw${i}${k}`, 3) - 0.5) * 0.9,
+            wPrev.z + (hash01(`aw${i}${k}`, 5) - 0.5) * 1.1,
+          ).normalize();
+          wPrev.copy(wD);
+          const rad = 0.2 + hash01(`ar${i}${k}`) * 0.58;
+          const p = insidePos(wD, rad, i < 7 ? 0.05 : 0.04, 0.3);
+          pts.push(new THREE.Vector3(p.x, p.y, p.z));
+        }
+        const thick = i < 7 ? 0.028 : 0.013;
+        netParts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.6), 18, thick, 5)) });
+      }
+      const actNet = new THREE.Mesh(track(mergeGeoms(netParts)), mat({
+        color: REF.actin,
+        emissive: '#a8783e',
+        emissiveIntensity: 0.4,
+        opacity: 0.5,
+        roughness: 0.42,
+        sheen: 0.5,
+        sheenColor: '#d8b88a',
+      }));
+      actNet.renderOrder = 44;
+      group.add(actNet);
+      // 悬停锚点: 代表束中段本体位（目录可发现性）
+      {
+        const anp = insidePos(new THREE.Vector3(0.55, -0.3, 0.78).normalize(), 0.5, 0.06, 0.3);
+        hover.push({ pos: { x: anp.x, y: anp.y, z: anp.z }, r: 2.1, zh: '胞质肌动蛋白网', latin: 'Cytoplasmic actin network', group: 'cytoskeleton' });
+      }
     }
   }
 

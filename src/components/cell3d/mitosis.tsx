@@ -468,13 +468,12 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   const pcmB = new THREE.Mesh(track(new THREE.SphereGeometry(0.55, 16, 12)), pcmMat);
   // 极组 A/B 直接挂根组（位置 = 世界坐标 ±PZ）; 静态微管族单独成组 —— 组 z 缩放 = 纺锤体拉长
   group.add(centA, centB, pcmA, pcmB);
-  const spindle = new THREE.Group();
-  group.add(spindle);
 
   /* ---------- 纺锤体微管 ---------- */
+  // v26 参照图对色: 微管 = sage 绿族（REF.microtubule —— 与主视图细胞骨架同色 = 同蛋白同色科学编码）
   const mtMat = mat({
     color: REF.microtubule,
-    emissive: '#5a6c84',
+    emissive: '#3f5c4a',
     emissiveIntensity: 0.6,
     roughness: 0.4,
     normalMap: mtStripe,
@@ -489,7 +488,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   //   「纤维全部消失 → 中间体突然冒出」断档读感（用户反馈根因）。
   const mtPolarMat = mat({
     color: REF.microtubule,
-    emissive: '#5a6c84',
+    emissive: '#3f5c4a',
     emissiveIntensity: 0.6,
     roughness: 0.4,
     normalMap: mtStripe,
@@ -514,30 +513,28 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   const astrals = new THREE.InstancedMesh(astralGeo, mtMat, astralDirs.length);
   astrals.renderOrder = 43;
   group.add(astrals);
-  // 极微管（两极反向伸向中央重叠区; antiparallel 交叉语义）
-  {
-    const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
-    const polarN = perf ? 10 : 16;
-    for (const side of [-1, 1]) {
-      for (let i = 0; i < polarN; i++) {
-        const lat = (hash01(`po${side}${i}`, 3) - 0.5) * 0.75;
-        const lon = hash01(`po${side}${i}`, 5) * Math.PI * 2;
-        const dir = new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon) * 0.35).normalize();
-        const start = new THREE.Vector3(dir.x * 0.5, dir.y * 0.5, side * POLE_Z0);
-        const end = new THREE.Vector3(-dir.x * 0.9, -dir.y * 0.9, -side * 1.6); // 越过赤道 → 重叠区
-        const ctrl = start.clone().lerp(end, 0.5).multiplyScalar(0.92);
-        parts.push({ geo: track(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(start, ctrl, end), 16, 0.03, 5)) });
-      }
+  // v26 极间微管（中央纺锤体）逐帧 InstancedMesh —— v25 静态合并网格 + spindle.scale.z 组缩放退役:
+  //   组缩放会把纤维极端拉离中心体（furrowMT=1 时极端仅 ±0.38·PZ 而中心体在 ±PZ ——
+  //   纤维整体悬空中段、与两极脱锚 —— 用户「纺锤丝显示还是有问题」根因）。
+  //   新体系: 极端逐帧恒锚中心体位（vA = 中心体 + 扇出偏移）, 远端随缢裂从越赤道 ±1.6
+  //   向赤道 ±0.5 滑移（antiparallel overlap 致密化）+ xy 压缩 → 「纤维束凝缩成致密杆」
+  //   读感保留; 全程双保险钳制膜内（端点 + 中段采样回转面）。
+  const polarN = perf ? 10 : 16;
+  const polarSeeds: { lat: number; lon: number }[] = [];
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < polarN; i++) {
+      polarSeeds.push({ lat: (hash01(`po${side}${i}`, 3) - 0.5) * 0.75, lon: hash01(`po${side}${i}`, 5) * Math.PI * 2 });
     }
-    const polar = new THREE.Mesh(track(mergeGeoms(parts)), mtPolarMat);
-    polar.renderOrder = 43;
-    spindle.add(polar);
   }
+  const polarGeo = track(new THREE.CylinderGeometry(0.032, 0.032, 1, 5));
+  const polars = new THREE.InstancedMesh(polarGeo, mtPolarMat, polarSeeds.length);
+  polars.renderOrder = 43;
+  group.add(polars);
   // 动粒微管（逐染色体双极连接 —— InstancedMesh 逐帧重排: 极 → 着丝粒动粒）
   const kfiberGeo = track(new THREE.CylinderGeometry(0.055, 0.055, 1, 7, 1));
   const kfiberMat = mat({
-    color: '#a8b8cc',
-    emissive: '#7a8aa4',
+    color: '#a8c8b4',
+    emissive: '#6a8a76',
     emissiveIntensity: 0.85,
     roughness: 0.35,
     normalMap: mtStripe,
@@ -555,6 +552,67 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   const kQuat = new THREE.Quaternion();
   const kM = new THREE.Matrix4();
   const kScale = new THREE.Vector3();
+
+  /* ---------- v26 间期细胞骨架（参照图: 间期细胞绿色微管放射 + 琥珀皮层细丝 ----------
+   * 用户反馈「细胞骨架之类的目前好像没有体现」—— 分裂演示间期此前是裸胞质;
+   * 与主视图同族语言（同蛋白同色科学编码: 微管 sage 绿 / 肌动蛋白琥珀）:
+   *   · 间期微管阵列: MTOC（核被膜外表面中心粒对位）放射, [0.05,0.4] 淡入 →
+   *     前中期纺锤体组装时解聚退役 [1.2,2.0]（科学: 间期阵列去稳 → 微管蛋白
+   *     亚库重组装为纺锤体三族纤维）
+   *   · 皮层肌动蛋白网: 切向胶囊阵逐帧贴形态学膜面内 ~0.6 —— 随缢裂期膜面
+   *     收缩, 收缩环接管后让位退役 [4.55,5.3] */
+  const mtoC = new THREE.Vector3(0.9, 0.9, 3.15).normalize().multiplyScalar(NUC_R * 1.02);
+  const interMat = mat({
+    color: REF.microtubule,
+    emissive: '#3f5c4a',
+    emissiveIntensity: 0.5,
+    roughness: 0.45,
+    normalMap: mtStripe,
+    normalScale: 0.5,
+    opacity: 0,
+    sheen: 0.4,
+    sheenColor: REF.sheen,
+  });
+  const INTER_N = perf ? 14 : 22;
+  const interDirs: THREE.Vector3[] = [];
+  for (let i = 0; i < INTER_N * 3 && interDirs.length < INTER_N; i++) {
+    const d = new THREE.Vector3(
+      Math.cos((hash01(`it${i}`, 3) - 0.5) * 2.2) * Math.cos(hash01(`it${i}`, 5) * Math.PI * 2),
+      Math.sin((hash01(`it${i}`, 7) - 0.5) * 2.2),
+      Math.cos((hash01(`it${i}`, 3) - 0.5) * 2.2) * Math.sin(hash01(`it${i}`, 5) * Math.PI * 2),
+    ).normalize();
+    // 外向半空间过滤（回穿核体的方向丢弃 —— 间期微管不侵入核被膜内）
+    if (d.dot(mtoC) < -0.1 * NUC_R) continue;
+    interDirs.push(d);
+  }
+  const interMTs = new THREE.InstancedMesh(track(new THREE.CylinderGeometry(0.03, 0.03, 1, 5)), interMat, Math.max(2, interDirs.length));
+  interMTs.renderOrder = 43;
+  group.add(interMTs);
+  const actxMat = mat({
+    color: REF.actin,
+    emissive: '#8a6a3e',
+    emissiveIntensity: 0.32,
+    roughness: 0.42,
+    opacity: 0,
+    sheen: 0.45,
+    sheenColor: '#d8b88a',
+  });
+  const ACTX_N = perf ? 36 : 64;
+  const actxSeeds: { dir: THREE.Vector3; tan: THREE.Vector3 }[] = [];
+  for (let i = 0; i < ACTX_N; i++) {
+    const dir = new THREE.Vector3(
+      Math.cos((hash01(`ax${i}`, 3) - 0.5) * 2.4) * Math.cos(hash01(`ax${i}`, 5) * Math.PI * 2),
+      Math.sin((hash01(`ax${i}`, 7) - 0.5) * 2.4),
+      Math.cos((hash01(`ax${i}`, 3) - 0.5) * 2.4) * Math.sin(hash01(`ax${i}`, 5) * Math.PI * 2),
+    ).normalize();
+    const tan = new THREE.Vector3(hash01(`at${i}`) - 0.5, hash01(`at${i}`, 3) - 0.5, hash01(`at${i}`, 5) - 0.5).cross(dir).normalize();
+    actxSeeds.push({ dir, tan });
+  }
+  const actx = new THREE.InstancedMesh(track(new THREE.CapsuleGeometry(0.02, 0.7, 3, 5)), actxMat, ACTX_N);
+  actx.renderOrder = 44;
+  group.add(actx);
+  const interMatRef = interMat as THREE.MeshPhysicalMaterial;
+  const actxMatRef = actxMat as THREE.MeshPhysicalMaterial;
 
   /* ---------- 核被膜（崩解碎片 + 双子核重组） ---------- */
   const neMat = mat({
@@ -663,16 +721,17 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     phase: hash01(`mp${i}`) * Math.PI * 2,
   }));
   group.add(mitos);
-  // v24 板层嵴（非 perf）: 横贯斜置波浪板层堆 ×6 —— 共享线粒体实例矩阵（同一运动学）;
-  // 嵴随线粒体整体分向双子细胞, 透射外壳下「斜带横贯」读感与主细胞一致
+  // v26 板层嵴（非 perf）: 满腔密集近垂直蛇形板层堆 ×12 —— 共享线粒体实例矩阵（同一运动学）;
+  //   修缺陷: 旧参数（6 片, halfSpan 0.32）在半长 0.8 囊腔内仅覆盖中部 40% —— 端部空腔读感
+  //   「嵴稀疏/不对」; 新参数 12 片 ±0.52 满腔填铺（cylHalf 0.4 = 胶囊圆柱段真实值）
   let mitoCristae: THREE.InstancedMesh | null = null;
   let mitoInner: THREE.InstancedMesh | null = null;
   if (!perf) {
-    const { geometry: mcGeo } = cristaeLamellaeGeometry(77, 6, 0.34, 0.34, 0.32, false);
+    const { geometry: mcGeo } = cristaeLamellaeGeometry(77, 12, 0.345, 0.4, 0.52, false);
     const mcMat = mat({
       color: REF.mitoCristae,
-      emissive: '#7a5548',
-      emissiveIntensity: 0.55,
+      emissive: '#9a5a42',
+      emissiveIntensity: 0.7,
       roughness: 0.4,
       opacity: 0.85,
       sheen: 0.5,
@@ -682,7 +741,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     group.add(mitoCristae);
     // v25 内膜（inner boundary membrane）: 双膜三明治 —— 外膜 0.4 / 膜间隙 0.03 / 内膜 0.37;
     //   嵴板层片缘（Rm 0.34）贴内膜内面 → 「嵴从内膜折叠」读感; 共享实例矩阵同一运动学
-    const miGeo = track(new THREE.CapsuleGeometry(0.37, 0.74, 6, 14));
+    const miGeo = track(new THREE.CapsuleGeometry(0.365, 0.76, 6, 14));
     const miMat = mat({
       color: REF.mitoCristae,
       emissive: '#6a4a3e',
@@ -917,7 +976,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   const furrowRing = new THREE.Mesh(track(new THREE.TorusGeometry(1, 0.14, 10, 40)), ringMat);
   furrowRing.renderOrder = 48;
   group.add(furrowRing);
-  const midbodyMat = mat({ color: '#9aa4b4', emissive: '#6a748a', emissiveIntensity: 0.8, roughness: 0.4, opacity: 0 });
+  const midbodyMat = mat({ color: '#8fa694', emissive: '#5a6e60', emissiveIntensity: 0.8, roughness: 0.4, opacity: 0 });
   const midbody = new THREE.Mesh(track(new THREE.CylinderGeometry(0.3, 0.3, 1.1, 12)), midbodyMat);
   midbody.rotation.x = Math.PI / 2;
   midbody.renderOrder = 48;
@@ -953,6 +1012,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   const pv = new THREE.Vector3();
   const vA = new THREE.Vector3();
   const vB = new THREE.Vector3();
+  const vC = new THREE.Vector3();
 
   const update = (t: number, dt: number) => {
     uTime.value += dt;
@@ -1079,7 +1139,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
      * 全窗口内纤维可见度单调归零, 不再与深缢裂共存。 */
     const mtOpacity = clamp01(ramp(t, 0.7, 1.6) * (1 - ramp(t, 4.3, 5.05)));
     mtMatRef.opacity = mtOpacity;
-    /* v25 中央纺锤体（midzone 反平行重叠区）持续到胞质分裂（用户反馈「纺锤丝消失后突然又出现」根治）:
+    /* v26 中央纺锤体（midzone 反平行重叠区）持续到胞质分裂（用户反馈「纺锤丝消失后突然又出现」根治）:
      *   旧版极微管与星体共用 mtMat → 5.05 同拍全隐; 中间体 5.5 才快拍淡入 —— t∈[5.05,5.5]
      *   纺锤类结构完全断档 + 中间体 2.5s 内 0→0.95 快拍冒出。现三段连续交接:
      *   ① 星体/动粒纤维 4.2-5.02 退役 ② 中带 [4.95,5.8] 一边致密化一边淡出（科学: 后期 B
@@ -1087,7 +1147,6 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
      *   全程任一时刻纺锤-中间体链都有可见结构, 无断档无突兀。 */
     const mtPolarOpacity = clamp01(ramp(t, 0.7, 1.6) * (1 - ramp(t, 4.95, 5.8)));
     mtPolarMatRef.opacity = mtPolarOpacity;
-    spindle.visible = mtPolarOpacity > 0.01;
     /* v22 收缩环联动（用户反馈「收缩过程中纺锤丝没有随着发生变化」）:
      * 数值上纤维已恒在膜内（v20 双保险钳制 + __spindleQa 实测零越界）—— 但收缩期纤维
      * 长度/贴边位置不变, 半透膜下视觉上「顶穿」缢裂面。现让纺锤随收缩环主动退场:
@@ -1189,23 +1248,127 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     pcmB.position.copy(centB.position);
     centA.rotation.y += dt * 0.8;
     centB.rotation.y -= dt * 0.8;
-    // 静态微管族跟随极位（组 z 缩放 = 纺锤体拉长）
-    /* v25 中带致密化: 随收缩环 (1−0.62·furrowMT) 向中央收拢 —— 极端锚点向内脱锚、
-     * 重叠区向中间体位汇聚（科学: 胞质分裂期中带 antiparallel overlap 向中央来焦致密化,
-     * 成为中间体骨架）; 与纺锤腰收窄 (spindleWaist) 同步 = 「纤维束凝缩成致密杆」读感,
-     * 与下方中间体淡入无缝接棒。 */
-    spindle.scale.z = (PZ / POLE_Z0) * (1 - 0.62 * furrowMT);
-    /* v22 中央纺锤（极微管重叠区）随收缩环收窄: 旧版 xy 恒定 —— 缢裂腰部回转面半径
-     * 收缩到 ~2-3 时重叠区 ±0.9 的横向跨度读感「顶住膜面」; 现随 furrowMT 收窄 45%
-     * （科学: 极微管随中间体成熟向中央来焦, antiparallel overlap 致密化） */
-    const spindleWaist = 1 - 0.45 * furrowMT;
-    spindle.scale.x = spindleWaist;
-    spindle.scale.y = spindleWaist;
+
+    /* v26 极间微管逐帧解算（中央纺锤体 —— 极端恒锚中心体 + 重叠区随缢裂收拢）:
+     *   · 极端 vA = 中心体位 + 扇出偏移（dir·0.5）—— 逐帧跟随两极外移, 纤维永不脱离中心体
+     *     （v25 组缩放缺陷根治: 旧 scale.z=(PZ/POLE_Z0)·(1−0.62·furrowMT) 把极端拉到
+     *     ±0.38·PZ 悬空中段）
+     *   · 远端 vB: 越赤道反平行位 −side·1.6 → 随 furrowMT 滑向赤道 −side·0.5（重叠区
+     *     致密化 = 中间体骨架汇聚）+ xy 压缩 50%（纤维束收束）
+     *   · 双保险钳制（同星体微管 v20 体系）: 端点 + 中段线性内插采样 —— 纤维恒留膜内 */
+    if (mtPolarOpacity > 0.01) {
+      let pi = 0;
+      const ovZ = THREE.MathUtils.lerp(1.6, 0.5, furrowMT); // 重叠区边缘: ±1.6 → ±0.5
+      const xyComp = 1 - 0.5 * furrowMT; // 重叠区 xy 收束
+      for (const side of [-1, 1]) {
+        for (let i = 0; i < polarN; i++) {
+          const s2 = polarSeeds[side < 0 ? i : polarN + i];
+          const dir = vC.set(
+            Math.cos(s2.lat) * Math.cos(s2.lon),
+            Math.sin(s2.lat),
+            Math.cos(s2.lat) * Math.sin(s2.lon) * 0.35,
+          ).normalize();
+          // 极端: 恒锚中心体（扇出偏移 0.5）
+          vA.set(dir.x * 0.5, dir.y * 0.5, side * PZ);
+          // 远端: 越赤道反平行 → 重叠区（随缢裂收拢 + xy 压缩致密化）
+          vB.set(-dir.x * 0.9 * xyComp, -dir.y * 0.9 * xyComp, -side * ovZ);
+          // ① 端点钳制（缢裂颈部回转面）
+          {
+            const u0 = (vB.z / memL + 1) / 2;
+            const rr0 = Math.max(0.05, rProfile(u0)) * 0.9;
+            const rc = Math.hypot(vB.x, vB.y);
+            if (rc > rr0) {
+              const kk = rr0 / rc;
+              vB.x *= kk;
+              vB.y *= kk;
+            }
+          }
+          // ② 中段采样（两端均有 xy —— 通用线性内插; 超面 → 从极侧收缩远端保持极端锚定）
+          {
+            let shrink = 1;
+            for (const smp of [0.3, 0.5, 0.7, 0.9]) {
+              const zs = vA.z + (vB.z - vA.z) * smp;
+              if (Math.abs(zs) >= memL * 0.98) continue;
+              const us = (zs / memL + 1) / 2;
+              const allowed = Math.max(0.05, rProfile(us)) * 0.88;
+              const rs = Math.hypot(vA.x + (vB.x - vA.x) * smp, vA.y + (vB.y - vA.y) * smp);
+              if (rs > allowed) shrink = Math.min(shrink, allowed / rs);
+            }
+            if (shrink < 1) {
+              vB.x = vA.x + (vB.x - vA.x) * shrink;
+              vB.y = vA.y + (vB.y - vA.y) * shrink;
+            }
+          }
+          kDir.subVectors(vB, vA);
+          const kl = Math.max(0.01, kDir.length());
+          kMid.addVectors(vA, vB).multiplyScalar(0.5);
+          kQuat.setFromUnitVectors(kUp, kDir.normalize());
+          kScale.set(1, kl, 1);
+          kM.compose(kMid, kQuat, kScale);
+          polars.setMatrixAt(pi++, kM);
+        }
+      }
+      polars.instanceMatrix.needsUpdate = true;
+      polars.visible = true;
+    } else {
+      polars.visible = false;
+    }
+
+    /* v26 间期微管阵列: MTOC 放射 → 前中期解聚退役（微管蛋白亚库重组装为纺锤体） */
+    const interOp = clamp01(ramp(t, 0.05, 0.4) * (1 - ramp(t, 1.2, 2.0)));
+    interMatRef.opacity = interOp * 0.6;
+    if (interOp > 0.01) {
+      let iim = 0;
+      for (const d of interDirs) {
+        // 端点解算: 静态球面膜内（间期膜恒球 —— 退役完成 2.0 早于伸长起点 2.9, 恒有效）
+        const b = d.dot(mtoC);
+        const c = (R_CELL - 0.35) ** 2 - mtoC.lengthSq();
+        const len = Math.max(0.5, -b + Math.sqrt(Math.max(0.01, b * b + c)));
+        vA.copy(mtoC);
+        vB.copy(d).multiplyScalar(len).add(vA);
+        kDir.subVectors(vB, vA);
+        const kl = Math.max(0.01, kDir.length());
+        kMid.addVectors(vA, vB).multiplyScalar(0.5);
+        kQuat.setFromUnitVectors(kUp, kDir.normalize());
+        kScale.set(1, kl, 1);
+        kM.compose(kMid, kQuat, kScale);
+        interMTs.setMatrixAt(iim++, kM);
+      }
+      for (; iim < interMTs.count; iim++) {
+        kM.makeScale(0, 0, 0);
+        interMTs.setMatrixAt(iim, kM);
+      }
+      interMTs.instanceMatrix.needsUpdate = true;
+      interMTs.visible = true;
+    } else {
+      interMTs.visible = false;
+    }
+
+    /* v26 皮层肌动蛋白网: 逐帧贴形态学膜面内 ~0.6 —— 缢裂期随膜面收缩, 让位收缩环 */
+    const actxOp = clamp01(ramp(t, 0.05, 0.5) * (1 - ramp(t, 4.55, 5.3)));
+    actxMatRef.opacity = actxOp * 0.5;
+    if (actxOp > 0.01) {
+      for (let i = 0; i < ACTX_N; i++) {
+        const s3 = actxSeeds[i];
+        const h = Math.max(1e-4, Math.hypot(s3.dir.x, s3.dir.y));
+        const u = (s3.dir.z + 1) / 2;
+        const rr = Math.max(0.05, rProfile(u)) - 0.6;
+        pv.set((s3.dir.x / h) * rr, (s3.dir.y / h) * rr, s3.dir.z * memL * 0.99);
+        qq.setFromUnitVectors(kUp, s3.tan);
+        sc.set(1, 0.85 + hash01(`axs${i}`) * 0.9, 1);
+        mm.compose(pv, qq, sc);
+        actx.setMatrixAt(i, mm);
+      }
+      actx.instanceMatrix.needsUpdate = true;
+      actx.visible = true;
+    } else {
+      actx.visible = false;
+    }
 
     /* v22 QA 插桩: 纺锤纤维膜外越界测量（__spindleQaProbe 门控 —— 实测实例矩阵逐段采样,
      * 与渲染像素无关的数值真源; 常态零成本） */
     if (typeof window !== 'undefined' && (window as { __spindleQaProbe?: boolean }).__spindleQaProbe) {
-      const qa = { t, astral: 0, kfiber: 0, polar: 0, nAstral: 0, nKfiber: 0 };
+      const qa: { t: number; astral: number; kfiber: number; polar: number; nAstral: number; nKfiber: number; nPolar?: number; poleErr?: number } = { t, astral: 0, kfiber: 0, polar: 0, nAstral: 0, nKfiber: 0 };
       const testPt = (x: number, y: number, z: number): number => {
         if (Math.abs(z) > memL) return Math.abs(z) - memL + Math.hypot(x, y);
         const u = (z / memL + 1) / 2;
@@ -1230,20 +1393,26 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       };
       const astralQa = { worst: 0, n: 0 };
       const kfiberQa = { worst: 0, n: 0 };
+      const polarQa = { worst: 0, n: 0 };
       sampleInst(astrals, astralQa, false);
       sampleInst(kfibers, kfiberQa, true);
+      sampleInst(polars, polarQa, false);
       qa.astral = astralQa.worst; qa.nAstral = astralQa.n;
       qa.kfiber = kfiberQa.worst; qa.nKfiber = kfiberQa.n;
-      // 极微管: 静态合并网格 → 世界包围盒 8 角（回变换到组局部坐标 —— 与膜回转面同坐标系）
-      if (spindle.visible && mtPolarMatRef.opacity > 0.02) {
-        spindle.updateWorldMatrix(true, true);
-        const bb = new THREE.Box3().setFromObject(spindle);
-        const wp = new THREE.Vector3();
-        for (let cx = 0; cx <= 1; cx++) for (let cy = 0; cy <= 1; cy++) for (let cz = 0; cz <= 1; cz++) {
-          wp.set(cx ? bb.max.x : bb.min.x, cy ? bb.max.y : bb.min.y, cz ? bb.max.z : bb.min.z);
-          pv.copy(group.worldToLocal(wp.clone()));
-          qa.polar = Math.max(qa.polar, testPt(pv.x, pv.y, pv.z));
+      qa.polar = polarQa.worst; qa.nPolar = polarQa.n;
+      // v26 极端锚定性验证: 每根极间纤维极端 z 与中心体位 ±PZ 的最大偏差（逐帧数值真源）
+      if (polars.visible && mtPolarMatRef.opacity > 0.02) {
+        let poleErr = 0;
+        const pe = new THREE.Vector3();
+        for (let ii = 0; ii < polars.count; ii++) {
+          polars.getMatrixAt(ii, kM);
+          if (kM.elements[0] === 0 && kM.elements[5] === 0) continue;
+          pe.set(0, -0.5, 0).applyMatrix4(kM);
+          poleErr = Math.max(poleErr, Math.abs(Math.abs(pe.z) - PZ));
         }
+        qa.poleErr = poleErr;
+      } else {
+        qa.poleErr = 0;
       }
       (window as unknown as { __spindleQa?: unknown }).__spindleQa = qa;
     }
@@ -1445,6 +1614,10 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       push('中心体（中心粒对）', 'Centrosome', -0.5, 0, PZ, 1.8);
     } else {
       push('中心体（已复制, 贴核）', 'Centrosome', 0.5, 1.1, 1.5, 1.8);
+      // v26 间期细胞骨架锚点（微管阵列 + 皮层肌动蛋白 —— 悬停可发现性）
+      push('微管（间期放射阵列）', 'Interphase microtubules', mtoC.x + 1.4, mtoC.y + 0.6, mtoC.z + 1.1, 2.2);
+      const aDir = new THREE.Vector3(0.42, 0.18, 0.89).normalize().multiplyScalar(R_CELL - 0.6);
+      push('皮层肌动蛋白网', 'Cortical actin', aDir.x, aDir.y, aDir.z, 2.4);
     }
     // v20 线粒体锚点逐颗跟随相位（用户反馈「黄圈里的线粒体悬停无反应」）:
     //   旧版仅 2 个静态锚（间期位）—— 8 颗线粒体大多不在感应域内; 现按 update 同源运动学

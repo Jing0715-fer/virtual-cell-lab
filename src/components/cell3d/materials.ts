@@ -25,9 +25,9 @@ export function createTimeUniform(): TimeUniform {
  *   高光 (145,175,207) 浅蓝 · 暖 accents (110,76,54) 琥珀棕
  * 全部 organelle 颜色从旧"高饱和生物荧光"迁移到该低饱和家族 —— 科研插画的沉稳质感。 */
 export const REF = {
-  /* 线粒体（暖古铜族） */
-  mitoOuter: '#5d4640',
-  mitoCristae: '#93705f',
+  /* 线粒体（暖古铜族; v26 参照图再校色: 外膜浅化 + 嵴深化 —— 内外层次对比突显） */
+  mitoOuter: '#6b4f45',
+  mitoCristae: '#8a5140',
   mitoMatrix: '#392b27',
   mitoAtp: '#c9a227',
   mtdna: '#a8889a',
@@ -60,12 +60,14 @@ export const REF = {
   nucleolus: '#584a6e',
   nucleolusHi: '#6e5a8a',
   npc: '#9aa0ae',
-  /* 囊泡/骨架（石板族 + 浅蓝高光族） */
+  /* 囊泡/骨架 —— v26 参照图严格对色（VLM 实测: 微管=绿色粗管/微丝=橙黄细丝/中丝=灰白）
+   * 旧石板蓝灰三色在暗背景下不可读 —— 用户反馈「细胞骨架没有体现」的色彩根因;
+   * 微管 sage 绿（emerald 主题族）/ 微丝琥珀（与主题 accent 同族）—— 同蛋白同色的科学编码 */
   vesicle: '#6a7684',
   vesicleHi: '#8494a8',
-  microtubule: '#8494a8',
-  interFil: '#7a8598',
-  actin: '#94a0b2',
+  microtubule: '#6f9a80',
+  interFil: '#8b93a4',
+  actin: '#c9a05e',
   sheen: '#a8c4d8',
   /* 自噬流（低饱和绿族 —— LC3 生物学标记色保留可辨性） */
   autophago: '#4a6a62',
