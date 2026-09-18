@@ -56,6 +56,12 @@ export interface SimSnapshot {
   tourNode: string | null;
   /** 教学引导: 邻居分子 id 集合（保持可见） */
   tourNeighbors: Set<string> | null;
+  /** v31 教学引导: 已点亮站点集合（级联推进 —— 已讲解分子保持辉光, 「信号一路传来」读感） */
+  tourVisited?: Set<string> | null;
+  /** v31 教学引导: 教学链已点亮边 key 集合（含正反 `${a}>${b}`） */
+  tourLitEdges?: Set<string> | null;
+  /** v31 教学引导: 级联行进脉冲（站点切换写入 —— 上站→本站信号彗星沿边折线行进） */
+  tourPulse?: { points: { x: number; y: number; z: number }[]; startedAt: number; duration: number; color: string } | null;
   /** 事件脉冲: 分子最近被信号抵达时间戳（performance.now(), 事件脉冲层写入） */
   pulseAt?: Record<string, number>;
   /** 事件脉冲: 边最近脉冲时间戳（双向 key） */
@@ -226,10 +232,14 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
     const tourNode = sim.current.tourNode;
     const isTourTarget = !!tourNode && node.id === tourNode;
     const isTourNeighbor = !!tourNode && !!sim.current.tourNeighbors?.has(node.id);
+    // v31 级联点亮: 已讲解站点（非当前站）—— 恒亮 + 缓慢呼吸（「信号已传到这里」）
+    const isVisited = !!tourNode && !isTourTarget && !!sim.current.tourVisited?.has(node.id);
     const vis = tourNode
       ? isTourTarget || isTourNeighbor
         ? 1
-        : 0.16
+        : isVisited
+          ? 0.9
+          : 0.16
       : focus
         ? a > 0.12 || selected
           ? 1
@@ -241,14 +251,14 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
       groupRef.current.position.y = node.pos.y + Math.sin(t * 0.8 + phase) * 0.16;
       groupRef.current.position.x = node.pos.x + Math.cos(t * 0.5 + phase * 2) * 0.1;
     }
-    // 发光强度 = 活性（教学目标额外脉冲 + 信号抵达闪光）
+    // 发光强度 = 活性（教学目标额外脉冲 + 信号抵达闪光; v31 已访站点稳态辉光）
     coreMat.emissiveIntensity =
-      0.35 + a * 2.4 + flash * 2.6 + (isTourTarget ? 1.5 + 0.55 * Math.sin(t * 6) : 0);
+      0.35 + a * 2.4 + flash * 2.6 + (isTourTarget ? 1.5 + 0.55 * Math.sin(t * 6) : 0) + (isVisited ? 0.8 + 0.16 * Math.sin(t * 2.2 + phase) : 0);
     coreMat.opacity = 0.96 * Math.max(0.35, vis);
-    // 光晕呼吸（教学目标持续可见 + 抵达瞬间爆发）
-    haloMat.opacity = Math.max(a * 0.4, flash * 0.75, isTourTarget ? 0.5 : 0) * vis;
+    // 光晕呼吸（教学目标持续可见 + 抵达瞬间爆发; v31 已访站点微光环）
+    haloMat.opacity = Math.max(a * 0.4, flash * 0.75, isTourTarget ? 0.5 : 0, isVisited ? 0.18 : 0) * vis;
     if (haloRef.current) {
-      const pulse = 1 + Math.max(a * 0.25, flash * 0.5, isTourTarget ? 0.3 : 0) * Math.sin(t * 3 + phase);
+      const pulse = 1 + Math.max(a * 0.25, flash * 0.5, isTourTarget ? 0.3 : 0, isVisited ? 0.1 : 0) * Math.sin(t * 3 + phase);
       haloRef.current.scale.setScalar(pulse);
     }
     // 磷酸化环
@@ -273,7 +283,7 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
     // 标签（DOM imperative; 剖切掉的分子不显示; 远距离淡出; 窄视口智能降噪）
     const el = labelRef.current;
     if (el) {
-      const bright = a > 0.25 || selected || isTourTarget;
+      const bright = a > 0.25 || selected || isTourTarget || isVisited;
       el.classList.toggle('is-active', bright);
       el.classList.toggle('is-selected', selected);
       el.classList.toggle('is-phospho', ph > 0.25);

@@ -1292,6 +1292,52 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       core.renderOrder = 45;
       group.add(core);
       instNucleoli.push(core);
+      // v31 核仁三区亚结构补全: DFC 致密纤维组分（环绕 FC 纤维中心的低透纤维壳 + 放射纤维束）
+      // —— 教科书电镜三区 FC/DFC/GC（Alberts MBoC）: FC = rRNA 基因库, DFC = 转录活跃致密纤维, GC = 颗粒组分
+      const dfcGeo = track(displacedSphere(r0 * 1.16, 3, 2.6, r0 * 0.05, 17));
+      const dfc = new THREE.Mesh(dfcGeo, mat({
+        color: '#6b5480',
+        emissive: REF.nucleolusHi,
+        emissiveIntensity: 0.26,
+        roughness: 0.62,
+        opacity: 0.3,
+        clearcoat: 0.15,
+      }));
+      dfc.position.set(center.x, center.y, center.z);
+      dfc.renderOrder = 45.5;
+      group.add(dfc);
+      // DFC 放射纤维束（壳层纤维肌理 —— 与 GC 颗粒交错）
+      const fibrilGeo = track(new THREE.CapsuleGeometry(0.016, r0 * 0.34, 3, 5));
+      const fibrilN = 16;
+      const fibrils = new THREE.InstancedMesh(
+        fibrilGeo,
+        mat({ color: '#7a6490', emissive: REF.nucleolusHi, emissiveIntensity: 0.24, opacity: 0.62 }),
+        fibrilN,
+      );
+      {
+        const fm = new THREE.Matrix4();
+        const fq = new THREE.Quaternion();
+        const fdir = new THREE.Vector3();
+        const up = new THREE.Vector3(0, 1, 0);
+        for (let k = 0; k < fibrilN; k++) {
+          fdir.set(
+            hash01(`nfc${tag}${i}${k}`) - 0.5,
+            hash01(`nfc${tag}${i}${k}`, 3) - 0.5,
+            hash01(`nfc${tag}${i}${k}`, 5) - 0.5,
+          ).normalize();
+          fq.setFromUnitVectors(up, fdir);
+          const rr = r0 * (1.02 + hash01(`nfr${tag}${i}${k}`) * 0.1);
+          fm.compose(
+            new THREE.Vector3(center.x + fdir.x * rr, center.y + fdir.y * rr, center.z + fdir.z * rr),
+            fq,
+            new THREE.Vector3(1, 1, 1),
+          );
+          fibrils.setMatrixAt(k, fm);
+        }
+        fibrils.instanceMatrix.needsUpdate = true;
+        fibrils.renderOrder = 45.6;
+      }
+      group.add(fibrils);
       // 颗粒组分: 表面 RNA 颗粒
       const spkGeo = track(new THREE.SphereGeometry(0.032, 5, 5));
       const spkCount = Math.round(56 * q) + 8;
@@ -2198,6 +2244,72 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       //   旧首颗 label 派生锚（r=1.8 大域）退役 —— 目录与悬停均由逐颗锚承担（同名多锚 = 同一目录条目）。
       for (let i = 0; i < lysoN; i++) {
         hover.push({ pos: { x: centers[i].x, y: centers[i].y, z: centers[i].z }, r: 0.5 * scales[i] + 0.3, zh: '溶酶体（pH≈4.5）', latin: 'Lysosome', group: 'endomembrane' });
+      }
+      /* v31 多泡体（MVB / 晚期内体）: 内体成熟终末阶段 —— 限制膜内陷出芽形成腔内囊泡(ILV),
+       * ESCRT-0/I/II/III 复合体分选泛素化货物入 ILV; 与溶酶体融合后 ILV 全套内容物被酸性水解酶降解
+       * （内体→溶酶体航线读感 + 「胞内垃圾袋」直观形象）。单体建模: 半透限制膜 + 9 颗 ILV 直读;
+       * 定位于溶酶体群邻近胞质（叙事上「即将送抵」）。 */
+      {
+        const mvbG = new THREE.Group();
+        // 限制膜（内体谱系: 溶酶体暗红棕族淡化 + 微透 —— ILV 透过直读）
+        const mvbGeo = track(displacedSphere(0.44, 2, 3.0, 0.03, 103));
+        const mvbMat = mat({
+          color: '#8a5f57',
+          emissive: '#5f403a',
+          emissiveIntensity: 0.26,
+          transmission: transOn ? 0.3 : 0,
+          thickness: 0.3,
+          roughness: 0.36,
+          clearcoat: 0.38,
+          normalMap: coatNormal,
+          normalScale: 0.45,
+          opacity: transOn ? 0.92 : 0.62,
+          flow: { color: '#9c6a5e', strength: 0.12, scale: 1.3, speed: 0.07, rim: 0.2 },
+        });
+        const mvbBody = new THREE.Mesh(mvbGeo, mvbMat);
+        mvbBody.renderOrder = cutaway ? 97.8 : 46; // 与溶酶体同剖面窗口化序列
+        mvbG.add(mvbBody);
+        // 腔内囊泡 ILV（出芽内陷的货物囊泡 —— 琥珀-暗红棕小球）
+        const ilvGeo = track(new THREE.SphereGeometry(0.085, 8, 6));
+        const ilvMat = track(new THREE.MeshStandardMaterial({
+          color: REF.lysoGranule,
+          emissive: '#6a4426',
+          emissiveIntensity: 0.32 * dim,
+          transparent: true,
+          opacity: 0.78 * dim,
+          depthWrite: false,
+        }));
+        const ILV_N = 9;
+        const ilvs = new THREE.InstancedMesh(ilvGeo, ilvMat, ILV_N);
+        {
+          const im = new THREE.Matrix4();
+          const iv = new THREE.Vector3();
+          for (let k = 0; k < ILV_N; k++) {
+            iv.set(
+              hash01(`ilv${k}`) - 0.5,
+              hash01(`ilv${k}`, 3) - 0.5,
+              hash01(`ilv${k}`, 5) - 0.5,
+            ).normalize().multiplyScalar(0.1 + hash01(`ilvr${k}`) * 0.2);
+            const s = 0.62 + hash01(`ilvs${k}`) * 0.75;
+            im.makeScale(s, s, s);
+            im.setPosition(iv.x, iv.y, iv.z);
+            ilvs.setMatrixAt(k, im);
+          }
+          ilvs.instanceMatrix.needsUpdate = true;
+          ilvs.renderOrder = cutaway ? 97.9 : 47;
+        }
+        mvbG.add(ilvs);
+        // 定位: 溶酶体首颗邻近方向 + 核避让钳制（insidePos 保证界内）
+        const anchor = centers[0] ?? new THREE.Vector3(0.7, -0.45, 0.55);
+        const jitter = new THREE.Vector3(hash01('mvb') - 0.5, hash01('mvb', 3) - 0.5, hash01('mvb', 5) - 0.5).multiplyScalar(1.1);
+        const dirMvb = anchor.clone().add(jitter).normalize();
+        const frac = Math.min(0.86, anchor.length() / R + 0.34);
+        const mp = insidePos(dirMvb, frac, 0.5, 0.46);
+        mvbG.position.copy(mp);
+        group.add(mvbG);
+        labels.push({ pos: { x: mp.x, y: mp.y, z: mp.z }, zh: '多泡体', latin: 'Multivesicular body' });
+        const mvbHov: HoverTarget = { pos: { x: mp.x, y: mp.y, z: mp.z }, r: 0.62, zh: '多泡体（MVB）', latin: 'Multivesicular body', group: 'endomembrane' };
+        hover.push(mvbHov);
       }
       /* v23 溶酶体剖面示教个体（cutaway-only, 独立建模不入 InstancedMesh —— 颗粒子组随本体整体迁移）:
        * 一颗大溶酶体动态吸附当前切平面 → 剖面窗口半球剖开, 腔内酸性水解酶颗粒群直读。

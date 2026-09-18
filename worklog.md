@@ -2277,3 +2277,104 @@ Stage Summary:
   （成纤维细胞特有）ring 0.5-0.76 未做避核微调（掠核概率低, 待观察）
 - 下阶段建议: ①中期染色体 hover 锚随单体分离动态跟随（现静态 2 锚）②溶酶体自噬演示
   ③「发表模式」截图导出 ④减数分裂演示（复用相位时钟 + 三网体系范式）⑤微绒毛/纤毛细节
+
+---
+Task ID: 45
+Agent: frontend-styling-expert 子代理（Landing UI 设计感打磨）
+
+Task: 用户要求「继续提升 UI 的设计感」—— landing 首页 hero 视觉层级 + hero-visual 科学海报级质感 + METHOD 方法卡微交互 + 分区韵律（限定仅改 page.tsx / hero-visual.tsx / globals.css 追加段; cell3d / simulation / store / lab 其余组件零触碰, 与主代理 3D 并行工作隔离）
+
+Work Log:
+- 【现状盘点】接手时三个目标文件已在工作树含 Task 45 首轮未记录改动（hero-visual 141→442 行纯 SVG 海报级剖面 + page.tsx 426→525 行 + globals.css 已有 Task 45 追加段）—— 本轮在其上二次打磨并补全验证与日志
+- 【hero-visual.tsx · 显微细节层（+65 行）】
+  · 核孔复合物点环: 模块级 NPC_DOTS 参数化布点 22 孔（沿核被膜椭圆采样, 每 3 孔 +1.4 半径抖动避免机械等距感）—— 与 3D 视图 NPC 逐孔读感同构
+  · 核周紫调辉光: hvBokehV 渐变 + hv-soft-pulse 呼吸（4.2s 相位错峰）—— 核从「静态渐变填充」升级为「呼吸辉光体」
+  · 糖原颗粒簇（5 琥珀微点）+ 脂滴（琥珀环 + 高光点）—— 胞质内容物密度与 3D 视图同构
+  · 左上体积光: hvLight 渐变椭圆偏置左上（光源方向读感, 胞质体积感）
+  · 静态显微噪点: feTurbulence fractalNoise + feColorMatrix 去饱和 → overlay 混合 5% 强度全幅覆盖（胶片颗粒显微质感, 静态一次性渲染零动画成本）
+  · 核糖体整簇微闪（5.4s）+ 高尔基出芽囊泡脉冲（1.6s）—— 细胞器层次辉光补全
+- 【hero-visual.tsx · 标注系统期刊化】
+  · 引线: 每条悬浮标注新增 dot→芯片 渐隐发丝引线（hypot/atan2 现场解算长度与角度, 78% 长度留芯片间隙, 左右 chipSide 双向适配）—— 期刊图注惯例
+  · 图版字母: 芯片前缀 A-F（同色 70% 透明度）—— figure panel 读感
+- 【page.tsx · hero 排版节奏】
+  · h1 双行错峰入场: motion.span ×2（delay 0.1/0.24s, ease [0.22,1,0.36,1]）—— 首行素色 / 次行渐变辉光, 替代整块淡入
+  · 背景光晕「活化」: 三枚径向光晕挂 hero-glow-a/b/c（±3% 位移, 26/31/37s 错峰周期）—— 静态光晕变极慢漂移
+- 【page.tsx · METHOD 卡与分区韵律】
+  · 方法卡 framer-motion whileInView 入场（once, -32px margin, delay i×0.07 错峰）; 卡片 CSS transition 由 transition-all 收窄为 transition-[translate,border-color,box-shadow] —— framer 走 transform 通道、hover 位移走 translate 通道, 双通道零冲突（防 transition-all 对逐帧 transform 的二次缓动涂抹）
+  · 图标 hover 微缩放 group-hover:scale-[1.07]（transition-[border-color,scale], 与 methodIconGlow 辉光呼吸叠加）
+  · SectionHeading 新增 kicker 眉题（荧光短线 + 9px mono 大写 0.32em 字距; Cell Library / Simulation Lab / Method · Provenance 语言中性器件标签）—— 分区期刊化韵律
+  · SectionDivider 新增通行光线 divider-run（光带沿发丝线 7.5s 巡游首尾渐隐; 终点 calc(100%-84px) 容纳自身宽度, 375px 无横向溢出）
+  · 演示说明卡: 左缘琥珀渐隐竖线 accent + overflow-hidden
+- 【globals.css · 纯尾部追加】heroGlowDriftA/B/C + dividerRun 关键帧与类 + 本段 reduce-motion 停用（.mol3d-* 体系与既有 Task 45 段零改动）
+- 【QA（agent-browser 交互级 + DOM 级; VLM 持续 429 → 降级 DOM 验证）】
+  · lint 零错误; tsc 三个改动文件零错误（项目其余预存错误未触碰）; curl / = 200; dev.log 全 200
+  · DOM 验证: NPC 22 点参数化坐标正确、引线 6 条 rotate 注入、图版字母 A-F、kicker ×3、divider-run ×2、heroGlowDriftA 挂载、grain rect 存在、糖原 5 点/脂滴渲染、h1 双行拆分
+  · whileInView 完成态 opacity=1/transform=none; hover 边框光 --mx/--my 写入实测正常（166px/105.9px）; 卡片 transition-property 实测 translate,border-color,box-shadow（双通道隔离生效）
+  · 375px: scrollWidth=375 无横向溢出、零页面错误; 1440px hero/method/EN 三屏截图存档
+  · 双语切换回归: 中↔EN 标题/h1/标注/图注全切换正常
+- 过程缺陷自纠: 一次编辑在 cells SectionHeading 误引入 }} 语法错误（dev server 编译报错即时捕获）—— 立即修复后全链路重验
+
+Stage Summary:
+- landing 设计感二轮升级完成: hero-visual 达「科学海报级」完整读感（膜双层流动 / 核-线粒体-囊泡层次辉光 / NPC 点环 / 糖原脂滴 / 体积光 / 胶片噪点 / 引线+图版字母标注）; hero 首屏排版节奏（双行错峰 + 光晕漂移）; METHOD 卡 whileInView 入场 + 双通道动画隔离; 分区 kicker 眉题 + divider 通行光线
+- 架构沉淀: ①「framer transform 通道 + CSS translate/scale 属性通道」双通道动画隔离范式（transition-all 收窄法）②SVG 参数化布点（NPC_DOTS 模式）与现场三角解算引线（hypot/atan2）③纯尾部 CSS 追加工作流（.mol3d-* 零触碰约束下安全扩容）
+- 产出: src/components/lab/hero-visual.tsx（442→507 行）/ src/app/page.tsx（525→550 行）/ src/app/globals.css（735→768 行, 追加段）
+- 未解决/风险: ①VLM 429 持续（DOM 级验证替代, 视觉终验留待人工）②feTurbulence 在低端设备大画幅下有一次性渲染成本（静态无动画, 可接受）③EN 模式 hero 副标题与 kicker 均为语言中性 mono 标签, 无需 i18n 键扩展（i18n.tsx 未在授权文件内, 已规避）
+- 下阶段建议: ①细胞系卡片区与实验台面板的 hover 韵律统一（同款边框光范式）②hero SVG 加 SMIL animateMotion 兜底（offset-path 不支持的环境）③滚动视差微位移（hero 光晕随滚动轻微错位）④「发表模式」截图导出联动 hero 图注
+
+---
+Task ID: 43/44/45（第 18 轮 · v31）
+Agent: 主协调 Agent (Z.ai Code) + frontend-styling-expert 子代理（Task 45）
+Task: 用户第 18 轮需求 —— ①继续打磨细胞器精细度（尽量真实还原）②pathway 展示方式更沉浸 + 附带文字说明 + 逐步推进不要太快 ③继续提升 UI 设计感
+
+Work Log:
+- 【Task 45 · 子代理（landing UI）】hero-visual.tsx 核孔点环（22 孔参数化）/ 核周呼吸辉光 / 糖原脂滴簇 /
+  feTurbulence 胶片噪点 / 期刊化渐隐引线标注（图版字母 A-F）; page.tsx 双行错峰入场标题 + 背景光晕
+  慢漂移 + METHOD 卡 whileInView 入场与边框光 / section kicker 眉题 + divider 通行光线; globals.css
+  纯尾部追加（.mol3d-* 零改动）。lint 零错误, 375px 无横向溢出。
+- 【Task 43 · 沉浸式级联引导 v2（virtual-cell-3d.tsx + molecules.tsx + signal-edges.tsx）】
+  · SimSnapshot 扩展: tourVisited（已访站点集合）/ tourLitEdges（教学链边 key）/ tourPulse（行进脉冲）
+  · molecules: isVisited 站点恒亮 + 缓慢呼吸（emissive +0.8、微光环、标签 is-active）——「信号已传到这里」
+  · signal-edges: 教学模式三档边亮度（当前站邻接 0.92 / 已走链边 0.46 / 其余 0.03）; 链边恒有
+    慢速流动粒子（1.1 世界速度 —— 模拟暂停时级联路径仍在呼吸）; TourCascadePulse 信号彗星组件
+    （头亮白核心 0.15 + 9 节渐隐拖尾 + 行进 2.6s/驻留 1.15s 循环, 颜色随边类型）
+  · 剧场式解说卡重构: framer-motion AnimatePresence mode="wait" 站点切换翻页动画（模糊+位移动效）;
+    大字号站点编号（渐变 tabular-nums）+ 标题 + phaseTag; 首站展示 tourIntro 开场导览（此前从未展示）;
+    信号传递残基级注解（琥珀）; 控制条分段进度点 + 自动倒计时环（rAF 直写 strokeDashoffset 零重渲染）
+    + 上一站/下一站; 键盘 ←/→ 逐站推进 + Esc 退出; 剧场暗角 + 底部渐变 + 顶部章节章（通路名 + N/M + 区室）
+  · 节奏（用户原话「逐步推进, 不要太快」）: 默认手动模式; 自动 12s/站（旧 7s）+ 悬停解说卡暂停
+    （剩余时间跨暂停保留 —— dwellRemaining/lastAutoIdx 双 ref 方案, 站点切换/重开重置）
+- 【Task 44 · 细胞器精细度（organelles.tsx + hover-labels.tsx）】
+  · 核仁三区亚结构补全: DFC 致密纤维组分层（r0×1.16 低透壳 opacity 0.3 + 16 条放射纤维束胶囊）
+    —— 教科书 FC/DFC/GC 三区（Alberts MBoC）; 既有 FC 核心 + GC 颗粒不变
+  · 多泡体（MVB/晚期内体）新建: 半透限制膜（transmission 0.3, 溶酶体暗红棕族淡化）+ 9 颗腔内囊泡
+    ILV 直读（ESCRT 分选叙事）; 定位于溶酶体群邻近胞质（insidePos 钳制界内）; 标注 + 悬停锚 +
+    ORG_INFO 目录条目（「ESCRT 分选出芽腔内囊泡, 送抵溶酶体降解」）
+- 【QA 验证（agent-browser 交互级 + 像素量化 + 引擎探针; tsc/lint 零错误; dev.log 全 200; 0 console error）】
+  · 引导开卡: 章节章「MAPK 信号通路 1/10 细胞外 · 层级 L0」+ 卡片 + 导览 + 下一站 ✓
+  · 逐站推进: 下一站点击 02 ✓ / ArrowRight 键盘 03 ✓ / 自动模式 12s 后 2/10→… ✓（倒计时环
+    strokeDashoffset 31.66/37.7 实时写入 ✓）
+  · 彗星脉冲引擎真值: __tourPulseInfo {active:true, pts:25, color:#34d399, head 位于 EGF→EGFR
+    膜外段} ✓（早期 false 读数为无头帧饥饿的过期数据 —— 真实 60fps 无此问题）
+  · MVB: 目录含「多泡体（MVB）」✓, 目录点击 → locateNonce 消费 → hovered=「多泡体（MVB）」✓
+    （悬停目标总数 317→319）
+  · 核仁: 核内视角像素分层 dark(FC)=1191 / mid(DFC 壳+核质)=11447 / light(GC)=200, 紫色份额 43.6% ✓
+  · 沉浸卡像素: emerald 534/67142 + amber 276（注解框）+ bright 92-127（彗星头/高光）✓
+  · 【发现并修复的真 bug】tourDwell 初始 true —— 触屏设备无 hover 事件 → 自动模式永久停摆;
+    修正为初始 false（桌面鼠标入卡置 true/离卡恢复, 移动端恒可跑）
+- 【QA 工具沉淀】__tourPulseInfo 探针（__cellQaProbe 门控, useFrame 写入 —— 彗星引擎真值）;
+  scripts/analyze-tour-px / analyze-nucleolus-px / analyze-comet-px 像素量化脚本;
+  agent-browser 注意事项: AnimatePresence 退出卡在 SwiftShader 下长驻 DOM（真机 0.36s 完成）——
+  DOM 断言须用 chip 等非动画元素做真源。
+
+Stage Summary:
+- 用户三项诉求落地: ①pathway 沉浸式演示（剧场暗角 + 章节章 + 翻页解说卡 + 信号彗星 + 级联点亮 +
+  逐步节奏 + 键盘导航 —— 「沉浸 + 文字说明 + 逐步推进」全部命中）②细胞器精细度（核仁 FC/DFC/GC
+  三区 + 多泡体 MVB/ILV + 目录与悬停全链路）③UI 设计感（landing hero/方法卡/分区韵律全升级）
+- 架构沉淀: ①「快照扩展 + 帧驱动消费」让教学状态零重渲染进入 useFrame 体系（tourVisited/tourPulse
+  与 nodeStates 同一范式）②rAF 直写 DOM 的倒计时环（deadline 时间戳 + 跨暂停剩余保留）③彗星 =
+  「多边形折线参数域采样 + 头部 + 拖尾 instancedMesh」可复用于任意折线行进结构
+- 未解决/风险: ①无头环境 rAF 帧饥饿使 DOM 断言出现过期读数（真机无）②AnimatePresence 卡片在
+  极低帧率下 DOM 堆积（真机 0.36s 退出）③分子站点点位静态（金盘式动态跟随未做）④VLM 持续 429
+- 下阶段建议: ①引导模式站点切换时同步「模拟逐步激活」（tourVisited → nodeStates 活性渐升,
+  让磷酸化环/事件流随讲解推进 —— 沉浸感再上一级）②中期染色体 hover 锚随单体分离动态跟随
+  ③「发表模式」截图导出 ④减数分裂演示 ⑤其余条形结构折线命中体接入（神经元树突/轴突等）

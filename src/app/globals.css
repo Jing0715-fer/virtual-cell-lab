@@ -596,3 +596,173 @@
     animation: none;
   }
 }
+
+/* ============ Task 45 · Landing / Hero 设计感打磨（纯追加, 不动上方 .mol3d-* 体系） ============ */
+
+/* --- Hero 主视觉: SVG 生物荧光细胞微动效 --- */
+/* 细胞膜双层流动光晕: 外小叶顺流 / 内小叶逆流（双层反向流动 = 膜流动性读感） */
+@keyframes hvFlowA { to { stroke-dashoffset: -230; } }
+@keyframes hvFlowB { to { stroke-dashoffset: 166; } }
+.hv-flow-a { animation: hvFlowA 6s linear infinite; }
+.hv-flow-b { animation: hvFlowB 7.5s linear infinite; }
+
+/* 细胞整体缓慢呼吸（±1.4%） */
+@keyframes hvBreathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.014); }
+}
+.hv-breathe { animation: hvBreathe 11s ease-in-out infinite; }
+
+/* 膜外辉光晕呼吸明暗 */
+@keyframes hvHaloPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+.hv-halo { animation: hvHaloPulse 9s ease-in-out infinite; }
+
+/* 信号级联虚线行进（与实验台 .edge-flow 同视觉语言, 更缓更克制） */
+@keyframes hvCascade { to { stroke-dashoffset: -14; } }
+.hv-cascade {
+  stroke-dasharray: 4 10;
+  animation: hvCascade 1.6s linear infinite;
+}
+
+/* 信号粒子沿弧线行进（CSS offset-path; 路径/时长/相位由内联 style 注入） */
+@keyframes hvTravel {
+  from { offset-distance: 0%; }
+  to { offset-distance: 100%; }
+}
+.hv-travel { animation: hvTravel 5s linear infinite; }
+
+/* 激酶中继节点脉冲环 */
+@keyframes hvRelayPing {
+  0% { opacity: 0.75; transform: scale(0.55); }
+  70% { opacity: 0; transform: scale(2.1); }
+  100% { opacity: 0; transform: scale(2.1); }
+}
+.hv-relay-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: hvRelayPing 2.8s cubic-bezier(0.2, 0.7, 0.4, 1) infinite;
+}
+
+/* 细胞器辉光呼吸（线粒体/核仁/配体结合点; --hv-pd 错峰相位） */
+@keyframes hvSoftPulse {
+  0%, 100% { opacity: 0.72; }
+  50% { opacity: 1; }
+}
+.hv-soft-pulse {
+  animation: hvSoftPulse 7s ease-in-out infinite;
+  animation-delay: var(--hv-pd, 0s);
+}
+
+/* 囊泡/配体轨道漂移（往复微移; 方向与周期由 --hv-dx/--hv-dy/--hv-dd 注入） */
+@keyframes hvDrift {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(var(--hv-dx, 4px), var(--hv-dy, -3px)); }
+}
+.hv-drift { animation: hvDrift var(--hv-dd, 9s) ease-in-out infinite; }
+
+/* 背景微粒景深漂移（两组反向, 极慢） */
+@keyframes hvBgDrift {
+  from { transform: translate(0, 0); }
+  to { transform: translate(var(--hv-dx, -12px), var(--hv-dy, 7px)); }
+}
+.hv-bg-drift { animation: hvBgDrift var(--hv-bd, 26s) linear infinite alternate; }
+
+/* 活性染色质微光起伏 */
+@keyframes hvChromatin {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 0.9; }
+}
+.hv-chromatin { animation: hvChromatin 5.5s ease-in-out infinite; }
+
+/* 基因应答位点脉冲（转录读感） */
+@keyframes hvGene {
+  0%, 100% { opacity: 0.65; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.4); }
+}
+.hv-gene {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: hvGene 3.2s ease-in-out infinite;
+}
+
+/* --- Landing 排版与节奏 --- */
+/* Hero 微网格渐隐罩（微弱网格 + 径向光晕收边, 不大面积铺色） */
+.bio-grid-fade {
+  -webkit-mask-image: radial-gradient(ellipse 78% 72% at 40% 42%, #000 26%, transparent 76%);
+  mask-image: radial-gradient(ellipse 78% 72% at 40% 42%, #000 26%, transparent 76%);
+}
+
+/* 渐变描边辉光字（hero 主标题第二行: 渐变填充 + 半透明描边 + 生物荧光光晕） */
+.h1-gradient-glow {
+  -webkit-text-stroke: 0.5px rgba(167, 243, 208, 0.24);
+  filter: drop-shadow(0 0 24px rgba(45, 212, 191, 0.18));
+}
+
+/* 滚动指示（hero 底部光线滑落） */
+@keyframes scrollRun {
+  0% { transform: translateY(-130%); }
+  100% { transform: translateY(340%); }
+}
+.scroll-run { animation: scrollRun 2.2s cubic-bezier(0.45, 0, 0.4, 1) infinite; }
+
+/* --- METHOD 方法卡: 边框光随鼠标方向 + 图标呼吸辉光 --- */
+/* 边框环带光（radial 跟随 --mx/--my, mask 只留 1px 边框环） */
+.method-border-light {
+  padding: 1px;
+  border-radius: inherit;
+  background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgba(52, 211, 153, 0.6), transparent 62%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+/* 图标呼吸辉光（悬停时启动） */
+@keyframes methodIconGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+  50% { box-shadow: 0 0 18px 2px rgba(52, 211, 153, 0.38), 0 0 4px rgba(167, 243, 208, 0.45); }
+}
+.method-card:hover .method-icon { animation: methodIconGlow 2.4s ease-in-out infinite; }
+
+/* 动效弱化（无障碍: 全部 hero/landing 装饰动画停用） */
+@media (prefers-reduced-motion: reduce) {
+  .hv-flow-a, .hv-flow-b, .hv-breathe, .hv-halo, .hv-cascade, .hv-travel,
+  .hv-relay-ring, .hv-soft-pulse, .hv-drift, .hv-bg-drift, .hv-chromatin, .hv-gene,
+  .scroll-run, .method-icon { animation: none !important; }
+}
+
+/* ============ Task 45 · 续: 光晕漂移 / divider 通行光线（追加段, 不动上方任何既有类） ============ */
+
+/* Hero 背景三枚径向光晕极慢漂移（±3% 位移, 26–37s 周期 —— 光晕「活」而不抢戏） */
+@keyframes heroGlowDriftA {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(-3%, 4%); }
+}
+@keyframes heroGlowDriftB {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(4%, -3%); }
+}
+@keyframes heroGlowDriftC {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(2.5%, -3.5%); }
+}
+.hero-glow-a { animation: heroGlowDriftA 26s ease-in-out infinite; }
+.hero-glow-b { animation: heroGlowDriftB 31s ease-in-out infinite; }
+.hero-glow-c { animation: heroGlowDriftC 37s ease-in-out infinite; }
+
+/* 分区 divider 通行光线（光带沿发丝线缓慢巡游, 首尾渐隐 —— 仪器扫掠韵律;
+   终点用 calc(100% - 84px) 容纳自身宽度, 375px 窄屏也不产生横向溢出） */
+@keyframes dividerRun {
+  0% { left: 4%; opacity: 0; }
+  14% { opacity: 1; }
+  86% { opacity: 1; }
+  100% { left: calc(100% - 84px); opacity: 0; }
+}
+.divider-run { animation: dividerRun 7.5s cubic-bezier(0.42, 0, 0.5, 1) infinite; }
+
+/* 动效弱化（本段新增动画同样停用） */
+@media (prefers-reduced-motion: reduce) {
+  .hero-glow-a, .hero-glow-b, .hero-glow-c, .divider-run { animation: none !important; }
+}

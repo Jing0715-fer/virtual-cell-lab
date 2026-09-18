@@ -19,9 +19,10 @@ import { EffectComposer, Bloom, ChromaticAberration, DepthOfField, Noise, N8AO, 
 import type { DepthOfFieldEffect } from 'postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { Eye, Tags, Focus, RotateCw, RotateCcw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick, ListTree, Split, Play, Pause, LocateFixed } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
-import { layout3D, projectLayoutToPlane, type CellBodySpec, type Vec3 } from '@/lib/simulation/layout3d';
+import { layout3D, projectLayoutToPlane, EDGE_COLORS, type CellBodySpec, type Vec3 } from '@/lib/simulation/layout3d';
 import { buildGuidedTour, tourIntro } from '@/lib/simulation/guided-tour';
 import { CellBody } from './organelles';
 import { MITOSIS_PHASES, MitosisStage } from './mitosis';
@@ -475,7 +476,16 @@ export function VirtualCell3D() {
   const [glow, setGlow] = useState(true);
   const [tourOpen, setTourOpen] = useState(false);
   const [tourIdx, setTourIdx] = useState(0);
-  const [tourAuto, setTourAuto] = useState(true);
+  // v31 逐步节奏（用户原话「逐步推进, 不要太快」）: 默认手动逐站; 自动模式 12s/站 + 悬停读卡暂停
+  const [tourAuto, setTourAuto] = useState(false);
+  /** 解说卡悬停 → 自动推进暂停（阅读节奏由用户掌握; 初始 false —— 触屏无 hover 事件,
+   *  恒 true 会让移动端自动模式永久停摆; 桌面端鼠标入卡即置 true、离卡恢复 false） */
+  const [tourDwell, setTourDwell] = useState(false);
+  /** 自动模式剩余停留时间（跨 dwell 暂停保留; 站点切换/重开时重置） */
+  const dwellRemaining = useRef(12000);
+  const lastAutoIdx = useRef(-1);
+  /** v31 倒计时环 circle 元素引用（rAF 直写 strokeDashoffset —— 零 React 重渲染） */
+  const countdownRef = useRef<SVGCircleElement | null>(null);
   // 流畅模式: 低端设备自动开启（低分辨率渲染 + 关闭 MSAA/帧缓冲保留，保留辉光视觉特征）
   // 初始化函数立即探测 → Canvas 首次创建即使用正确参数（避免低端设备以重参数初始化后无法降级）
   const [perfMode, setPerfMode] = useState(false);
@@ -572,6 +582,8 @@ export function VirtualCell3D() {
       useLabStore.getState().pause();
       setAutoRotate(false);
       setCamMode('tour');
+      dwellRemaining.current = 12000;
+      lastAutoIdx.current = -1;
     } else {
       setCamMode('overview');
     }
@@ -584,16 +596,52 @@ export function VirtualCell3D() {
     }
   }, [tourOpen, tourStep]);
 
-  // 自动逐步推进（7s/站，末站自动停止）
+  // v31 自动推进: 12s/站缓节奏 + 倒计时环（rAF 直写 DOM）+ 解说卡悬停暂停（暂停剩余时间保留）
   useEffect(() => {
-    if (!tourOpen || !tourAuto || tour.length === 0) return;
-    if (tourIdx >= tour.length - 1) return;
-    const timer = setInterval(() => setTourIdx((i) => Math.min(i + 1, tour.length - 1)), 7000);
-    return () => clearInterval(timer);
-  }, [tourOpen, tourAuto, tourIdx, tour.length]);
+    if (!tourOpen || !tourAuto || tourDwell || tour.length === 0 || tourIdx >= tour.length - 1) return;
+    const FULL = 12000;
+    const fresh = lastAutoIdx.current !== tourIdx;
+    lastAutoIdx.current = tourIdx;
+    let deadline = performance.now() + (fresh ? FULL : Math.min(FULL, Math.max(600, dwellRemaining.current)));
+    let raf = 0;
+    const tick = () => {
+      const now = performance.now();
+      const left = deadline - now;
+      if (left <= 0) {
+        dwellRemaining.current = FULL;
+        setTourIdx((i) => Math.min(tour.length - 1, i + 1));
+        return;
+      }
+      dwellRemaining.current = left;
+      if (countdownRef.current) {
+        countdownRef.current.style.strokeDashoffset = String(37.7 * (1 - left / FULL));
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [tourOpen, tourAuto, tourDwell, tourIdx, tour.length]);
+
+  // v31 键盘导航: ← / → 逐站推进, Esc 退出引导（沉浸阅读双手不离键盘）
+  useEffect(() => {
+    if (!tourOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setTourIdx((i) => Math.min(tour.length - 1, i + 1));
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setTourIdx((i) => Math.max(0, i - 1));
+      } else if (e.key === 'Escape') {
+        openTour(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [tourOpen, tour.length, openTour]);
 
   // 模拟快照: zustand 订阅写入可变引用（避免逐 tick React 重渲染）
-  const sim = useRef<SimSnapshot>({ nodeStates: {}, signalFlux: {}, injected: {}, inhibition: {}, focus: false, tourNode: null, tourNeighbors: null, pulseAt: {}, edgePulse: {}, clipPlane: null });
+  const sim = useRef<SimSnapshot>({ nodeStates: {}, signalFlux: {}, injected: {}, inhibition: {}, focus: false, tourNode: null, tourNeighbors: null, tourVisited: null, tourLitEdges: null, tourPulse: null, pulseAt: {}, edgePulse: {}, clipPlane: null });
   useEffect(() => {
     const unsub = useLabStore.subscribe((s) => {
       sim.current.nodeStates = s.nodeStates;
@@ -606,21 +654,6 @@ export function VirtualCell3D() {
   useEffect(() => {
     sim.current.focus = focus;
   }, [focus]);
-  // 教学引导快照: 聚焦分子 + 邻居集合
-  useEffect(() => {
-    if (tourOpen && tourStep && graph) {
-      sim.current.tourNode = tourStep.nodeId;
-      const neighbors = new Set<string>();
-      for (const e of graph.core.edges) {
-        if (e.source === tourStep.nodeId) neighbors.add(e.target);
-        else if (e.target === tourStep.nodeId) neighbors.add(e.source);
-      }
-      sim.current.tourNeighbors = neighbors;
-    } else {
-      sim.current.tourNode = null;
-      sim.current.tourNeighbors = null;
-    }
-  }, [tourOpen, tourStep, graph]);
 
   const layout = useMemo(
     () => (graph ? layout3D(graph.core.nodes, graph.core.edges, morph) : null),
@@ -657,6 +690,58 @@ export function VirtualCell3D() {
     if (!tourOpen || !tourStep || !effLayout) return null;
     return effLayout.nodes.find((n) => n.id === tourStep.nodeId)?.pos ?? null;
   }, [tourOpen, tourStep, effLayout]);
+
+  // v31 教学引导快照: 聚焦分子 + 邻居集合 + 级联点亮（已访站点/链边） + 上站→本站行进脉冲
+  useEffect(() => {
+    if (tourOpen && tourStep && graph) {
+      sim.current.tourNode = tourStep.nodeId;
+      const neighbors = new Set<string>();
+      for (const e of graph.core.edges) {
+        if (e.source === tourStep.nodeId) neighbors.add(e.target);
+        else if (e.target === tourStep.nodeId) neighbors.add(e.source);
+      }
+      sim.current.tourNeighbors = neighbors;
+      // 已访站点集合（含当前站 —— 级联点亮「信号已传到这里」）
+      const visited = new Set<string>();
+      for (let i = 0; i <= Math.min(tourIdx, tour.length - 1); i++) visited.add(tour[i].nodeId);
+      sim.current.tourVisited = visited;
+      // 教学链已点亮边（相邻站点对, 双向 key）
+      const lit = new Set<string>();
+      for (let i = 0; i < Math.min(tourIdx, tour.length - 1); i++) {
+        const a = tour[i].nodeId;
+        const b = tour[i + 1].nodeId;
+        lit.add(`${a}>${b}`);
+        lit.add(`${b}>${a}`);
+      }
+      sim.current.tourLitEdges = lit;
+      // 行进脉冲: 上站 → 本站的边折线（相机稍许跟进后发射; 颜色随边类型）
+      if (effLayout && tourIdx > 0) {
+        const prevId = tour[tourIdx - 1].nodeId;
+        const edge = effLayout.edges.find(
+          (e) =>
+            (e.source === prevId && e.target === tourStep.nodeId) ||
+            (e.target === prevId && e.source === tourStep.nodeId),
+        );
+        sim.current.tourPulse =
+          edge && edge.points.length > 1
+            ? {
+                points: edge.points,
+                startedAt: performance.now() + 400,
+                duration: 2.6,
+                color: EDGE_COLORS[edge.kind] ?? '#34d399',
+              }
+            : null;
+      } else {
+        sim.current.tourPulse = null;
+      }
+    } else {
+      sim.current.tourNode = null;
+      sim.current.tourNeighbors = null;
+      sim.current.tourVisited = null;
+      sim.current.tourLitEdges = null;
+      sim.current.tourPulse = null;
+    }
+  }, [tourOpen, tourStep, graph, tourIdx, tour, effLayout]);
 
   // 网页内全屏模式下 ESC 退出（页面级全屏检视; 锁定背景滚动）
   useEffect(() => {
@@ -1217,95 +1302,186 @@ export function VirtualCell3D() {
         </div>
       )}
 
-      {/* 底部中央: 教学引导卡（激活时替换操作提示） */}
-      {tourOpen && tourStep ? (
-        <div className="absolute bottom-3 left-1/2 z-20 w-[min(94%,560px)] -translate-x-1/2">
-          <div className="rounded-xl border border-emerald-500/25 bg-slate-950/85 p-3 shadow-[0_8px_32px_rgba(0,0,0,0.45)] backdrop-blur-lg">
-            {/* 头部: 站点标题 + 进度 + 关闭 */}
-            <div className="flex items-center gap-2">
-              <BookOpen className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
-              <span className="text-[12px] font-semibold text-slate-100">{tourStep.title}</span>
-              <span className="shrink-0 rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-px font-mono text-[8px] leading-tight text-emerald-300">
-                {Math.min(tourIdx + 1, tour.length)} / {tour.length}
-              </span>
-              <span className="ml-auto hidden font-mono text-[8px] text-slate-500 sm:inline">{tourStep.phaseTag}</span>
-              <button
-                onClick={() => openTour(false)}
-                aria-label={t('hud.tour')}
-                className="shrink-0 rounded-md border border-white/10 bg-white/5 p-1 text-slate-500 transition hover:text-rose-300"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </div>
-
-            {/* 级联注解（上一站 → 本站） */}
-            {tourStep.edgeNote && (
-              <p className="mt-2 rounded-lg border border-amber-500/20 bg-amber-950/15 px-2.5 py-1.5 text-[10.5px] leading-relaxed text-amber-200/90">
-                <span className="mr-1 font-mono text-[9px] text-amber-400">{lang === 'zh' ? '级联 ⟶' : 'Cascade ⟶'}</span>
-                {tourStep.edgeNote}
-              </p>
-            )}
-
-            {/* 分子功能注释 */}
-            <p className="mt-2 text-[11px] leading-relaxed text-slate-300">{tourStep.text}</p>
-
-            {/* 进度点 + 导航 */}
-            <div className="mt-2.5 flex items-center gap-2">
-              <div className="flex flex-1 items-center gap-1 overflow-x-auto">
-                {tour.map((s, i) => (
-                  <button
-                    key={s.nodeId}
-                    aria-label={`${lang === 'zh' ? '跳转到' : 'Jump to'} ${s.label}`}
-                    onClick={() => setTourIdx(i)}
-                    className={`h-1.5 shrink-0 rounded-full transition-all ${
-                      i === tourIdx
-                        ? 'w-5 bg-emerald-400'
-                        : i < tourIdx
-                          ? 'w-1.5 bg-emerald-500/50 hover:bg-emerald-400/70'
-                          : 'w-1.5 bg-white/15 hover:bg-white/30'
-                    }`}
-                  />
-                ))}
-              </div>
-              <button
-                onClick={() => setTourAuto(!tourAuto)}
-                className={`flex shrink-0 items-center gap-1 rounded-lg border px-2 py-1 text-[9px] transition ${
-                  tourAuto
-                    ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
-                    : 'border-white/10 bg-white/5 text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                <CirclePlay className={`h-3 w-3 ${tourAuto ? 'animate-pulse' : ''}`} />
-                {lang === 'zh' ? '自动' : 'Auto'}
-              </button>
-              <button
-                onClick={() => setTourIdx(Math.max(0, tourIdx - 1))}
-                disabled={tourIdx === 0}
-                aria-label={lang === 'zh' ? '上一站' : 'Previous'}
-                className="flex shrink-0 items-center rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-slate-400 transition hover:text-slate-200 disabled:opacity-30"
-              >
-                <ChevronLeft className="h-3 w-3" />
-              </button>
-              <button
-                onClick={() => setTourIdx(Math.min(tour.length - 1, tourIdx + 1))}
-                disabled={tourIdx >= tour.length - 1}
-                aria-label={lang === 'zh' ? '下一站' : 'Next'}
-                className="flex shrink-0 items-center gap-1 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-[10px] text-emerald-300 transition hover:bg-emerald-500/25 disabled:opacity-30"
-              >
-                {lang === 'zh' ? '下一站' : 'Next'}
-                <ChevronRight className="h-3 w-3" />
-              </button>
-            </div>
-
-            {/* 末站导出提示 */}
-            {tourIdx >= tour.length - 1 && (
-              <p className="mt-2 border-t border-white/8 pt-1.5 text-[9px] text-slate-500">
-                {lang === 'zh'
-                  ? '级联讲解完毕 —— 退出引导后点击「播放」可观察动态信号流，或在「药理」面板投放激酶抑制剂观察断流效应。'
-                  : 'Cascade walkthrough complete — exit the tour and press “Play” to watch dynamic signal flow, or deploy kinase inhibitors in the “Pharmacology” panel to observe blockade effects.'}
-              </p>
-            )}
+      {/* v31 沉浸式级联引导 —— 剧场暗角 + 章节章 + 剧场式解说卡（逐步推进 + 行进脉冲 + 级联点亮） */}
+      {tourOpen && (
+        <>
+          <div
+            className="pointer-events-none absolute inset-0 z-[14]"
+            style={{ background: 'radial-gradient(ellipse 74% 64% at 50% 44%, transparent 56%, rgba(2,6,23,0.45) 100%)' }}
+          />
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-[14] h-28"
+            style={{ background: 'linear-gradient(to top, rgba(2,6,23,0.72), transparent)' }}
+          />
+        </>
+      )}
+      {tourOpen && tourStep && (
+        <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2">
+          <div className="flex max-w-[92vw] items-center gap-2 rounded-full border border-emerald-500/25 bg-slate-950/75 px-3.5 py-1.5 backdrop-blur-md">
+            <BookOpen className="h-3 w-3 shrink-0 text-emerald-400" />
+            <span className="truncate text-[10.5px] font-medium text-emerald-200">{graph?.meta.nameZh}</span>
+            <span className="h-2.5 w-px shrink-0 bg-white/15" />
+            <span className="shrink-0 font-mono text-[10px] tabular-nums text-slate-300">
+              {Math.min(tourIdx + 1, tour.length)}
+              <span className="text-slate-600"> / {tour.length}</span>
+            </span>
+            <span className="hidden h-2.5 w-px shrink-0 bg-white/15 sm:block" />
+            <span className="hidden truncate font-mono text-[9px] text-slate-500 sm:block">{tourStep.phaseTag}</span>
           </div>
+        </div>
+      )}
+      {tourOpen && tourStep ? (
+        <div
+          className="absolute bottom-3 left-1/2 z-20 w-[min(94%,640px)] -translate-x-1/2"
+          onMouseEnter={() => setTourDwell(true)}
+          onMouseLeave={() => setTourDwell(false)}
+        >
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={`${tourKey}:${tourIdx}`}
+              initial={{ opacity: 0, y: 24, filter: 'blur(7px)' }}
+              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, y: -14, filter: 'blur(5px)' }}
+              transition={{ duration: 0.36, ease: [0.21, 0.58, 0.25, 1] }}
+              className="overflow-hidden rounded-2xl border border-emerald-500/25 bg-slate-950/88 shadow-[0_10px_44px_rgba(0,0,0,0.5)] backdrop-blur-xl"
+            >
+              {/* 顶部生物荧光光缘 */}
+              <div className="h-px w-full bg-gradient-to-r from-transparent via-emerald-400/70 to-transparent" />
+
+              {/* 头部: 站点编号 + 标题 + 关闭 */}
+              <div className="flex items-start gap-3 px-4 pt-3">
+                <div className="flex shrink-0 flex-col items-center pt-0.5">
+                  <span className="bg-gradient-to-b from-emerald-200 to-teal-500 bg-clip-text font-mono text-[26px] font-bold leading-none tabular-nums text-transparent">
+                    {String(Math.min(tourIdx + 1, tour.length)).padStart(2, '0')}
+                  </span>
+                  <span className="mt-1 text-[8px] uppercase tracking-[0.2em] text-slate-500">{lang === 'zh' ? '站' : 'STOP'}</span>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13.5px] font-semibold leading-snug text-slate-100">{tourStep.title}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[9.5px] text-slate-500">
+                    <span className="font-mono text-emerald-300/80">{tourStep.label}</span>
+                    <span className="text-slate-700">·</span>
+                    <span>{tourStep.phaseTag}</span>
+                    <span className="text-slate-700">·</span>
+                    <span className="font-mono tabular-nums">
+                      {Math.min(tourIdx + 1, tour.length)}/{tour.length}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => openTour(false)}
+                  aria-label={t('hud.tour')}
+                  className="shrink-0 rounded-md border border-white/10 bg-white/5 p-1 text-slate-500 transition hover:text-rose-300"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+
+              {/* 开场导览（首站 —— 通路级教学框架） */}
+              {tourIdx === 0 && (
+                <p className="mx-4 mt-2.5 rounded-lg border border-teal-500/20 bg-teal-950/15 px-3 py-2 text-[10.5px] leading-relaxed text-teal-200/90">
+                  <span className="mr-1 font-mono text-[9px] text-teal-400">{lang === 'zh' ? '导览' : 'Guide'}</span>
+                  {tourIntro(graph, tour.length)}
+                </p>
+              )}
+
+              {/* 信号传递注解（上一站 → 本站, 残基级） */}
+              {tourStep.edgeNote && (
+                <p className="mx-4 mt-2.5 rounded-lg border border-amber-500/20 bg-amber-950/15 px-3 py-2 text-[10.5px] leading-relaxed text-amber-200/90">
+                  <span className="mr-1 font-mono text-[9px] text-amber-400">{lang === 'zh' ? '信号传递 ⟶' : 'Signal ⟶'}</span>
+                  {tourStep.edgeNote}
+                </p>
+              )}
+
+              {/* 分子功能注释 */}
+              <p className="px-4 pb-1 pt-2 text-[11.5px] leading-[1.8] text-slate-300">{tourStep.text}</p>
+
+              {/* 控制条: 分段进度 + 自动倒计时环 + 逐站导航 */}
+              <div className="mt-2 flex items-center gap-2 border-t border-white/8 bg-white/[0.02] px-3 py-2">
+                <div className="flex flex-1 items-center gap-[3px] overflow-x-auto">
+                  {tour.map((s, i) => (
+                    <button
+                      key={s.nodeId}
+                      aria-label={`${lang === 'zh' ? '跳转到' : 'Jump to'} ${s.label}`}
+                      onClick={() => setTourIdx(i)}
+                      className={`h-1.5 shrink-0 rounded-full transition-all ${
+                        i === tourIdx
+                          ? 'w-6 bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]'
+                          : i < tourIdx
+                            ? 'w-1.5 bg-emerald-500/50 hover:bg-emerald-400/70'
+                            : 'w-1.5 bg-white/15 hover:bg-white/30'
+                      }`}
+                    />
+                  ))}
+                </div>
+                <button
+                  onClick={() => setTourAuto(!tourAuto)}
+                  title={
+                    lang === 'zh'
+                      ? '自动模式：每 12 秒推进一站，悬停解说卡时暂停阅读'
+                      : 'Auto: advance every 12s, hover the card to pause'
+                  }
+                  className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1 text-[9px] transition ${
+                    tourAuto
+                      ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+                      : 'border-white/10 bg-white/5 text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  {tourAuto && tourIdx < tour.length - 1 ? (
+                    <svg className="h-3.5 w-3.5 -rotate-90" viewBox="0 0 16 16">
+                      <circle cx="8" cy="8" r="6" fill="none" stroke="rgba(255,255,255,0.16)" strokeWidth="2" />
+                      <circle
+                        ref={countdownRef}
+                        cx="8"
+                        cy="8"
+                        r="6"
+                        fill="none"
+                        stroke="#34d399"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeDasharray={37.7}
+                        strokeDashoffset={0}
+                      />
+                    </svg>
+                  ) : (
+                    <CirclePlay className={`h-3.5 w-3.5 ${tourAuto ? 'animate-pulse' : ''}`} />
+                  )}
+                  {lang === 'zh' ? '自动' : 'Auto'}
+                </button>
+                <button
+                  onClick={() => setTourIdx(Math.max(0, tourIdx - 1))}
+                  disabled={tourIdx === 0}
+                  aria-label={lang === 'zh' ? '上一站' : 'Previous'}
+                  className="flex shrink-0 items-center rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-slate-400 transition hover:text-slate-200 disabled:opacity-30"
+                >
+                  <ChevronLeft className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={() => setTourIdx(Math.min(tour.length - 1, tourIdx + 1))}
+                  disabled={tourIdx >= tour.length - 1}
+                  aria-label={lang === 'zh' ? '下一站' : 'Next'}
+                  className="flex shrink-0 items-center gap-1 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-[10.5px] font-medium text-emerald-300 transition hover:bg-emerald-500/25 hover:shadow-[0_0_14px_rgba(52,211,153,0.3)] disabled:opacity-30"
+                >
+                  {lang === 'zh' ? '下一站' : 'Next'}
+                  <ChevronRight className="h-3 w-3" />
+                </button>
+              </div>
+
+              {/* 键盘提示 + 末站结语 */}
+              <div className="flex items-center gap-1.5 px-4 pb-2.5 pt-1.5 text-[9px] text-slate-600">
+                <kbd className="rounded border border-white/10 bg-white/5 px-1 font-mono">←</kbd>
+                <kbd className="rounded border border-white/10 bg-white/5 px-1 font-mono">→</kbd>
+                <span className="truncate">
+                  {lang === 'zh' ? '逐站推进 · 自动模式 12s/站（悬停本卡暂停阅读）' : 'Step through · auto 12s/stop (hover to pause)'}
+                </span>
+                {tourIdx >= tour.length - 1 && (
+                  <span className="ml-auto hidden truncate text-slate-500 sm:inline">
+                    {lang === 'zh' ? '级联讲解完毕 —— 退出后点「播放」看动态流' : 'Complete — exit and press Play'}
+                  </span>
+                )}
+              </div>
+            </motion.div>
+          </AnimatePresence>
         </div>
       ) : (
         <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 hidden -translate-x-1/2 items-center gap-2 rounded-full border border-white/8 bg-slate-950/60 px-3 py-1 text-[9px] text-slate-500 backdrop-blur-md md:flex">
