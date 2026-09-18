@@ -93,6 +93,8 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
   const inhibRingRef = useRef<THREE.Mesh>(null);
   const selRingRef = useRef<THREE.Mesh>(null);
   const labelRef = useRef<HTMLDivElement>(null);
+  /** v33 教学引导激活爬升（本地 0→1 平滑逼近 —— 引导站点切换时活性/磷化视觉渐进点亮, 零重渲染） */
+  const tourRampRef = useRef(0);
   const phase = useMemo(() => (node.id.charCodeAt(0) % 7) * 0.9, [node.id]);
 
   // 共享材质（跨膜螺旋 + ECD + ICD 同一材质，活性统一驱动）
@@ -206,12 +208,24 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
     };
   }, [node.id, onHover]);
 
-  useFrame((state) => {
+  useFrame((state, delta) => {
     const t = state.clock.elapsedTime;
     const wallNow = performance.now();
+    const focus = sim.current.focus;
+    const tourNode = sim.current.tourNode;
+    const isTourTarget = !!tourNode && node.id === tourNode;
+    const isTourNeighbor = !!tourNode && !!sim.current.tourNeighbors?.has(node.id);
+    // v31 级联点亮: 已讲解站点（非当前站）—— 恒亮 + 缓慢呼吸（「信号已传到这里」）
+    const isVisited = !!tourNode && !isTourTarget && !!sim.current.tourVisited?.has(node.id);
+    // v33 引导↔模拟联动视觉爬升: 引擎状态瞬时写入（事件流/阶段/检测器即时真值）,
+    // 分子侧 ~1.2s 平滑逼近（本地 ramp 零重渲染）; 引导关闭时恒 1 = 教毕级联状态原样呈现
+    const inTour = !!tourNode;
+    const rampTarget = inTour ? (isTourTarget || isVisited ? 1 : 0) : 1;
+    tourRampRef.current += (rampTarget - tourRampRef.current) * Math.min(1, (delta ?? 0.016) * 2.6);
+    const ramp = inTour ? tourRampRef.current : 1;
     const st = sim.current.nodeStates[node.id];
-    const a = st?.activity ?? 0;
-    const ph = st?.phospho ?? 0;
+    const a = (st?.activity ?? 0) * ramp;
+    const ph = (st?.phospho ?? 0) * ramp;
     // 世界坐标一次计算（剖切检测 + 标签距离淡出共用; 模块级临时向量避免每帧分配）
     const grp = groupRef.current;
     if (grp) grp.getWorldPosition(_wp);
@@ -228,12 +242,6 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
       const age = (wallNow - pAt) / 650;
       if (age >= 0 && age < 1) flash = (1 - age) * (1 - age);
     }
-    const focus = sim.current.focus;
-    const tourNode = sim.current.tourNode;
-    const isTourTarget = !!tourNode && node.id === tourNode;
-    const isTourNeighbor = !!tourNode && !!sim.current.tourNeighbors?.has(node.id);
-    // v31 级联点亮: 已讲解站点（非当前站）—— 恒亮 + 缓慢呼吸（「信号已传到这里」）
-    const isVisited = !!tourNode && !isTourTarget && !!sim.current.tourVisited?.has(node.id);
     const vis = tourNode
       ? isTourTarget || isTourNeighbor
         ? 1

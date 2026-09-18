@@ -148,7 +148,7 @@ export const COMPARTMENT_ZH: Record<Compartment, string> = {
   extracellular: '细胞外', membrane: '细胞膜', cytoplasm: '细胞质', nucleus: '细胞核',
 };
 
-const EDGE_EVENT_KIND: Record<EdgeKind, EventKind> = {
+export const EDGE_EVENT_KIND: Record<EdgeKind, EventKind> = {
   activation: 'activation', phosphorylation: 'phosphorylation', inhibition: 'inhibition',
   expression: 'expression', repression: 'repression', binding: 'binding',
   dephosphorylation: 'phosphorylation', dissociation: 'activation', indirect: 'activation',

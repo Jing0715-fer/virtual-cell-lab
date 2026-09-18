@@ -22,6 +22,8 @@ import { Eye, Tags, Focus, RotateCw, RotateCcw, Maximize, Shell, Atom, Crosshair
 import { AnimatePresence, motion } from 'framer-motion';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
+import { EDGE_EVENT_KIND, PHASES } from '@/lib/simulation/engine';
+import type { SimEvent } from '@/lib/simulation/engine';
 import { layout3D, projectLayoutToPlane, EDGE_COLORS, type CellBodySpec, type Vec3 } from '@/lib/simulation/layout3d';
 import { buildGuidedTour, tourIntro } from '@/lib/simulation/guided-tour';
 import { CellBody } from './organelles';
@@ -579,9 +581,14 @@ export function VirtualCell3D() {
   const openTour = (next: boolean) => {
     setTourOpen(next);
     if (next) {
-      useLabStore.getState().pause();
+      const lab = useLabStore.getState();
+      lab.pause();
+      // v33: 引导从静息态开讲 —— 级联逐站点亮/事件流叙事/阶段推进的干净起点
+      // （退出引导不清零: 教毕的级联状态保留, 点「播放」可从该状态续跑动态流）
+      lab.resetSim();
       setAutoRotate(false);
       setCamMode('tour');
+      setTourIdx(0);
       dwellRemaining.current = 12000;
       lastAutoIdx.current = -1;
     } else {
@@ -642,6 +649,10 @@ export function VirtualCell3D() {
 
   // 模拟快照: zustand 订阅写入可变引用（避免逐 tick React 重渲染）
   const sim = useRef<SimSnapshot>({ nodeStates: {}, signalFlux: {}, injected: {}, inhibition: {}, focus: false, tourNode: null, tourNeighbors: null, tourVisited: null, tourLitEdges: null, tourPulse: null, pulseAt: {}, edgePulse: {}, clipPlane: null });
+  // v33 引导↔模拟联动发射守卫（复合键 tourKey:idx —— 通路上层 graph/effLayout 变化重跑 effect 不重复发射）
+  const tourSyncRef = useRef('');
+  // v33 信号阶段指示（引导推进 → computePhase 逐级点亮: 静息→配体结合→受体激活→级联→转录）
+  const simPhase = useLabStore((s) => s.phase);
   useEffect(() => {
     const unsub = useLabStore.subscribe((s) => {
       sim.current.nodeStates = s.nodeStates;
@@ -734,14 +745,48 @@ export function VirtualCell3D() {
       } else {
         sim.current.tourPulse = null;
       }
+      // v33 引导↔模拟联动: 站点切换 → 引擎状态写入（当前站活性/磷化点亮）+ 事件流叙事（残基级注解
+      // 作为 SimEvent 入流 → EventPulses 自动孵化彗星与冲击波）+ 阶段推进。复合键守卫防重复发射。
+      const syncKey = `${tourKey}:${tourIdx}`;
+      if (tourSyncRef.current !== syncKey) {
+        tourSyncRef.current = syncKey;
+        const prevStep = tourIdx > 0 ? tour[tourIdx - 1] : null;
+        const node = graph.core.nodes.find((n) => n.id === tourStep.nodeId);
+        const edge = prevStep
+          ? graph.core.edges.find(
+              (e) =>
+                (e.source === prevStep.nodeId && e.target === tourStep.nodeId) ||
+                (e.target === prevStep.nodeId && e.source === tourStep.nodeId),
+            )
+          : undefined;
+        const kind: SimEvent['kind'] = !prevStep
+          ? 'binding'
+          : node?.kind === 'gene'
+            ? 'expression'
+            : edge
+              ? EDGE_EVENT_KIND[edge.kind] ?? 'activation'
+              : 'activation';
+        const text = !prevStep
+          ? `【引导·起点】${tourStep.text}`
+          : tourStep.edgeNote ??
+            `【引导】${prevStep.label} → ${tourStep.label}：信号沿级联传递，${tourStep.label} 进入活性状态。`;
+        useLabStore.getState().tourStep({
+          nodeId: tourStep.nodeId,
+          label: tourStep.label,
+          prevLabel: prevStep?.label,
+          text: tourStep.edgeNote && prevStep ? `【引导】${tourStep.edgeNote}` : text,
+          kind,
+        });
+      }
     } else {
       sim.current.tourNode = null;
       sim.current.tourNeighbors = null;
       sim.current.tourVisited = null;
       sim.current.tourLitEdges = null;
       sim.current.tourPulse = null;
+      tourSyncRef.current = ''; // 退出引导重置发射守卫（重开时从第 0 站重新开讲）
     }
-  }, [tourOpen, tourStep, graph, tourIdx, tour, effLayout]);
+  }, [tourOpen, tourStep, graph, tourIdx, tour, tourKey, effLayout]);
 
   // 网页内全屏模式下 ESC 退出（页面级全屏检视; 锁定背景滚动）
   useEffect(() => {
@@ -1327,6 +1372,11 @@ export function VirtualCell3D() {
             </span>
             <span className="hidden h-2.5 w-px shrink-0 bg-white/15 sm:block" />
             <span className="hidden truncate font-mono text-[9px] text-slate-500 sm:block">{tourStep.phaseTag}</span>
+            {/* v33 信号阶段章（引导推进 → computePhase 逐级点亮: 静息→配体结合→受体激活→级联→转录） */}
+            <span className="hidden h-2.5 w-px shrink-0 bg-white/15 md:block" />
+            <span className="hidden shrink-0 font-mono text-[9px] text-emerald-300/70 md:block">
+              {lang === 'zh' ? PHASES[simPhase].name : PHASES[simPhase].en}
+            </span>
           </div>
         </div>
       )}
@@ -1362,6 +1412,10 @@ export function VirtualCell3D() {
                     <span className="font-mono text-emerald-300/80">{tourStep.label}</span>
                     <span className="text-slate-700">·</span>
                     <span>{tourStep.phaseTag}</span>
+                    <span className="text-slate-700">·</span>
+                    <span className="font-medium text-emerald-300/75">
+                      {lang === 'zh' ? PHASES[simPhase].name : PHASES[simPhase].en}
+                    </span>
                     <span className="text-slate-700">·</span>
                     <span className="font-mono tabular-nums">
                       {Math.min(tourIdx + 1, tour.length)}/{tour.length}

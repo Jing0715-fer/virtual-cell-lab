@@ -64,6 +64,15 @@ interface LabStore {
   toggleInhibitor: (drugId: string) => void;
   tickSim: () => void;
   selectNode: (id: string | null) => void;
+  /** v33 教学引导 ↔ 模拟引擎联动: 站点切换写入引擎状态（活性/磷化点亮 + 事件流叙事 + 阶段推进）
+   *  引导模式模拟暂停 —— 本 action 直接写入快照（不动 running）, 退出后点播放可从教毕状态续跑 */
+  tourStep: (p: {
+    nodeId: string;
+    label: string;
+    prevLabel?: string;
+    text: string;
+    kind: SimEvent['kind'];
+  }) => void;
 }
 
 const MAX_EVENTS = 240;
@@ -397,4 +406,42 @@ export const useLabStore = create<LabStore>((set, get) => ({
   },
 
   selectNode: (id) => set({ selectedNode: id }),
+
+  tourStep: (p) => {
+    const { graph, nodeStates, tick, events } = get();
+    if (!graph) return;
+    const node = graph.core.nodes.find((n) => n.id === p.nodeId);
+    if (!node) return;
+    const states = { ...nodeStates };
+    // 蛋白质类分子获得磷酸化修饰读感（配体/第二信使/靶基因无磷酸化语义）
+    const PROTEIN_KINDS = new Set([
+      'kinase', 'receptor', 'tf', 'gtpase', 'phosphatase', 'adapter', 'enzyme', 'channel',
+    ]);
+    const prev = nodeStates[p.nodeId];
+    const nextTick = tick + 1;
+    states[p.nodeId] = {
+      activity: 0.92,
+      phospho: PROTEIN_KINDS.has(node.kind) ? 0.85 : 0,
+      activated: true,
+      activatedAtTick: prev?.activatedAtTick ?? nextTick,
+    };
+    set({
+      nodeStates: states,
+      tick: nextTick,
+      phase: computePhase(graph.core, states),
+      events: [
+        ...events,
+        {
+          id: `tour-${p.nodeId}-${Date.now()}`,
+          tick: nextTick,
+          simTime: `T+${(nextTick * 0.5).toFixed(1)}s`,
+          kind: p.kind,
+          nodeId: p.nodeId,
+          nodeLabel: p.label,
+          sourceLabel: p.prevLabel,
+          text: p.text,
+        },
+      ].slice(-MAX_EVENTS),
+    });
+  },
 }));

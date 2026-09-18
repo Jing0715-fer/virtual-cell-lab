@@ -2442,3 +2442,56 @@ Stage Summary:
 - 下阶段建议: ①tourVisited → nodeStates 活性渐升（讲解推进时磷酸化环/事件流同步点亮）②中期
   染色体 hover 锚随单体分离动态跟随 ③「发表模式」截图导出 ④减数分裂演示 ⑤其余条形结构
   （神经元树突/轴突等）折线命中体接入
+
+---
+Task ID: 47
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户第 20 轮需求 —— 继续打磨项目和开发新功能（落地 worklog 下阶段建议首选项: 引导模式站点切换同步「模拟逐步激活」—— tourVisited → nodeStates 活性渐升, 让磷酸化环/事件流/阶段随讲解推进）
+
+Work Log:
+- 【架构: 引导 ↔ 模拟引擎联动（v33）】
+  · lab-store 新增 tourStep action: 站点切换时写入引擎状态（当前站 activity 0.92 + 蛋白类
+    phospho 0.85 + activated + activatedAtTick）、推进 tick +1（simTime 叙事时间）、追加
+    SimEvent（【引导】前缀, 携带 sourceLabel=上站 → EventPulses 自动孵化彗星+冲击波+抵达闪光）、
+    computePhase 重算阶段; 不动 running —— 引导期间模拟暂停, 引擎不覆盖教学写入
+  · openTour(true) 升级: pause + resetSim（从静息态开讲的干净叙事起点）+ setTourIdx(0)
+    （重开引导重新从第 0 站教起）; 退出引导不清零 —— 教毕级联状态保留, 点「播放」续跑
+  · virtual-cell-3d 站点同步发射: v31 快照 effect 内加复合键守卫（`${tourKey}:${tourIdx}`）
+    —— 通路上层 graph/effLayout 变化重跑 effect 不重复发射; 退出引导重置守卫; 事件 kind 按
+    上站→本站边类型推导（EDGE_EVENT_KIND 导出自 engine）, 靶基因站 → expression
+  · molecules.tsx 视觉爬升: tourRampRef 本地 0→1 平滑逼近（delta*2.6 ≈1.2s）—— 引擎瞬时
+    写入（事件流/阶段/检测器即时真值）与分子侧渐进点亮双层解耦, 零重渲染; 引导关闭恒 1
+    （教毕状态原样呈现）
+  · 阶段章可视叙事: 章节章与解说卡头部新增信号阶段章（静息态→配体结合→受体激活→信号级联
+    →转录响应 —— computePhase 随站点 tier 逐级点亮, PHASES 双语）
+- 【QA（agent-browser 交互级 + 像素量化; lint/tsc 零错误; dev.log 全 200; 0 console/page error）】
+  · 开卡: 章节章「MAPK 1/10 细胞外·L0 配体结合」+ 检测器 EGF 活性 92%/磷酸化 0%（配体无
+    磷酸化语义 ✓）+ T+0.5s + 1 分子事件 ✓
+  · 逐站: 下一站 → EGFR 站「2/10 细胞膜·L1 受体激活」（阶段 1→2 ✓）+ 检测器活性 92%/
+    磷酸化 85%（受体属蛋白类 ✓）+ T+1.0s + 2 分子事件 + 动力学曲线出现 EGFR 曲线 ✓
+  · 跳末站: 「10/10 细胞核·L5 转录响应」（阶段 4 ✓）+ 末站提示「退出后点播放看动态流」✓
+  · 退出续跑: 退出引导 → 播放 → T+1.5s→T+10.5s、事件 2→8（引擎从教毕状态续跑, 下游级联
+    自动产生新分子事件 ✓）
+  · 像素: 站点 2 截图 amber 1247px（磷酸化环+琥珀注解）+ emerald 5723px（辉光）✓
+  · 彗星联动: tourStep 事件带 sourceLabel → EventPulses bolt 自动从上站飞抵本站（观察到位,
+    与 v31 tourPulse 大彗星分层叠加）
+- 【注意事项】①SwiftShader 低帧率下 eval 偶发超时（点击已生效, 二次查询确认即可）
+  ②playback 播放按钮 title 为「播放（自动注射配体）」, running 时变「暂停」—— QA 选择器
+  用 button[title*=播放]/[title*=暂停] ③WebGL Context Lost 日志来自 HMR 重载瞬间（benign）
+
+Stage Summary:
+- 用户「继续打磨 + 新功能」落地: 引导模式从「静态讲解叠加层」升级为「驱动模拟引擎的教学
+  叙事系统」—— 每推进一站, 该分子在引擎中真实激活（活性/磷酸化/激活时刻写入）, 事件流
+  输出残基级叙事, 信号阶段章逐级点亮, 彗星脉冲自动从上站飞抵; 退出后可无缝续跑动态模拟
+- 架构沉淀: ①「store 瞬时写入 + 视图本地 ramp」双层解耦（真值即时、视觉渐进、零重渲染）
+  ②复合键 `${tourKey}:${tourIdx}` 发射守卫（effect 依赖变化不重复发射）③教学状态直接
+  写引擎快照（不动 running）—— 教毕状态成为续跑初始条件的完整模式
+- 产出: lab-store.ts（tourStep action）/ virtual-cell-3d.tsx（openTour 重置 + 站点同步
+  发射 + 阶段章）/ molecules.tsx（tourRampRef 视觉爬升）/ engine.ts（EDGE_EVENT_KIND 导出）
+- 未解决/风险: ①跳站时中间站点不逐一写入（只写当前站 —— 叙事时间线有跳变, 属预期行为）
+  ②引导重开清空用户实验配置（配体/药物注入被 resetSim 重置 —— 教学叙事优先, 可接受）
+  ③无头环境 rAF 帧饥饿使 eval 偶发超时（真机无）
+- 下阶段建议: ①中期染色体 hover 锚随单体分离动态跟随 ②「发表模式」截图导出（scene-capture
+  已有快照管道, 补 HUD 入口与图注版式）③减数分裂演示（复用相位时钟+三网体系范式）④其余
+  条形结构（神经元树突/轴突等）折线命中体接入 ⑤引导模式结束后自动弹出「完整级联已点亮」
+  总结卡（复用 tourIntro 版式）
