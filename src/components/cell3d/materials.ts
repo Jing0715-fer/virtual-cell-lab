@@ -42,6 +42,9 @@ export const REF = {
   golgiCis: '#9a90b4',
   golgiTrans: '#cfc6dd',
   golgiVesicle: '#ada4c4',
+  /* v35 分泌泡（TGN→质膜 组成型分泌航线 —— 低饱和青绿族: 与内膜藕荷家族拉开
+   * 「离站航向膜面」的方向语义; 与 emerald 主题同族保持画面统一） */
+  secretory: '#4e8f88',
   /* 溶酶体（暗红棕 —— 酸性水解酶仓） */
   lyso: '#7a4a41',
   lysoHi: '#a06255',

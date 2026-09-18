@@ -98,6 +98,15 @@ export const T: Record<string, Entry> = {
   },
   'hud.gear': { zh: '显示', en: 'View' },
   'hud.snap': { zh: '信号贴面', en: 'Section snap' },
+  /* v35 发表模式（图版导出） */
+  'hud.fig': { zh: '图版导出', en: 'Figure' },
+  'hud.figTip': {
+    zh: '发表模式 · 将当前 3D 视图导出为科研图版 PNG（刊头 + 双语图注 + 实时比例标尺）',
+    en: 'Publication mode · export the current 3D view as a scientific figure PNG (masthead, bilingual caption, live scale bar)',
+  },
+  'fig.busy': { zh: '正在合成图版…', en: 'Composing figure…' },
+  'fig.ok': { zh: '图版已导出 · PNG 已开始下载', en: 'Figure exported · PNG download started' },
+  'fig.err': { zh: '导出失败，请稍后重试', en: 'Export failed — please retry' },
   'hud.snapTip': {
     zh: '信号级联正交投影到剖切面上演示 —— 全部分子落于切面, 无一被剖切裁掉（50% 过心切面视野最佳）',
     en: 'Orthogonally projects the cascade onto the section plane — every molecule stays visible on the cut face (best at the 50% mid-plane)',

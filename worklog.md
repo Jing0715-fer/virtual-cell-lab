@@ -2554,3 +2554,69 @@ Stage Summary:
   「发表模式」整页截图导出（scene-capture 快照管道 + HUD 入口 + 图注版式）③减数分裂演示
   （复用相位时钟+三网体系）④神经元树突/轴突条形结构折线命中体接入 ⑤TGN 出芽囊泡「分泌
   泡沿轨运输到质膜」的动态流演示（结合 mrna-flow 范式）
+
+---
+Task ID: 49
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户第 22 轮需求 —— 继续下一阶段开发和持续打磨整个项目（落地 worklog 下阶段建议②④: 「发表模式」图版导出 + TGN 分泌泡沿轨运输动态流）
+
+Work Log:
+- 【发表模式: 图版导出（v35 旗舰功能, 全新三文件链路）】
+  · scene-capture.ts: 新增 requestFigureCapture/consumeFigureRequest 原子请求 API + FigureMeta
+    （width/height/fov/camDist/pxPerWorld —— 标尺标定元数据）; 模块级单例不进 zustand
+  · figure-compose.ts（新建 +230 行）: 科研图版纸面版式合成器 —— 刊头（VIRTUAL CELL LAB 小体大写
+    字距 + 图版编号）/ 标题行（细胞类型 · 通路）/ 图区（快照 + 1px 内衬框 + 图内右下比例标尺
+    胶囊: 1-2-5 序列自动选长 + 黑标尺杆端竖线 + µm 标签）/ 图注块（粗体引导行「图 N | …」+
+    状态行 + 方法行灰 + 脚注时间戳/KEGG id 双语）/ 会话内图号递增 / parseDiameterUm 直径字符串
+    解析（'20–30 μm'→25）/ isBlankPng 快照空白检测兜底 / toBlob+anchor 下载（文件名含细胞/
+    通路/时间戳）
+  · virtual-cell-3d.tsx: PublicationCapture 组件 —— useFrame priority 随辉光管线切换（composer
+    priority 1 → 本组件 2: 同 rAF 帧内 toDataURL, drawing buffer 未交还合成器, 无
+    preserveDrawingBuffer 依赖且含后处理画面; 辉光关闭退 priority 0 读上一帧, 绝不单独接管
+    渲染循环避免无 composer 黑屏）; HUD 右上常驻「图版导出」按钮（Camera/Loader2 图标切换,
+    amber highlight）+ 底部居中 framer-motion 反馈胶囊（busy 微调→ok 翡翠/err 玫红, role=status,
+    2.8s 自动消隐）; umPerPx 标定 = 膜半径×2/直径µm ÷ pxPerWorld（物平面真实比例）
+- 【3D 精细度: TGN→质膜 组成型分泌流（衔接 v34 高尔基极性叙事的「第三幕」）】
+  · organelles.tsx: SecVesicle 粒子池（perf 3 / 常规 5 泡）—— 每泡 = 主体球（衣被法线 + 青绿
+    REF.secretory 新色板 #4e8f88 + emissive 0.85）+ 双拖尾 ghost（共享 bodyMat, 尺寸递减）+
+    融合环（Torus 膜面法向朝向 + 加色混合）+ 货物外释三粒（琥珀加色族膜外漂散）
+  · 路径: TGN 管上缘出芽点（局部椭圆轮廓 localToWorld）→ 沿堆轴初抬 + 中途外摆贝塞尔弧 →
+    膜前减速点（-0.42）→ 质膜停靠点（cellSurf -0.08, 逐泡偏航 ±0.17rad 分散）; 世界坐标挂
+    group 不随堆自旋
+  · 四相生命周期（update(t) 帧驱动, 周期 9.5-12s 错峰）: ①出芽（0-9%: 沿堆轴鼓起 + 缩放爬升）
+    ②巡航（9-72%: 贝塞尔 + 布朗微扰 + 双拖尾滞后 0.055）③停靠（72-86%: 减速贴靠缓动）④胞吐
+    融合（86-100%: 泡体压扁淡出 + 融合环扩张 sin 脉冲 + 货物三粒膜外扩散上浮）
+  · 悬停: 运输走廊中点静态锚「分泌泡运输（TGN→质膜）」+ ORG_INFO 双语科学词条（组成型分泌
+    叙事）; 目录 28→29 个细胞器
+- 【QA（agent-browser 交互级 + 像素量化; lint 零错误; tsc src 零错误; console/page errors 零）】
+  · 图版导出全链路: 点击 → toast「正在合成图版…」→「图版已导出 · PNG 已开始下载」（busy→ok
+    状态机 ✓）; anchor.click 补丁拦截 blob → 2D 重建统计: 556×760, 纸面白 29%/暗部 13%/内容
+    57%（合成非空白、版式分层正确 ✓）
+  · 分泌流: 目录「29 个细胞器」含新词条 ✓; 定位飞行后 4 帧 1.3s 间隔青绿像素计数 7865→8843→
+    7948→8908（方差 1043px = 泡体巡航动画活跃 ✓）; 相机中心悬停 → 「分泌泡运输（TGN→质膜）」
+    悬停卡全词条显示 ✓
+  · 回归: 双语 中/EN（h1 + fig 按钮 Figure）✓; 教学引导 开卡 1/10 → 下一站 2/10 → ESC 退出
+    （叶节点 N/10 归零 ✓）; 375×780 无横向溢出 + 图版按钮移动端可见 ✓; dev.log 全 200
+  · 注意事项: ①agent-browser 无 resize 命令 —— 视口用 `set viewport <w> <h>` ②Escape 检测
+    勿用父容器文本匹配（大容器 false positive, 用叶节点 /^N\/10$/ 精确匹配）③设备模拟在
+    Linux 不可用（device list 需 Xcode）
+
+Stage Summary:
+- 用户「继续下一阶段开发和持续打磨」落地: ①发表模式图版导出（worklog 建议②）—— 任意视角
+  一键导出科研图版 PNG: 刊头/双语图注/实时比例标尺（相机几何标定 µm）全版式客户端合成,
+  捕获时序架构（composer 后同帧 priority 2）保证任何模式下含辉光的完整画面; ②TGN→质膜
+  组成型分泌流（worklog 建议⑤）—— v34 高尔基「入货-加工-分选」叙事补上「出货运抵」终章,
+  四相全周期动画（出芽/巡航/停靠/胞吐融合+货物外释）+ 悬停词条教学化
+- 架构沉淀: ①「请求置位 → 帧内消费回调」的跨组件捕获通道（HUD 事件 → Canvas 帧循环 →
+  回调, 零全局轮询）②标尺标定链: fov/相机距离/aspect → pxPerWorld → 世界/µm 换算 → 1-2-5
+  美观标尺自动选长 ③贝塞尔巡航 + 拖尾滞后采样 + 融合环 sin 脉冲的粒子生命周期范式（与
+  mRNA/自噬流同族但常驻循环）
+- 产出: figure-compose.ts（新建）/ scene-capture.ts（图版 API）/ virtual-cell-3d.tsx
+  （PublicationCapture + HUD 按钮 + toast）/ organelles.tsx（分泌流 +130 行）/
+  hover-labels.tsx（词条）/ materials.ts（REF.secretory）/ i18n.tsx（6 键）
+- 未解决/风险: ①无头环境 dpr=1 使图版像素数低于真机（dpr=2 时 ~1112px 宽, 出版级）②标尺为
+  膜半径近似的示意标定（图注已注明「非等比示意」）③SwiftShader 低帧率下捕获可能偶发超时
+- 下阶段建议: ①中期染色体 hover 锚随姐妹染色单体分离动态跟随（mitosis.tsx 金盘式动态锚）
+  ②减数分裂演示（复用相位时钟+三网体系范式）③神经元树突/轴突条形结构折线命中体接入
+  ④图版导出多面板版式（2×2 对照图版: 不同细胞类型/相位拼版 + 共享图注）⑤分泌流接入引擎
+  事件（配体注入后分泌速率可视增强 —— 与信号模拟联动）

@@ -1401,6 +1401,35 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   }
   const showcaseAnchors: ShowcaseAnchor[] = [];
 
+  /* ================= v35 TGN→质膜 组成型分泌流（常驻循环粒子池） =================
+   *  科学过程: TGN 分选出口出芽分泌泡 → 沿细胞骨架轨道巡航 → 质膜停靠 → 胞吐融合
+   *  （融合环闪光 + 分泌货物外释淡出）。衔接 v34 高尔基极性叙事的「第三幕」。
+   *  状态在 Golgi 构建段填充（世界坐标路径）; update(t) 帧驱动四相生命周期。 */
+  interface SecVesicle {
+    body: THREE.Mesh;
+    bodyMat: THREE.MeshPhysicalMaterial;
+    trail: THREE.Mesh[];
+    flash: THREE.Mesh;
+    flashMat: THREE.MeshBasicMaterial;
+    cargo: THREE.Mesh[];
+    cargoMat: THREE.MeshBasicMaterial;
+    /** TGN 出芽点（世界） */
+    exit: THREE.Vector3;
+    /** 弧线控制点（世界） */
+    ctrl: THREE.Vector3;
+    /** 膜前减速点（世界, 距膜 ~0.35） */
+    preDock: THREE.Vector3;
+    /** 质膜停靠点（世界） */
+    dock: THREE.Vector3;
+    /** 膜外法向（= 停靠点径向; 融合环朝向/货物外释方向） */
+    outDir: THREE.Vector3;
+    period: number;
+    offset: number;
+    phase: number;
+    r: number;
+  }
+  const secVesicles: SecVesicle[] = [];
+
   /* ================= 线粒体（双膜 + 板层嵴 + ATP 合酶） ================= */
   const mitos: { obj: THREE.Group; baseY: number; phase: number; pinned?: boolean }[] = [];
   const mitoCount = perf ? Math.max(4, Math.round(spec.mitoCount * 0.6)) : spec.mitoCount;
@@ -2212,6 +2241,123 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
             group: 'endomembrane',
           });
         }
+      }
+    }
+
+    /* ---- v35 TGN→质膜 组成型分泌流构建（高尔基段落第三幕; 世界坐标挂 group 不随堆自旋） ----
+     *  路径: TGN 管上方出芽点 → 沿堆轴初抬的贝塞尔弧 → 膜前减速点 → 质膜停靠点;
+     *  视觉: 主体球（衣被法线 + 青绿发光族）+ 双拖尾 ghost + 融合环 + 货物外释三粒。
+     *  悬停: 路径中点静态锚（运输走廊指认）; 生命周期见 update() 四相。 */
+    {
+      const gAxis = GOLGI_AXIS.clone();
+      const secN = perf ? 3 : 5;
+      const secGeo = track(new THREE.SphereGeometry(1, 14, 12));
+      const flashGeo = track(new THREE.TorusGeometry(1, 0.1, 8, 26));
+      const cargoGeo = track(new THREE.SphereGeometry(1, 8, 6));
+      const secGroup = new THREE.Group();
+      // 出芽环带（TGN 管网上缘）: 局部椭圆轮廓 → 世界坐标（g 位姿已由上方 updateMatrixWorld 锁定）
+      const transDiskR = GOLGI_SEMI_B * (1 - (GOLGI_CIST_N - 1) * 0.045);
+      for (let i = 0; i < secN; i++) {
+        const r = (0.15 + hash01(`sv${i}`) * 0.05) * GOLGI_SCALE;
+        const ang = 1.9 + i * (Math.PI * 2 / secN) + hash01(`sv${i}`, 3) * 0.4;
+        const rr = transDiskR * (0.55 + hash01(`sv${i}`, 5) * 0.3);
+        const exit = g.localToWorld(new THREE.Vector3(
+          Math.cos(ang) * rr * GOLGI_ASPECT,
+          GOLGI_STACK_H * 0.5 + (0.40 + hash01(`sv${i}`, 7) * 0.22) * GOLGI_SCALE,
+          Math.sin(ang) * rr,
+        ));
+        // 膜面: 高尔基径向外推（细胞中心→堆中心方向）→ 类型化膜面内 0.08; 逐泡微偏航分散停靠点
+        const outDir = new THREE.Vector3(p.x, p.y, p.z).normalize();
+        const yaw = (hash01(`sv${i}`, 9) - 0.5) * 0.34;
+        const dockDir = outDir.clone().applyAxisAngle(gAxis, yaw).normalize();
+        const dock = dockDir.clone().multiplyScalar(cellSurf(dockDir, R, SHAPE, -0.08));
+        const preDock = dock.clone().addScaledVector(dockDir, -0.42);
+        // 控制点: 沿堆轴先抬起（出芽延续动量）+ 中途外摆 —— 「离栈→巡航」自然弧线
+        const ctrl = exit.clone()
+          .addScaledVector(gAxis, 1.1 * GOLGI_SCALE)
+          .lerp(preDock, 0.55);
+        const bodyMat = mat({
+          color: REF.secretory,
+          emissive: '#2f6f66',
+          emissiveIntensity: 0.85,
+          opacity: 0,
+          roughness: 0.3,
+          normalMap: coatNormal,
+          normalScale: 0.7,
+          clearcoat: 0.4,
+          sheen: 0.4,
+          sheenColor: '#8fd8cf',
+        });
+        const body = new THREE.Mesh(secGeo, bodyMat);
+        body.scale.setScalar(r);
+        body.renderOrder = cutaway ? 101 : 47;
+        const trail: THREE.Mesh[] = [];
+        for (let k = 0; k < 2; k++) {
+          const tm = new THREE.Mesh(secGeo, bodyMat);
+          tm.scale.setScalar(r * (0.72 - k * 0.22));
+          tm.renderOrder = cutaway ? 101 : 47;
+          trail.push(tm);
+          secGroup.add(tm);
+        }
+        // 融合环: 膜面法向朝向（Torus 默认朝 +z → setFromUnitVectors）
+        const flashMat = track(new THREE.MeshBasicMaterial({
+          color: '#8ff0dd',
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          fog: false,
+          side: THREE.DoubleSide,
+        }));
+        const flash = new THREE.Mesh(flashGeo, flashMat);
+        flash.position.copy(dock);
+        flash.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dockDir);
+        flash.visible = false;
+        // 货物外释三粒（胞吐内容物 —— 琥珀加色族, 向膜外漂散）
+        const cargoMat = track(new THREE.MeshBasicMaterial({
+          color: '#ffd27a',
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          fog: false,
+        }));
+        const cargo: THREE.Mesh[] = [];
+        for (let k = 0; k < 3; k++) {
+          const cm = new THREE.Mesh(cargoGeo, cargoMat);
+          cm.visible = false;
+          cargo.push(cm);
+          secGroup.add(cm);
+        }
+        secGroup.add(body);
+        secVesicles.push({
+          body, bodyMat, trail, flash, flashMat, cargo, cargoMat,
+          exit, ctrl, preDock, dock, outDir: dockDir,
+          period: 9.5 + hash01(`sv${i}`, 11) * 2.5,
+          offset: (i * 2.7 + hash01(`sv${i}`, 13) * 1.3),
+          phase: hash01(`sv${i}`, 15) * Math.PI * 2,
+          r,
+        });
+        void exit; // exit 已存入粒子（保留引用语义清晰）
+      }
+      group.add(secGroup);
+      // 悬停锚: 运输走廊中点（静态 —— 覆盖巡航段的指认; 出芽/融合由 TGN/质膜词条承担）
+      if (secVesicles.length > 0) {
+        const sv0 = secVesicles[0]!;
+        const mid45 = new THREE.Vector3();
+        const q = 1 - 0.45;
+        mid45.set(
+          q * q * sv0.exit.x + 2 * q * 0.45 * sv0.ctrl.x + 0.45 * 0.45 * sv0.dock.x,
+          q * q * sv0.exit.y + 2 * q * 0.45 * sv0.ctrl.y + 0.45 * 0.45 * sv0.dock.y,
+          q * q * sv0.exit.z + 2 * q * 0.45 * sv0.ctrl.z + 0.45 * 0.45 * sv0.dock.z,
+        );
+        hover.push({
+          pos: { x: mid45.x, y: mid45.y, z: mid45.z },
+          r: 1.0,
+          zh: '分泌泡运输（TGN→质膜）',
+          latin: 'Secretory transport (TGN→PM)',
+          group: 'endomembrane',
+        });
       }
     }
   }
@@ -4214,6 +4360,89 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
           const fk = (k - 0.12) / 0.88;
           p.flash.scale.setScalar(0.55 + fk * 1.5);
           p.flashMat.opacity = Math.sin(Math.min(1, fk * 1.6) * Math.PI) * 0.5;
+        }
+      }
+    }
+
+    /* ---- v35 TGN→质膜 组成型分泌流四相生命周期（常驻循环; 出芽→巡航→停靠→胞吐融合） ---- */
+    const SEC_BUD = 0.09;
+    const SEC_DOCK = 0.72;
+    const SEC_FUSE = 0.86;
+    for (const sv of secVesicles) {
+      const u = (((t + sv.offset) % sv.period) + sv.period) % sv.period / sv.period;
+      const smooth = (x: number) => x * x * (3 - 2 * x);
+      // 帧内可见性总开关（ budding 前与融合末尾隐藏几何体 —— 透明度之外的硬开关）
+      const alive = u < 0.985;
+      if (u < SEC_BUD) {
+        // 相 ① 出芽: TGN 出口上方鼓起（延续堆轴动量）
+        const k = smooth(u / SEC_BUD);
+        sv.body.visible = true;
+        sv.body.position.copy(sv.exit).addScaledVector(GOLGI_AXIS, k * 0.22 * GOLGI_SCALE);
+        sv.body.scale.setScalar(sv.r * (0.25 + 0.75 * k));
+        sv.bodyMat.opacity = 0.85 * k;
+        for (const tm of sv.trail) tm.visible = false;
+        sv.flash.visible = false;
+        for (const c of sv.cargo) c.visible = false;
+      } else if (u < SEC_DOCK) {
+        // 相 ② 巡航: 贝塞尔弧线（出芽点 → 堆轴抬升 → 膜前减速点）+ 布朗微扰 + 双拖尾
+        const k = smooth((u - SEC_BUD) / (SEC_DOCK - SEC_BUD));
+        const q = 1 - k;
+        sv.body.visible = true;
+        sv.body.position.set(
+          q * q * sv.exit.x + 2 * q * k * sv.ctrl.x + k * k * sv.preDock.x + Math.sin(t * 2.9 + sv.phase) * 0.06,
+          q * q * sv.exit.y + 2 * q * k * sv.ctrl.y + k * k * sv.preDock.y + Math.cos(t * 2.3 + sv.phase * 1.4) * 0.05,
+          q * q * sv.exit.z + 2 * q * k * sv.ctrl.z + k * k * sv.preDock.z + Math.sin(t * 3.4 + sv.phase * 0.7) * 0.05,
+        );
+        sv.body.scale.setScalar(sv.r * (1 + Math.sin(t * 4.1 + sv.phase) * 0.045));
+        sv.bodyMat.opacity = 0.85;
+        for (let ti = 0; ti < sv.trail.length; ti++) {
+          const tm = sv.trail[ti]!;
+          const kt = Math.max(0, k - (ti + 1) * 0.055);
+          const qt = 1 - kt;
+          tm.visible = alive;
+          tm.position.set(
+            qt * qt * sv.exit.x + 2 * qt * kt * sv.ctrl.x + kt * kt * sv.preDock.x,
+            qt * qt * sv.exit.y + 2 * qt * kt * sv.ctrl.y + kt * kt * sv.preDock.y,
+            qt * qt * sv.exit.z + 2 * qt * kt * sv.ctrl.z + kt * kt * sv.preDock.z,
+          );
+        }
+        sv.flash.visible = false;
+        for (const c of sv.cargo) c.visible = false;
+      } else if (u < SEC_FUSE) {
+        // 相 ③ 停靠: 减速点 → 膜面贴靠（缓动 + 拖尾收起）
+        const k = smooth((u - SEC_DOCK) / (SEC_FUSE - SEC_DOCK));
+        sv.body.visible = true;
+        sv.body.position.copy(sv.preDock).lerp(sv.dock, k);
+        sv.body.scale.setScalar(sv.r);
+        sv.bodyMat.opacity = 0.85;
+        for (const tm of sv.trail) tm.visible = false;
+        sv.flash.visible = false;
+        for (const c of sv.cargo) c.visible = false;
+      } else {
+        // 相 ④ 胞吐融合: 泡体贴膜压扁淡出 + 融合环闪光扩张 + 货物三粒膜外漂散
+        const k = (u - SEC_FUSE) / (1 - SEC_FUSE);
+        sv.body.visible = k < 0.55;
+        sv.body.position.copy(sv.dock).addScaledVector(sv.outDir, k * 0.1);
+        sv.body.scale.set(sv.r * (1 + k * 0.12), sv.r * Math.max(0.3, 1 - k * 1.3), sv.r * (1 + k * 0.12));
+        sv.bodyMat.opacity = 0.85 * Math.max(0, 1 - k * 1.8) ** 1.2;
+        for (const tm of sv.trail) tm.visible = false;
+        sv.flash.visible = k < 0.9;
+        sv.flash.scale.setScalar(0.5 + k * 1.9);
+        sv.flashMat.opacity = Math.sin(Math.min(1, k * 1.15) * Math.PI) * 0.75;
+        const cActive = k > 0.25;
+        sv.cargoMat.opacity = Math.max(0, Math.min(1, (k - 0.25) / 0.2)) * Math.max(0, 1 - k) * 0.95;
+        for (let ci = 0; ci < sv.cargo.length; ci++) {
+          const c = sv.cargo[ci]!;
+          c.visible = cActive && k < 0.98;
+          const ck = Math.max(0, (k - 0.25) / 0.75);
+          // 各粒固定外漂偏航（构建时随 phase 定序）: 膜外扩散 + 轻微上浮
+          const spread = sv.outDir.clone()
+            .applyAxisAngle(GOLGI_AXIS, (ci / sv.cargo.length) * Math.PI * 2 + sv.phase)
+            .normalize();
+          c.position.copy(sv.dock)
+            .addScaledVector(spread, 0.12 + ck * (0.5 + ci * 0.12))
+            .add(new THREE.Vector3(0, ck * 0.18, 0));
+          c.scale.setScalar(0.055 * (1 - ck * 0.35));
         }
       }
     }

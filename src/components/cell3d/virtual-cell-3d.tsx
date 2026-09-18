@@ -13,12 +13,13 @@ import type { ComponentType, ReactNode, RefObject } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, useThree, events as createPointerEvents } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
-import { setSceneSnapshot } from '@/lib/simulation/scene-capture';
+import { consumeFigureRequest, requestFigureCapture, setSceneSnapshot, type FigureMeta } from '@/lib/simulation/scene-capture';
+import { composeAndDownloadFigure, parseDiameterUm } from '@/lib/simulation/figure-compose';
 import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, ChromaticAberration, DepthOfField, Noise, N8AO, Vignette } from '@react-three/postprocessing';
 import type { DepthOfFieldEffect } from 'postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Eye, Tags, Focus, RotateCw, RotateCcw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick, ListTree, Split, Play, Pause, LocateFixed } from 'lucide-react';
+import { Eye, Tags, Focus, RotateCw, RotateCcw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick, ListTree, Split, Play, Pause, LocateFixed, Camera, Loader2, CheckCircle2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
@@ -428,6 +429,44 @@ function SceneCapture() {
   return null;
 }
 
+/** v35 发表模式捕获器（Publication figure capture）
+ *  HUD「图版导出」请求 → 本组件在渲染管线之后、同一 rAF 回调内 toDataURL —— drawing buffer
+ *  尚未交还合成器，无 preserveDrawingBuffer 依赖（含后处理辉光效果）。
+ *  帧序: EffectComposer useFrame(priority 1) 渲染 → 本组件 priority 2 捕获;
+ *  辉光关闭时退 priority 0（读上一帧 —— HD 模式 preserveDrawingBuffer 保证有效;
+ *  流畅模式由 figure-compose 空白检测兜底），绝不单独接管渲染循环（避免无 composer 时黑屏）。
+ *  同时采集标尺标定元数据（fov/相机-目标距离/画布像素 → 物平面 px/世界单位）。 */
+function PublicationCapture({ controlsRef, priority }: {
+  controlsRef: RefObject<OrbitControlsImpl | null>;
+  priority: number;
+}) {
+  useFrame(({ gl, camera }) => {
+    const cb = consumeFigureRequest();
+    if (!cb) return;
+    const el = gl.domElement;
+    const persp = camera as THREE.PerspectiveCamera;
+    const target = controlsRef.current?.target ?? new THREE.Vector3();
+    const camDist = camera.position.distanceTo(target);
+    const aspect = el.width / Math.max(1, el.height);
+    const visW = 2 * camDist * Math.tan((persp.fov * Math.PI) / 360) * aspect;
+    const meta: FigureMeta = {
+      width: el.width,
+      height: el.height,
+      fov: persp.fov,
+      camDist,
+      pxPerWorld: visW > 0 ? el.width / visW : 0,
+    };
+    let png: string | null = null;
+    try {
+      png = el.toDataURL('image/png');
+    } catch {
+      png = null;
+    }
+    cb(png, meta);
+  }, priority);
+  return null;
+}
+
 /** 自适应景深（高保真显微摄影质感）: 焦平面逐帧追踪「相机 → 控制目标」距离，
  *  焦深范围随拍摄距离自适应 —— 细胞整体保持清晰可检视，胞外远场与前景柔和虚化，
  *  空间层次感参考高保真科学插画。HD 模式专用（流畅模式跳过）。 */
@@ -691,6 +730,51 @@ export function VirtualCell3D() {
       constant: Rn - clipDepth * 2 * Rn - 0.3,
     };
   }, [clipView, sectionSnap, clipAxis, clipDepth, layout]);
+
+  /* ============ v35 发表模式: 图版导出（Publication figure export） ============
+   *  HUD 请求 → PublicationCapture 帧内捕获（含辉光后处理 + 标尺标定元数据）
+   *  → figure-compose 纸面版式合成（刊头/标题/图注/比例标尺）→ PNG 下载; 底部胶囊反馈。 */
+  const [figState, setFigState] = useState<'idle' | 'busy' | 'ok' | 'err'>('idle');
+  const figTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashFigure = useCallback((s: 'ok' | 'err') => {
+    setFigState(s);
+    if (figTimer.current) clearTimeout(figTimer.current);
+    figTimer.current = setTimeout(() => setFigState('idle'), 2800);
+  }, []);
+  const exportFigure = useCallback(() => {
+    if (figState === 'busy' || !graph) return;
+    setFigState('busy');
+    requestFigureCapture((png, meta) => {
+      void (async () => {
+        if (!png) {
+          flashFigure('err');
+          return;
+        }
+        const cellName = (lang === 'zh' ? cell?.name : cell?.nameEn ?? cell?.name) ?? (t('loading.cell'));
+        const diameterUm = parseDiameterUm(lang === 'zh' ? cell?.diameter : cell?.diameterEn ?? cell?.diameter);
+        // 标定: 世界单位 → µm（膜半径 = 细胞半径; 直径字符串取中值）→ 物平面 px/µm
+        const membraneR = layoutSpec.membraneR;
+        const umPerPx = meta && diameterUm && membraneR > 0 && meta.pxPerWorld > 0
+          ? membraneR * 2 / diameterUm / meta.pxPerWorld
+          : null;
+        const res = await composeAndDownloadFigure({
+          png,
+          lang,
+          cellName,
+          cellId,
+          pathwayName: lang === 'zh' ? graph.meta.nameZh : graph.meta.name,
+          pathwayId: graph.meta.id,
+          phase,
+          simTimeS: (tick * 0.5).toFixed(1),
+          running,
+          moleculeCount: graph.stats.coreCount,
+          sectionView: clipView,
+          umPerPx,
+        });
+        flashFigure(res === 'ok' ? 'ok' : 'err');
+      })();
+    });
+  }, [figState, lang, cell, cellId, graph, layoutSpec, phase, tick, running, clipView, t, flashFigure]);
   // 有效布局: 贴面模式下级联投影到切面（相机跟随/教学引导同步使用投影后坐标）
   const effLayout = useMemo(
     () => (layout && snapPlane ? projectLayoutToPlane(layout, snapPlane) : layout),
@@ -917,6 +1001,8 @@ export function VirtualCell3D() {
            *  飞行永不执行（此前定位过细胞器再开分裂 → 舞台偏出画面中心）。 */}
           <FlyToController req={locateReq} />
           <SceneCapture />
+          {/* v35 发表模式捕获: 辉光管线存在时 priority 2（composer 之后同帧捕获含后处理画面）*/}
+          <PublicationCapture controlsRef={controlsRef} priority={glow ? 2 : 0} />
           <SectionClipController
             enabled={clipView && !mitosis}
             depth={clipDepth}
@@ -1052,6 +1138,15 @@ export function VirtualCell3D() {
           label={fullscreen ? t('hud.exitFs') : t('hud.fs')}
           highlight
           title={t('hud.fsTip')}
+        />
+        {/* v35 发表模式: 图版导出（当前 3D 视图 → 纸面版式科研图版 PNG） */}
+        <HudToggle
+          active={figState !== 'idle'}
+          onClick={exportFigure}
+          icon={figState === 'busy' ? Loader2 : Camera}
+          label={t('hud.fig')}
+          highlight
+          title={t('hud.figTip')}
         />
         {/* 移动端齿轮: 展开/收起其余显示开关（桌面恒显） */}
         <button
@@ -1615,6 +1710,40 @@ export function VirtualCell3D() {
           )}
         </div>
       )}
+
+      {/* v35 发表模式导出反馈胶囊（合成中/已导出/失败 —— 底部居中浮层, 2.8s 自动消隐） */}
+      <AnimatePresence>
+        {figState !== 'idle' && (
+          <motion.div
+            initial={{ opacity: 0, y: 14, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.97 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+            className="pointer-events-none absolute bottom-14 left-1/2 z-30 -translate-x-1/2"
+          >
+            <div
+              className={`flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-[11px] backdrop-blur-md ${
+                figState === 'ok'
+                  ? 'border-emerald-400/40 bg-emerald-950/80 text-emerald-200'
+                  : figState === 'err'
+                    ? 'border-rose-400/40 bg-rose-950/80 text-rose-200'
+                    : 'border-teal-400/40 bg-slate-950/85 text-teal-200'
+              }`}
+              role="status"
+              aria-live="polite"
+            >
+              {figState === 'busy' ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : figState === 'ok' ? (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              ) : (
+                <AlertTriangle className="h-3.5 w-3.5" />
+              )}
+              {figState === 'busy' ? t('fig.busy') : figState === 'ok' ? t('fig.ok') : t('fig.err')}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
