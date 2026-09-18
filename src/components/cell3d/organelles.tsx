@@ -2555,10 +2555,12 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
 
   /* ================= 细胞骨架 ================= */
   {
-    // 中心体（双联体中心粒）—— v6: 贴核定位（真实 MTOC 核旁; 柱状上皮位于核上顶端区）
-    const c = nucC.clone().add(
-      SHAPE === 'columnar' ? new THREE.Vector3(0.9, 2.3, 1.2) : new THREE.Vector3(1.9, -1.1, 1.6),
-    );
+    // 中心体（双联体中心粒）—— v30: 沿偏移方向贴核膜外表面（核面半径+0.4 求解）
+    //   （旧固定偏移矢量 |(1.9,-1.1,1.6)|≈2.75 与核半径同量级 → 中心体嵌进核体半深 ——
+    //    真实 MTOC 位于核被膜外表面旁; 分叶/FBM 起伏核型下自适应）
+    const cOff = SHAPE === 'columnar' ? new THREE.Vector3(0.9, 2.3, 1.2) : new THREE.Vector3(1.9, -1.1, 1.6);
+    const cDir = cOff.clone().normalize();
+    const c = nucC.clone().addScaledVector(cDir, nucSurf(cDir, 0.4));
     // 中心粒（v10: 9 组三联微管桶 + 中央辐 —— 电镜横截面剪影，高保真插画读感）
     const centGeo = (() => {
       const centParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
@@ -2591,22 +2593,60 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     // v26 微管阵列全面升级（参照图: 「粗壮绿色管道、放射状贯穿胞质、最显眼骨架成分」）:
     //   密度 ×2.2+6（旧 8-14 根在暗背景下不可读 —— 用户「细胞骨架没有体现」根因）、
     //   管径 0.03 → 0.042、发射 0.24 → 0.46、不透明度 0.5 → 0.62 —— sage 绿主骨架直读
+    // v30 核体避让（用户「细胞骨架感觉穿过细胞核了」根因: 中心体放射微管随机方向 ~一半
+    //   反穿核椭球 —— 间期微管遇核被膜偏转滑行/解聚, 绝不侵入核内）:
+    //   · 掠核方向先做「绕核偏转」—— 控制点自核心向外推, 微管呈贴核弯绕读感（真实 MT 沿核面偏转）
+    //   · 仍穿核（深反穿向）→ 整根重掷（上限 40 次/根, 密度守恒 —— 核影区微管稀疏 = 真实生物学:
+    //     MTOC 对侧胞质本就微管贫乏, 核体充当物理屏障）
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
     let mtMid = new THREE.Vector3();
     const mtTotal = Math.round(spec.microtubules * (perf ? 1.2 : 2.2)) + (perf ? 4 : 6);
-    for (let i = 0; i < mtTotal; i++) {
+    const nucAvoidProbe = new THREE.Vector3();
+    let mtMinClear = Infinity; // v30 QA: 已接受微管对核体的最小净距（采样点）
+    const nucAvoid = (curve: THREE.QuadraticBezierCurve3): boolean => {
+      let minM = Infinity;
+      for (let k = 1; k <= 6; k++) {
+        curve.getPoint(k / 7, nucAvoidProbe);
+        const rl = Math.hypot(nucAvoidProbe.x - nucC.x, nucAvoidProbe.y - nucC.y, nucAvoidProbe.z - nucC.z);
+        if (rl < 1e-4) return false;
+        nucAvoidProbe.set(
+          (nucAvoidProbe.x - nucC.x) / rl,
+          (nucAvoidProbe.y - nucC.y) / rl,
+          (nucAvoidProbe.z - nucC.z) / rl,
+        );
+        const rr = nucSurf(nucAvoidProbe, 0.38); // 管半径 0.042 + 视觉净空
+        if (rl < rr) return false;
+        minM = Math.min(minM, rl - rr);
+      }
+      mtMinClear = Math.min(mtMinClear, minM);
+      return true;
+    };
+    let mtPlaced = 0;
+    for (let attempt = 0; attempt < mtTotal * 40 && mtPlaced < mtTotal; attempt++) {
+      const sd = `t${attempt}`;
       const mtDir = new THREE.Vector3(
-        Math.cos((hash01(`t${i}`) - 0.5) * 2.4) * Math.cos(hash01(`t${i}`, 3) * Math.PI * 2),
-        Math.sin((hash01(`t${i}`) - 0.5) * 2.4),
-        Math.cos((hash01(`t${i}`) - 0.5) * 2.4) * Math.sin(hash01(`t${i}`, 3) * Math.PI * 2),
+        Math.cos((hash01(sd) - 0.5) * 2.4) * Math.cos(hash01(sd, 3) * Math.PI * 2),
+        Math.sin((hash01(sd) - 0.5) * 2.4),
+        Math.cos((hash01(sd) - 0.5) * 2.4) * Math.sin(hash01(sd, 3) * Math.PI * 2),
       ).normalize();
       const mtR = cellSurf(mtDir, R, SHAPE, -0.35);
       const end = new THREE.Vector3(mtDir.x * mtR, mtDir.y * mtR, mtDir.z * mtR);
       const ctrl = c.clone().lerp(end, 0.6);
-      ctrl.y += (hash01(`t${i}`, 9) - 0.5) * 1.6;
+      ctrl.y += (hash01(sd, 9) - 0.5) * 1.6;
+      // 掠核偏转: 控制点距核面 < 1.15 时自核心径向外推（微管绕核弯的有机读感）
+      {
+        const rel = ctrl.clone().sub(nucC);
+        const rl = rel.length();
+        if (rl > 1e-4) {
+          const need = nucSurf(rel.clone().multiplyScalar(1 / rl), 0) + 1.15;
+          if (rl < need) ctrl.addScaledVector(rel.multiplyScalar(1 / rl), need - rl + 0.1);
+        }
+      }
       const curve = new THREE.QuadraticBezierCurve3(c, ctrl, end);
+      if (!nucAvoid(curve)) continue; // 深反穿向 → 重掷
+      mtPlaced++;
       // v19: 微管静态标注取首根微管中段真实管位（旧 c·2.5 悬空）
-      if (i === 0) curve.getPoint(0.42, mtMid);
+      if (mtPlaced === 1) curve.getPoint(0.42, mtMid);
       // v28 每根微管全段折线命中体（旧 v27 离散点锚每采样根仅 2 点 —— 用户
       //   「细胞骨架还是只能放在中心才行, 而不是条形的任意位置」根治:
       //   poly 通道沿管身任意点可悬停, 套环/信息卡锚定在指针命中处而非固定锚心;
@@ -2626,6 +2666,15 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         group: 'cytoskeleton',
       });
       parts.push({ geo: track(new THREE.TubeGeometry(curve, 26, 0.042, 8)) });
+    }
+    // v30 QA 插桩: 微管避核验证（构建期一次性真源 —— 已接受管数/请求管数/最小净距;
+    //   __cytoQaProbe 门控, 零常态成本）
+    if (typeof window !== 'undefined' && (window as { __cytoQaProbe?: boolean }).__cytoQaProbe) {
+      (window as unknown as { __mtNucQa?: unknown }).__mtNucQa = {
+        placed: mtPlaced,
+        requested: mtTotal,
+        minClear: mtMinClear === Infinity ? null : mtMinClear,
+      };
     }
     const mts = new THREE.Mesh(track(mergeGeoms(parts)), mat({
       // v26 参照图: 微管 sage 绿族（旧石板蓝灰在暗背景下不可见）

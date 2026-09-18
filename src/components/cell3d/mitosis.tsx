@@ -409,18 +409,23 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     cB.position.x = 0.105;
     cA.rotation.z = 0.14;
     cB.rotation.z = -0.14;
-    // 着丝粒（连接姐妹染色单体）
+    // 着丝粒（连接姐妹染色单体 —— cohesin 黏合读感; anaphase separase 切割 → 淡出）
     const centro = new THREE.Mesh(track(new THREE.SphereGeometry(0.15, 10, 8)), centroMat);
     centro.renderOrder = 47;
-    // 动粒（每单体着丝粒两侧、朝向两极的金盘 —— 微管锚定点）
+    // 动粒（每单体着丝粒朝极面金盘 —— 微管锚定点）
     const kinGeo = track(new THREE.CylinderGeometry(0.11, 0.11, 0.05, 10));
+    // v30 动粒盘随单体迁移（用户「纺锤丝没有拉着染色体动」根因①: 旧金盘挂组原点 ——
+    //   后期单体分离时盘恒悬留赤道板、纤维端点又用组心近似 → 「染色体动了, 纺锤丝没动」读感）:
+    //   盘改挂各自姐妹单体的着丝粒外缘朝极面 —— 全程随单体迁移至两极, 纤维端点即盘位（见 k-fibers 段）
     const kinA = new THREE.Mesh(kinGeo, kinMat);
-    kinA.position.set(-0.06, 0, 0.16);
+    kinA.position.set(0, 0, 0.17);
     kinA.rotation.x = Math.PI / 2;
     const kinB = new THREE.Mesh(kinGeo, kinMat);
-    kinB.position.set(0.06, 0, -0.16);
+    kinB.position.set(0, 0, -0.17);
     kinB.rotation.x = Math.PI / 2;
-    g.add(cA, cB, centro, kinA, kinB);
+    cB.add(kinA); // +z 极侧盘 → 随 +z 单体
+    cA.add(kinB); // -z 极侧盘 → 随 -z 单体
+    g.add(cA, cB, centro);
     // 尺寸: 染色体整体 ~1.6-2.2 单位（醒目可读）
     const scl = 1.62 + hash01(`cs${ci}`) * 0.42;
     g.scale.setScalar(0.001);
@@ -947,7 +952,14 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   const rerDauA = buildRerCrown(0.62, 'dauA'); // 末期双子核迷你冠
   const rerDauB = buildRerCrown(0.62, 'dauB');
   group.add(rerDauA.mesh, rerDauA.ribos, rerDauB.mesh, rerDauB.ribos);
-  // 外周 ER 管网（SER 语义; 前期回缩 → 末期重建 —— RER 冠之外的持续 ER 网络）
+  // 外周 ER 管网（SER 语义; 前期回缩 → 末期双子细胞各自重建 —— RER 冠之外的持续 ER 网络）
+  // v30 工厂化三份（用户「后期突然出现滑面内质网 + 部分在分裂后的细胞外」根治）:
+  //   旧单一管网以原点为中心、末期 z 向拉伸 1.55× 试图横跨双子细胞 —— 网心悬在两子细胞
+  //   之间的胞外空隙（半数管段出膜）; 且 [4.9,5.9] 全尺寸快拍重现。新体系:
+  //   · 间期网: 缢裂前 [5.0,5.75] 彻底回收（ER 膜池回流核周冠语义）
+  //   · 双子网: [5.45,6.35] 自子核区萌发、scale 0.42→0.72 生长（ER 与核被膜连续 ——
+  //     自子核向外重建的科学叙事; 无整网快拍）, 中心恒随子细胞重算（±dauZ 同源轨迹）,
+  //     全程留子细胞球内（6.9·0.72≈5.0 < rD−0.5）
   const erMat = mat({
     color: REF.erSheet,
     emissive: '#54507a',
@@ -957,12 +969,23 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     clearcoat: 0.3,
     flow: { color: '#9c96b8', strength: 0.12, scale: 0.9, speed: 0.06, rim: 0.16 },
   });
-  const erNet = (() => {
+  const erDauMat = mat({
+    color: REF.erSheet,
+    emissive: '#54507a',
+    emissiveIntensity: 0.22,
+    roughness: 0.38,
+    opacity: 0,
+    clearcoat: 0.3,
+    flow: { color: '#9c96b8', strength: 0.12, scale: 0.9, speed: 0.06, rim: 0.16 },
+  });
+  /** 外周 ER 管网几何工厂: seed='' 复现旧间期网（el0..eo7 同源 hash）; 返回悬停锚（管身中段采样点） */
+  const buildErNet = (seed: string, tubeR: number, count: number, material: THREE.Material): { mesh: THREE.Mesh; anchors: THREE.Vector3[] } => {
     const parts: { geo: THREE.BufferGeometry }[] = [];
-    for (let i = 0; i < (perf ? 4 : 8); i++) {
+    const anchors: THREE.Vector3[] = [];
+    for (let i = 0; i < count; i++) {
       const pts: THREE.Vector3[] = [];
-      const baseLat = (hash01(`el${i}`) - 0.5) * 1.8;
-      const baseLon = hash01(`eo${i}`) * Math.PI * 2;
+      const baseLat = (hash01(`el${seed}${i}`) - 0.5) * 1.8;
+      const baseLon = hash01(`eo${seed}${i}`) * Math.PI * 2;
       for (let k = 0; k <= 5; k++) {
         const tt = k / 5;
         const lat = baseLat + Math.sin(tt * 3.9 + i * 1.3) * 0.3;
@@ -970,12 +993,21 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
         const rr = 6.2 + Math.sin(tt * 2.8 + i) * 0.7;
         pts.push(new THREE.Vector3(Math.cos(lat) * Math.cos(lon) * rr, Math.sin(lat) * rr * 0.82, Math.cos(lat) * Math.sin(lon) * rr));
       }
-      parts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 20, 0.085, 6)) });
+      parts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 20, tubeR, 6)) });
+      if (i % 3 === 1) anchors.push(pts[2].clone(), pts[4].clone()); // 每 3 管取 2 锚（管身真实采样点）
     }
-    return new THREE.Mesh(track(mergeGeoms(parts)), erMat);
-  })();
-  erNet.renderOrder = 44;
+    const mesh = new THREE.Mesh(track(mergeGeoms(parts)), material);
+    mesh.renderOrder = 44;
+    return { mesh, anchors };
+  };
+  const erNetB = buildErNet('', 0.085, perf ? 4 : 8, erMat);
+  const erNet = erNetB.mesh;
+  const erAnchors = erNetB.anchors;
   group.add(erNet);
+  // 末期双子细胞独立外周 ER 网（管径 0.11 —— 缩放 0.42-0.72 下投影管径仍可读）
+  const erDauA = buildErNet('A', 0.11, perf ? 3 : 5, erDauMat);
+  const erDauB = buildErNet('B', 0.11, perf ? 3 : 5, erDauMat);
+  group.add(erDauA.mesh, erDauB.mesh);
   // 游离核糖体微粒（翻译车间持续运转）
   const riboGeo = track(new THREE.SphereGeometry(0.052, 5, 4));
   const riboMat = track(new THREE.MeshStandardMaterial({ color: '#c9a54e', emissive: '#a8842e', emissiveIntensity: 0.85, roughness: 0.5 }));
@@ -1028,6 +1060,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   const golgiStackMatRef = golgiStackMat as THREE.MeshPhysicalMaterial;
   const rerMatRef = rerMat as THREE.MeshPhysicalMaterial;
   const erMatRef = erMat as THREE.MeshPhysicalMaterial;
+  const erDauMatRef = erDauMat as THREE.MeshPhysicalMaterial;
   const ringMatRef = ringMat as THREE.MeshPhysicalMaterial;
   const midbodyMatRef = midbodyMat as THREE.MeshPhysicalMaterial;
 
@@ -1074,8 +1107,12 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     // 染色体凝聚可见（跟随凝聚时序）→ 末期大幅淡出（去凝聚染色质融入双子核读感; v16: 0.55→0.7）
     const chrOpacity = clamp01(ramp(t, 0.5, 1.25) * (1 - ramp(t, 4.4, 5.6) * 0.7));
     chrMatRef.opacity = chrOpacity;
-    centroMatRef.opacity = chrOpacity;
-    kinMatRef.opacity = clamp01(ramp(t, 1.2, 1.7) * (1 - ramp(t, 3.05, 3.6)));
+    // v30 着丝粒球（cohesin 黏合）: anaphase 起始即被 separase 切割 → [3.02,3.35] 快速淡出
+    //   （单体几何自带着丝粒球随单体走 —— 旧版组心球全程跟随 = 「黏合未断」的错误读感）
+    centroMatRef.opacity = chrOpacity * (1 - ramp(t, 3.02, 3.35));
+    // v30 动粒金盘寿命与动粒微管同步 [4.2,5.02] 退役（旧 [3.05,3.6] —— 后期刚开始盘就消失,
+    //   纤维端失去视觉锚点 = 「纺锤丝没拉着染色体」读感根因②; 动粒在后期持续存在并牵引单体）
+    kinMatRef.opacity = clamp01(ramp(t, 1.2, 1.7) * (1 - ramp(t, 4.2, 5.02)));
     // 染色质网/核仁: 仅间期-前期存在（末期由去凝聚的染色单体团 + 双子核被膜承载读感）
     chromatinMatRef.opacity = 0.8 * (1 - condense);
     nucleolusMatRef.opacity = 0.92 * (1 - ramp(t, 0.5, 1.1));
@@ -1194,7 +1231,9 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
         for (let i = 0; i < astralN; i++) {
           const dir = astralDirs[side < 0 ? i : astralN + i];
           const len = (4.4 + hash01(`asl${side}${i}`) * 1.8) * mtShrink; // 4.4-6.2 芽长（收缩环启动后朝极回缩）
-          vA.set(0, 0, side * PZ); // 极（xy≈0 —— 中段采样线性内插的前提）
+          // v30 极端 = 中心体木体位（旧 (0,0,±PZ) 轴上近似点与中心体 x±0.5 脱开）——
+          //   逐帧跟随中心体迁移, 星体扇白中心体长出
+          vA.copy(side < 0 ? centA.position : centB.position);
           vB.copy(dir).multiplyScalar(len).add(vA); // 芽端
           // ① 端点钳制（v22: 随缢裂加深 0.80→0.58 —— 皮质附着点同步脱离收缩中的皮质）
           if (Math.abs(vB.z) > memL * 0.8) vB.z = Math.sign(vB.z) * memL * 0.8;
@@ -1218,12 +1257,14 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
               if (Math.abs(zs) >= memL * 0.98) continue;
               const us = (zs / memL + 1) / 2;
               const allowed = Math.max(0.05, rProfile(us)) * midK;
-              const rs = Math.hypot(vB.x * s, vB.y * s);
+              // v30 两端 xy 通用线性内插（中心体 xy=±0.5 后极/端两端均有 xy; 旧 s·端点 xy 仅极 xy=0 时成立）
+              const rs = Math.hypot(vA.x + (vB.x - vA.x) * s, vA.y + (vB.y - vA.y) * s);
               if (rs > allowed) shrink = Math.min(shrink, allowed / rs);
             }
             if (shrink < 1) {
-              vB.x *= shrink;
-              vB.y *= shrink;
+              // 自极端侧收缩芽端保持中心体锚定（同极间微管 v26 手法）
+              vB.x = vA.x + (vB.x - vA.x) * shrink;
+              vB.y = vA.y + (vB.y - vA.y) * shrink;
             }
           }
           kDir.subVectors(vB, vA);
@@ -1240,32 +1281,8 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     } else {
       astrals.visible = false;
     }
-    if (kfiberOpacity > 0.01) {
-      let ki = 0;
-      for (const chr of chromosomes) {
-        const gz = chr.group.position.z;
-        for (const side of [-1, 1]) {
-          const pole = vA.set(chr.group.position.x * 0.12, chr.group.position.y * 0.12, side * PZ);
-          const centromere = vB.copy(chr.group.position);
-          // v18c: 端点用世界分离量 cZW（组缩放补偿后的同一真源 —— 与真实动粒位置重合）
-          centromere.z = gz + (side < 0 ? -chr.cZW : chr.cZW) + side * 0.12;
-          kDir.subVectors(centromere, pole);
-          const len = kDir.length();
-          kMid.addVectors(pole, centromere).multiplyScalar(0.5);
-          kQuat.setFromUnitVectors(kUp, kDir.normalize());
-          kScale.set(1, Math.max(0.01, len), 1);
-          kM.compose(kMid, kQuat, kScale);
-          kfibers.setMatrixAt(ki++, kM);
-        }
-      }
-      for (; ki < CHR_N * 2; ki++) {
-        kM.makeScale(0, 0, 0);
-        kfibers.setMatrixAt(ki, kM);
-      }
-      kfibers.instanceMatrix.needsUpdate = true;
-    }
-
-    /* 中心体: 间期贴核并排 → 分离至两极 */
+    /* 中心体: 间期贴核并排 → 分离至两极（v30 提前至纤维解算前 —— 星体/动粒/极间三族
+     *   纤维极端同帧锚定中心体木体位, 零帧滞后） */
     const sepT = ramp(t, 0.35, 1.9);
     const cAz = THREE.MathUtils.lerp(1.35, -PZ, sepT);
     const cBz = THREE.MathUtils.lerp(1.75, PZ, sepT);
@@ -1276,6 +1293,51 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     pcmB.position.copy(centB.position);
     centA.rotation.y += dt * 0.8;
     centB.rotation.y -= dt * 0.8;
+
+    /* 动粒微管（逐帧: 中心体 → 动粒金盘）
+     * v25 [4.1,4.9]→[4.2,5.02]: 与星体微管同拍退役 —— 三族纤维整齐谢事,
+     * 中央纺锤体（极微管）独自留存承载缢裂期（见下方 mtPolarOpacity）
+     * v30 严格锚定（用户「纺锤丝并没有拉着染色体动」根治）:
+     *   · 着丝粒端 = 动粒金盘世界坐标（getWorldPosition 消费本帧刚写入的局部变换 ——
+     *     纤维端点与「渲染中的金盘」零漂移重合; 旧版 gz±cZW+0.12 公式与真实盘位差
+     *     旋转/缩放/侧向错位三重近似误差 → 后期纤维端悬空不贴单体 = 「没拉着」读感）
+     *   · 极端 = 中心体木体位（旧 side·PZ 轴上近似点, 与中心体 x±0.5 脱开）
+     *   · 端点回撤 0.05: 纤维端面停在盘面而非穿盘（金盘可读）
+     *   · 单体向极迁移 → 纤维自盘端超极解聚缩短（anaphase A 牵引读感直读） */
+    if (kfiberOpacity > 0.01) {
+      let ki = 0;
+      for (const chr of chromosomes) {
+        // 世界矩阵即时刷新: 染色体组局部变换刚写入 → 强制重算矩阵链再取盘位
+        chr.group.updateMatrixWorld(true);
+        for (const side of [-1, 1]) {
+          vA.copy(side < 0 ? centA.position : centB.position); // 极端 = 中心体木体
+          chr.kinA.getWorldPosition(vB);
+          chr.kinB.getWorldPosition(vC);
+          // 选与该极同侧的动粒盘（极轴翻转 poleYaw=π 的染色体自动配对另一盘 —— 任意旋转态恒正确）
+          const useA = side > 0 ? vC.z >= vB.z : vC.z < vB.z;
+          if (useA) vB.copy(vC);
+          kDir.subVectors(vB, vA);
+          const full = kDir.length();
+          const len = Math.max(0.02, full - 0.05); // 端点回撤: 露出金盘
+          if (full > 1e-4) kDir.multiplyScalar(1 / full);
+          kMid.copy(vA).addScaledVector(kDir, len / 2);
+          kQuat.setFromUnitVectors(kUp, kDir);
+          kScale.set(1, len, 1);
+          kM.compose(kMid, kQuat, kScale);
+          kfibers.setMatrixAt(ki++, kM);
+        }
+      }
+      for (; ki < CHR_N * 2; ki++) {
+        kM.makeScale(0, 0, 0);
+        kfibers.setMatrixAt(ki, kM);
+      }
+      kfibers.instanceMatrix.needsUpdate = true;
+      kfibers.visible = true;
+    } else {
+      // v30 可见性门控（旧版恒 visible + 不透明度 0 —— 退役后实例矩阵冻结为末帧位,
+      //   QA 探针按当前膜面采样误报「膜外」; 现与星体/极间同拍隐藏）
+      kfibers.visible = false;
+    }
 
     /* v26 极间微管逐帧解算（中央纺锤体 —— 极端恒锚中心体 + 重叠区随缢裂收拢）:
      *   · 极端 vA = 中心体位 + 扇出偏移（dir·0.5）—— 逐帧跟随两极外移, 纤维永不脱离中心体
@@ -1296,8 +1358,9 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
             Math.sin(s2.lat),
             Math.cos(s2.lat) * Math.sin(s2.lon) * 0.35,
           ).normalize();
-          // 极端: 恒锚中心体（扇出偏移 0.5）
-          vA.set(dir.x * 0.5, dir.y * 0.5, side * PZ);
+          // 极端: 恒锚中心体本体位 + 扇出偏移（v30: 旧 (dir·0.5, side·PZ) 轴上近似点
+          //   与中心体 x±0.5 脱开最多 1.0 —— 现自中心体位扇出, 逐帧跟随迁移）
+          vA.copy(side < 0 ? centA.position : centB.position).addScaledVector(dir, 0.5);
           // 远端: 越赤道反平行 → 重叠区（随缢裂收拢 + xy 压缩致密化）
           vB.set(-dir.x * 0.9 * xyComp, -dir.y * 0.9 * xyComp, -side * ovZ);
           // ① 端点钳制（缢裂颈部回转面）
@@ -1637,10 +1700,21 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     rerDauB.mesh.position.set(0, 0, dauZ);
     rerDauA.ribos.position.set(0, 0, -dauZ);
     rerDauB.ribos.position.set(0, 0, dauZ);
-    // 外周 ER: 前期回缩 → 末期重建（v19: 分离期随单膜淡出 —— ER 回收入核周冠, 两子细胞各自独立）
-    erMatRef.opacity = clamp01((1 - ramp(t, 0.8, 1.8)) + ramp(t, 4.9, 5.9)) * 0.5 * (1 - ramp(t, 6.3, 6.8));
+    // 外周 ER（v30 三网体系）: 间期单网前期回缩 [0.8,1.8] → 缢裂前彻底回收 [5.0,5.75]
+    //   （旧版 [4.9,5.9] 全尺寸重现 + z 拉伸 1.55× 悬跨双子细胞胞外空隙 —— 已退役）
+    erMatRef.opacity = clamp01(1 - ramp(t, 0.8, 1.8)) * (1 - ramp(t, 5.0, 5.75)) * 0.5;
     erNet.visible = erMatRef.opacity > 0.02;
-    erNet.scale.z = 1 + ramp(t, 5, 6.6) * 0.55;
+    // 双子外周 ER 网: [5.45,6.35] 自子核区萌发、scale 0.42→0.72 生长 —— 中心恒随子细胞
+    //   （±dauZ 与子核/子代 RER 冠同一轨迹真源）; 尺度全程留子细胞球内
+    const erDauOp = ramp(t, 5.45, 6.35);
+    erDauMatRef.opacity = erDauOp * 0.55;
+    const erDauS = THREE.MathUtils.lerp(0.42, 0.72, ramp(t, 5.45, 6.9));
+    erDauA.mesh.visible = erDauOp > 0.02;
+    erDauB.mesh.visible = erDauOp > 0.02;
+    erDauA.mesh.position.set(0, 0, -dauZ);
+    erDauB.mesh.position.set(0, 0, dauZ);
+    erDauA.mesh.scale.setScalar(Math.max(0.001, erDauS));
+    erDauB.mesh.scale.setScalar(Math.max(0.001, erDauS));
 
     /* 收缩环 + 中间体 */
     const furrowK = ramp(t, 4.55, 5.95);
@@ -1856,6 +1930,10 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       // v18: S 期复制可视化锚点（金色光点行进区 —— 悬停可指认复制叉语义）
       push('复制叉（DNA 复制中）', 'Replication forks', -1.1, -0.7, 0.9, 2.0);
       push('核仁', 'Nucleolus', 0.6, 0.7, -0.5, 1.6);
+      // v30 间期外周 ER 管网逐管锚（管身真实采样点 —— 主视图 v27 同步补齐）
+      for (const a of erAnchors) {
+        push('滑面内质网（外周管网）', 'Smooth ER', a.x, a.y, a.z, 1.1);
+      }
       // v16: 间期全套细胞器（用户反馈「分裂细胞没有 RER/高尔基」—— 悬停目录同步补齐）
       // v23: 游离核糖体/运输囊泡改逐颗跟随锚（上方块）—— 静态近似锚退役
       push('粗面内质网（核糖体冠）', 'Rough ER', -2.35, 1.5, -2.9, 2.2);
@@ -1902,6 +1980,18 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       push('粗面内质网（子代重建）', 'Rough ER', 0, 0.6, rzT, 2.0);
       push('高尔基体（重建）', 'Golgi apparatus', 1.62, -1.05, -(rzT + 0.35), 1.7);
       push('高尔基体（重建）', 'Golgi apparatus', -1.62, -1.05, rzT + 0.35, 1.7);
+    }
+    if (phase >= 6) {
+      // v30 双子外周 ER 管网锚（与 update 同源轨迹: ±dauZ + scale lerp —— 管身采样点随子细胞重算）
+      const tA6 = Math.min(6.9, PHASE_BOUNDS[phase] + 0.4);
+      const dz6 = THREE.MathUtils.lerp(3.1, 7.0, ramp(tA6, 5, 7));
+      const es6 = THREE.MathUtils.lerp(0.42, 0.72, ramp(tA6, 5.45, 6.9));
+      for (const a of erDauA.anchors) {
+        push('滑面内质网（子代管网）', 'Smooth ER', a.x * es6, a.y * es6, -dz6 + a.z * es6, 1.0);
+      }
+      for (const a of erDauB.anchors) {
+        push('滑面内质网（子代管网）', 'Smooth ER', a.x * es6, a.y * es6, dz6 + a.z * es6, 1.0);
+      }
     }
     if (phase === 5 || phase === 6) {
       push('收缩环（actomyosin）', 'Contractile ring', 3.6, 0, 0, 2.2);
@@ -1950,6 +2040,16 @@ export const MitosisStage = ({ playing, speed, seek, onPhaseChange, onEnded, sho
   const [phase, setPhase] = useState(0);
   const build = useMemo(() => buildMitosisScene(perf), [perf]);
   useEffect(() => () => build.dispose(), [build]);
+  // v30 QA 时钟写入钩（任意 t 精确定位 —— 相位 chip 只能落在相位边界; 零成本, 仅被显式调用时生效）
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    (window as unknown as { __mitoSeekT?: (t: number) => void }).__mitoSeekT = (t: number) => {
+      clock.current = Math.max(0, Math.min(7, t));
+    };
+    return () => {
+      delete (window as unknown as { __mitoSeekT?: (t: number) => void }).__mitoSeekT;
+    };
+  }, []);
 
   useFrame((_, dt) => {
     const d = Math.min(0.1, dt);
