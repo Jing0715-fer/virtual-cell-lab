@@ -766,3 +766,46 @@
 @media (prefers-reduced-motion: reduce) {
   .hero-glow-a, .hero-glow-b, .hero-glow-c, .divider-run { animation: none !important; }
 }
+
+/* ============ Task 46 · Hero 标注水合安全层 ============ */
+/* 动态值一律经 CSS 自定义属性注入: CSSOM 对 custom property 原样保留（不做数值截断 /
+   简写展开 / 颜色格式改写）, React 19 style hydration diff 零伪差异 */
+/* 标注点底色 / 芯片字色（--hv-dot 为 hex; --hv-rgb 为 "r g b" 数字串, 供 rgba(var()) 消费） */
+.hv-dot-bg { background: var(--hv-dot); }
+.hv-dot-text { color: var(--hv-dot); }
+
+/* 引线: 点 → 标签渐隐发丝线。长度/角度走变量 —— 浏览器会把高精度数值（16.8739…px）
+   在 CSSOM 里截断为 16.874px 造成 SSR/client 伪水合差异, calc(var() * 1px) 完全绕开该通道 */
+.hv-leader {
+  width: calc(var(--hv-len) * 1px);
+  transform: rotate(calc(var(--hv-ang) * 1deg));
+  transform-origin: 0 0;
+  background: linear-gradient(to right, rgba(var(--hv-rgb), 0.4), transparent);
+}
+
+/* 标签芯片边框色（--hv-dot ≈27% 透明度 —— 原 #rrggbb44 语义等价） */
+.hv-chip-edge { border-color: rgba(var(--hv-rgb), 0.27); }
+
+/* 方法卡/细胞系卡 内衬柔光（跟随鼠标 --mx/--my; 自内联迁入 —— background 简写在 CSSOM
+   序列化时被展开改写（rgba 空格规范化/附加分量）, 内联会与 React 19 水合 diff 产生伪差异） */
+.method-card-glow {
+  background: radial-gradient(230px circle at var(--mx, 50%) var(--my, 50%), rgba(52, 211, 153, 0.07), transparent 65%);
+}
+
+/* Hero 光晕滚动视差（scroll-driven animation: hero 滚出视口过程中光晕反向微移+微缩 ——
+   背景比内容「慢半拍」的空间纵深; @supports 门控: 不支持 animation-timeline 的浏览器
+   零效果零位移, 绝不会误走 document timeline 瞬时播完） */
+@keyframes heroScrollParallax {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(-3.5%, 6%, 0) scale(0.955); }
+}
+@supports (animation-timeline: view()) {
+  .hero-parallax {
+    animation: heroScrollParallax linear both;
+    animation-timeline: view();
+    animation-range: exit 0% exit 85%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-parallax { animation: none !important; }
+}

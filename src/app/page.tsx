@@ -145,11 +145,10 @@ function MethodCard({ m, i, lang }: { m: (typeof METHOD)[number]; i: number; lan
         e.currentTarget.style.setProperty('--my', `${e.clientY - r.top}px`);
       }}
     >
-      {/* 内衬柔光（跟随鼠标） */}
+      {/* 内衬柔光（跟随鼠标; 背景经 CSS 类注入 —— background 简写在 CSSOM 序列化时展开改写, 内联会与 React 19 水合 diff 产生伪差异） */}
       <span
         aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-        style={{ background: 'radial-gradient(230px circle at var(--mx, 50%) var(--my, 50%), rgba(52,211,153,0.07), transparent 65%)' }}
+        className="method-card-glow pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
       />
       {/* 边框环带光（跟随鼠标, 只亮 1px 边框环） */}
       <span aria-hidden className="method-border-light pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
@@ -303,11 +302,15 @@ export default function Home() {
       <main className="flex-1">
         {/* ============ Hero ============ */}
         <section className="relative overflow-hidden">
-          {/* 背景层: 微网格渐隐 + 径向光晕（纯 CSS; 网格向边缘淡出, 不大面积铺色） */}
+          {/* 背景层: 微网格渐隐 + 径向光晕（纯 CSS; 网格向边缘淡出, 不大面积铺色）
+              光晕组套滚动视差容器 —— hero 滚出视口时背景反向微移+微缩（scroll-driven animation,
+              @supports 门控: 不支持 animation-timeline 的环境零效果零位移） */}
           <div className="bio-grid bio-grid-fade pointer-events-none absolute inset-0 -z-10" aria-hidden />
-          <div className="hero-glow-a pointer-events-none absolute -right-40 -top-40 -z-10 h-[480px] w-[480px] rounded-full bg-emerald-500/[0.07] blur-[120px]" aria-hidden />
-          <div className="hero-glow-b pointer-events-none absolute -left-40 top-20 -z-10 h-[380px] w-[380px] rounded-full bg-teal-500/[0.05] blur-[100px]" aria-hidden />
-          <div className="hero-glow-c pointer-events-none absolute -bottom-36 left-[38%] -z-10 h-[300px] w-[440px] rounded-full bg-amber-500/[0.035] blur-[110px]" aria-hidden />
+          <div className="hero-parallax pointer-events-none absolute inset-0 -z-10" aria-hidden>
+            <div className="hero-glow-a absolute -right-40 -top-40 h-[480px] w-[480px] rounded-full bg-emerald-500/[0.07] blur-[120px]" />
+            <div className="hero-glow-b absolute -left-40 top-20 h-[380px] w-[380px] rounded-full bg-teal-500/[0.05] blur-[100px]" />
+            <div className="hero-glow-c absolute -bottom-36 left-[38%] h-[300px] w-[440px] rounded-full bg-amber-500/[0.035] blur-[110px]" />
+          </div>
           {/* 期刊书脊式侧标（科学海报器件感） */}
           <div className="pointer-events-none absolute left-3.5 top-1/2 hidden -translate-y-1/2 2xl:block" aria-hidden>
             <span className="font-mono text-[9px] uppercase tracking-[0.34em] text-slate-600 [writing-mode:vertical-rl]">

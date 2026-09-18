@@ -116,13 +116,24 @@ export function CellPicker() {
           <button
             key={c.id}
             onClick={() => pickCell(c.id)}
+            onMouseMove={(e) => {
+              // 边框光随鼠标方向: --mx/--my 写入卡片元素（与 METHOD 卡同范式 —— 全页 hover 韵律统一, 无 re-render）
+              const r = e.currentTarget.getBoundingClientRect();
+              e.currentTarget.style.setProperty('--mx', `${e.clientX - r.left}px`);
+              e.currentTarget.style.setProperty('--my', `${e.clientY - r.top}px`);
+            }}
             className={cn(
-              'group relative overflow-hidden rounded-2xl border p-3.5 text-left transition-all duration-300',
+              'group relative overflow-hidden rounded-2xl border p-3.5 text-left transition-all duration-300 hover:-translate-y-0.5',
               active
                 ? 'border-emerald-500/60 bg-gradient-to-b from-emerald-500/[0.12] to-slate-950/60 shadow-[0_0_24px_rgba(52,211,153,0.18)]'
                 : 'border-white/8 bg-slate-950/40 hover:border-emerald-500/35 hover:bg-white/[0.04]',
             )}
           >
+            {/* 鼠标方向内衬柔光 + 边框环带光（非选中卡 hover 亮起 —— 与 METHOD 卡同款范式, 韵律统一） */}
+            <span aria-hidden className="method-card-glow pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+            <span aria-hidden className="method-border-light pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+            {/* 顶部荧光细线（hover 加亮, 图卡顶部封口） */}
+            <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-400/35 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
             <div className="flex items-start justify-between">
               <CellGlyph morph={c.morphology} />
               {active ? (

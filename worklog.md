@@ -2378,3 +2378,67 @@ Stage Summary:
 - 下阶段建议: ①引导模式站点切换时同步「模拟逐步激活」（tourVisited → nodeStates 活性渐升,
   让磷酸化环/事件流随讲解推进 —— 沉浸感再上一级）②中期染色体 hover 锚随单体分离动态跟随
   ③「发表模式」截图导出 ④减数分裂演示 ⑤其余条形结构折线命中体接入（神经元树突/轴突等）
+
+---
+Task ID: 46
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户第 19 轮反馈 —— ①Console Error: hydration mismatch（hero-visual.tsx:465 引线标注 span, width/rotate 高精度数值 + transformOrigin + background 简写与 server 渲染不匹配）②继续打磨项目增加 UI 设计感
+
+Work Log:
+- 【诊断: React 19 style hydration diff 伪差异 —— 三类 CSSOM 规范化通道】
+  · 高精度浮点: client `width: 16.873979969171472`（number）经 React 序列化为 "16.873979969171472px",
+    浏览器 CSSOM 解析后序列化回 "16.874px"（Chrome 数值精度截断）→ 两侧字符串不等 → 伪 mismatch;
+    rotate(123.69006752597979deg) → "rotate(123.69deg)" 同理
+  · transformOrigin: '0 0' → CSSOM 规范化为 "0px 0px"
+  · background 简写: CSSOM 展开为 background-image/position-x/... 全套分量, 且颜色
+    #fda4af66 → rgba(253, 164, 175, 0.4) 格式改写 → 简写 key 与展开分量集天然不等
+- 【修复范式: 动态值全部走 CSS 自定义属性（水合安全通道）】
+  · CSSOM 对 custom property **原样保留**（不做数值截断/简写展开/颜色格式改写）—— 经变量注入的
+    动态值与 client 值字符串恒等, React 19 style hydration diff 零伪差异
+  · 静态样式全部移入 CSS 类（类内样式不参与 React diff, 简写/transform-origin 随意用）
+  · hero-visual.tsx: hexRgb() 工具（hex → "r, g, b" 逗号串）; ANNOTATIONS 六标注改造 ——
+    标注点 background / 芯片字 color / 引线 width+rotate+渐变 / 芯片 borderColor 全部经
+    --hv-dot / --hv-rgb / --hv-len / --hv-ang 注入; opacity 0.25 → Tailwind opacity-25 类
+  · globals.css Task 46 段: .hv-dot-bg / .hv-dot-text / .hv-leader（calc(var(--hv-len)*1px) +
+    rotate(calc(var(--hv-ang)*1deg)) + linear-gradient rgba(var(--hv-rgb),0.4) 渐隐）/
+    .hv-chip-edge（rgba(var(--hv-rgb),0.27)）
+- 【同类隐患排查（修复 hero 后会逐个暴露, 一次性清完）】
+  · page.tsx MethodCard 内衬柔光 `style={{ background: 'radial-gradient(...var(--mx)...)' }}`
+    简写 + var() → 迁入 .method-card-glow 类
+  · offset-path/animation-duration/transform-origin '285px 212px'/mixBlendMode 实证通过
+    diff（报错元素之前的 DOM 顺序）—— 保留
+- 【UI 设计感（用户诉求②）】
+  · CellPicker 七卡与 METHOD 卡 hover 韵律统一: onMouseMove 写 --mx/--my（交互期 JS 写入,
+    零水合风险）+ method-card-glow 内衬柔光 + method-border-light 边框环带光 + 顶部荧光细线
+    + hover:-translate-y-0.5 微抬升 —— 全页卡片交互同一套「鼠标方向光」语言
+  · hero 光晕滚动视差: 三枚径向光晕套 .hero-parallax 容器, CSS scroll-driven animation
+    （animation-timeline: view() + animation-range: exit 0% exit 85%, hero 滚出视口时光晕
+    反向微移 -3.5%/6% + scale 0.955 —— 背景比内容慢半拍的空间纵深）; @supports 门控保证不支持
+    环境（Firefox/Safari 旧版）零效果零位移, 绝不误走 document timeline; reduced-motion 停用
+- 【自纠缺陷】①JSX 注释闭合 */}} 多一花括号（lint/tsc 即时捕获修复）②--hv-rgb 首版用空格
+  分隔 "251 191 36" → rgba(var()) 展开非法 → 渐变静默丢弃（agent-browser computed
+  backgroundImage "none" 发现）→ 改逗号分隔 "251, 191, 36" 修复
+- 【验证（agent-browser 交互级 + computed style + 像素量化; lint/tsc 零错误; dev.log 全 200）】
+  · console/errors 清空后 reload: **零 hydration mismatch**（仅 React DevTools 提示 + HMR）✓
+  · 引线 computed: width 25.19px / rotate matrix(-68.2°) / backgroundImage
+    "linear-gradient(to right, rgba(251, 191, 36, 0.4), rgba(0, 0, 0, 0))" ✓;
+    芯片 border rgba(251,191,36,0.27) / 点 rgb(251,191,36) / 字色 rgb(251,191,36) ✓
+  · CellPicker: mousemove dispatch → --mx "237px" / --my "60.42px" 写入 ✓, 柔光+边框光挂载 ✓
+  · 375×780: scrollWidth=375 无横向溢出 ✓; 1440×900 hero/cells 截图存档 qa-shots/
+    task46-{hero,cells}.png, 像素量化 hero 视觉区 emerald 5065 + amber 569, cells 区
+    emerald 7509 ✓
+  · 双语切换回归: EN h1/芯片标签全切换, 6 引线保持 ✓（切回 zh）
+
+Stage Summary:
+- 用户 hydration 报错根治: 「CSS 自定义属性原样保留」是动态内联 style 的水合安全通道 ——
+  高精度几何（hypot/atan2 现场解算）与颜色注入零 CSSOM 规范化风险; 静态样式入类则完全
+  脱离 React diff。该范式已沉淀为项目通用规则（后续任何动态 style 一律走变量）
+- UI 设计感: 细胞系卡片区接入 METHOD 卡同款鼠标方向边框光范式（全页 hover 韵律统一）;
+  hero 滚动视差（scroll-driven animation, @supports 门控零风险降级）
+- 产出: hero-visual.tsx（hexRgb + 六标注 CSS 变量化）/ page.tsx（MethodCard 柔光迁类 +
+  hero 视差容器）/ cell-picker.tsx（边框光范式）/ globals.css（Task 46 段 +76 行）
+- 未解决/风险: ①无头环境 rAF 帧饥饿的过期 DOM 读数（真机无）②SwiftShader QA 帧率低
+  （真机无）③引导模式站点切换同步「模拟逐步激活」（下阶段建议首选项）
+- 下阶段建议: ①tourVisited → nodeStates 活性渐升（讲解推进时磷酸化环/事件流同步点亮）②中期
+  染色体 hover 锚随单体分离动态跟随 ③「发表模式」截图导出 ④减数分裂演示 ⑤其余条形结构
+  （神经元树突/轴突等）折线命中体接入

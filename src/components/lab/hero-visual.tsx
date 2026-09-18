@@ -68,6 +68,12 @@ const NPC_DOTS = Array.from({ length: 22 }, (_, i) => {
   return { x: 308 + (84 + rj) * Math.cos(a), y: 196 + (64 + rj) * Math.sin(a) };
 });
 
+/** hex → "r, g, b" 逗号串（CSS 变量经典技巧: rgba(var(--rgb), α) 展开 rgba(251, 191, 36, 0.4) —— 动态色水合安全注入） */
+function hexRgb(hex: string): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+}
+
 export function HeroVisual() {
   const { lang } = useLang();
   const zh = lang === 'zh';
@@ -439,12 +445,16 @@ export function HeroVisual() {
             <div className="text-emerald-300/80">KEGG · hsa04010</div>
           </div>
 
-          {/* ==== 悬浮结构标注（引线 + 图版字母, 期刊图注惯例） ==== */}
+          {/* ==== 悬浮结构标注（引线 + 图版字母, 期刊图注惯例）
+               水合安全: 动态几何/颜色一律经 CSS 自定义属性注入 —— CSSOM 对 custom property
+               原样保留（不做数值截断/简写展开/颜色格式改写）, React 19 style hydration diff 零伪差异 */}
           {ANNOTATIONS.map((a, i) => {
             // 引线几何: 标注点 → 芯片近角（dx 为芯片与点的水平间距; 长度取 78% 留出芯片间隙）
             const dx = a.chipSide === 'right' ? 12 : -12;
             const len = Math.hypot(dx, a.chipDy) * 0.78;
             const ang = (Math.atan2(a.chipDy, dx) * 180) / Math.PI;
+            // 整数坐标（left/top 整数 px）与百分比字符串经 CSSOM 往返无损, 可保留内联
+            const cssVars = { '--hv-dot': a.dot, '--hv-rgb': hexRgb(a.dot) } as React.CSSProperties;
             return (
               <motion.div
                 key={a.key}
@@ -459,24 +469,19 @@ export function HeroVisual() {
                 aria-hidden
               >
                 {/* 标注点 */}
-                <div className="absolute -left-1 -top-1 h-2 w-2 rounded-full ring-2 ring-[#030812]/70" style={{ background: a.dot }} />
-                <div className="absolute -left-2 -top-2 h-4 w-4 rounded-full" style={{ background: a.dot, opacity: 0.25 }} />
-                {/* 引线（点 → 标签, 渐隐发丝线） */}
+                <div className="hv-dot-bg absolute -left-1 -top-1 h-2 w-2 rounded-full ring-2 ring-[#030812]/70" style={cssVars} />
+                <div className="hv-dot-bg absolute -left-2 -top-2 h-4 w-4 rounded-full opacity-25" style={cssVars} />
+                {/* 引线（点 → 标签, 渐隐发丝线; 长度/角度/色走变量 —— 类内样式不参与 React diff） */}
                 <span
-                  className="absolute left-0 top-0 h-px"
-                  style={{
-                    width: len,
-                    transform: `rotate(${ang}deg)`,
-                    transformOrigin: '0 0',
-                    background: `linear-gradient(to right, ${a.dot}66, transparent)`,
-                  }}
+                  className="hv-leader absolute left-0 top-0 h-px"
+                  style={{ ...cssVars, '--hv-len': len.toFixed(2), '--hv-ang': ang.toFixed(2) } as React.CSSProperties}
                 />
                 {/* 标签芯片（图版字母前缀 A-F） */}
                 <div
-                  className={`absolute ${a.chipSide === 'left' ? 'right-3 text-right' : 'left-3 text-left'} whitespace-nowrap rounded-md border bg-[#030812]/78 px-2 py-1 backdrop-blur-sm`}
-                  style={{ top: a.chipDy, borderColor: `${a.dot}44` }}
+                  className={`hv-chip-edge absolute ${a.chipSide === 'left' ? 'right-3 text-right' : 'left-3 text-left'} whitespace-nowrap rounded-md border bg-[#030812]/78 px-2 py-1 backdrop-blur-sm`}
+                  style={{ top: a.chipDy, ...cssVars }}
                 >
-                  <span className="font-mono text-[10.5px] font-medium" style={{ color: a.dot }}>
+                  <span className="hv-dot-text font-mono text-[10.5px] font-medium">
                     <span className="mr-1 opacity-70">{String.fromCharCode(65 + i)}</span>
                     {zh ? a.zh : a.en}
                   </span>
