@@ -37,8 +37,13 @@ export interface HoverTarget {
   group?: HoverGroupKey;
   /** v20 悬停卡强调色（信号边/分子目标按语义色着色; 默认翡翠） */
   accent?: string;
-  /** v21 折线命中体（信号边）—— 全段任意点可悬停, 不再仅中点两锚 */
+  /** v21 折线命中体（信号边/细胞骨架纤维）—— 全段任意点可悬停, 不再仅中点两锚;
+   *  v28 开放给细胞器条形结构（微管/中间丝/肌动网/ER 管网/肌原纤维/应力纤维）
+   *  —— 用户反馈「细胞骨架还是只能放在中心才行, 而不是条形的任意位置」的根治通道 */
   poly?: Vec3[];
+  /** v28 折线命中像素阈值（默认 14px —— 管径越粗的结构给更宽的感应带: 微管/肌原纤维 15,
+   *  细丝 11-12; 同屏数十条纤维时仍指向最近一条） */
+  hitPx?: number;
   /** v21 目标类别: organelle 默认; edge 让位于细胞器（「只显示pathway信息」根治） */
   kind?: 'organelle' | 'edge';
   /** v21 外部引用 id（边 id —— 整线高亮联动） */
@@ -156,8 +161,10 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
   const ray = useRef(new THREE.Ray());
   const tmp = useRef(new THREE.Vector3());
   const tmp2 = useRef(new THREE.Vector3());
-  /** v21 折线屏幕投影缓存（每帧重算成本 ~40 边 × 12 点 ≈ 480 投影, 可接受） */
+  /** v21 折线屏幕投影缓存（每帧重算成本 ~40 边 × 12 点 + v28 ~150 纤维折线 × 2-7 点 ≈ 1500 投影, 可接受） */
   const polyScreen = useRef<{ x: number; y: number; z: number }[]>([]);
+  /** v28 折线逐点剖面剪裁状态（真 3D 纤维被剖掉的前半不感应 —— 与锤点通道 v22 同语义） */
+  const polyCut = useRef<boolean[]>([]);
   const lastPtr = useRef({ x: NaN, y: NaN });
   const lastCam = useRef(new THREE.Vector3(NaN, NaN, NaN));
   const lastNonce = useRef(0);
@@ -229,18 +236,29 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
     /** v21 边命中最近点沿折线参数（0..1 —— 高亮脉冲粒子定位） */
     for (const t of targets) {
       if (t.poly && t.poly.length >= 2) {
-        /* ---- v21 折线通道: 全段投影 → 指针到各段的像素距离 ---- */
+        /* ---- v21 折线通道（v28 开放给细胞器条形结构）: 全段投影 → 指针到各段的像素距离 ---- */
         const n = t.poly.length;
         if (polyScreen.current.length < n) polyScreen.current.length = n;
+        if (polyCut.current.length < n) polyCut.current.length = n;
         const scr = polyScreen.current;
+        const cut = polyCut.current;
         let culled = true;
+        let allCut = true;
         for (let i = 0; i < n; i++) {
           const p = t.poly[i];
+          // v28 剪裁感知: 先算世界坐标到剖切面距离（project 会原地改写 tmp2 —— 必须在前）
+          if (clip0) {
+            tmp2.current.set(p.x, p.y, p.z);
+            cut[i] = clip0.distanceToPoint(tmp2.current) < -0.12; // 与锤点通道同容差
+          } else {
+            cut[i] = false;
+          }
+          if (!cut[i]) allCut = false;
           tmp2.current.set(p.x, p.y, p.z).project(state.camera);
           scr[i] = { x: tmp2.current.x, y: tmp2.current.y, z: tmp2.current.z };
           if (tmp2.current.z < 1 && tmp2.current.z > -1) culled = false;
         }
-        if (culled) continue;
+        if (culled || allCut) continue; // 全点在相机外或全点被剖掉
         // 指针 NDC → 像素坐标
         const px = ptr.x * halfW + halfW;
         const py = halfH - ptr.y * halfH;
@@ -250,6 +268,7 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
         for (let i = 0; i < n - 1; i++) {
           const a = scr[i], b = scr[i + 1];
           if (a.z > 1 || a.z < -1 || b.z > 1 || b.z < -1) continue;
+          if (cut[i] && cut[i + 1]) continue; // v28 两端都被剖掉的段不感应（跨面段保留 —— 半可见）
           const ax = a.x * halfW + halfW, ay = halfH - a.y * halfH;
           const bx = b.x * halfW + halfW, by = halfH - b.y * halfH;
           const dx = bx - ax, dy = by - ay;
@@ -260,8 +279,8 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
           const d = Math.hypot(px - cx, py - cy);
           if (d < minD) { minD = d; minI = i; minK = k; }
         }
-        // v21 命中阈值: 14px（线宽 ~2-4px + 手抖余量）; 拉近时按投影尺度微放宽
-        const edgeCap = 14;
+        // v21 命中阈值: 默认 14px（线宽 ~2-4px + 手抖余量）; v28 hitPx 按结构管径自适应
+        const edgeCap = t.hitPx ?? 14;
         if (minD > edgeCap || minI < 0) continue;
         // 折线最近点世界坐标（命中点即套环锚 —— 视网膜环就在指针处）
         const pA = t.poly[minI], pB = t.poly[minI + 1];

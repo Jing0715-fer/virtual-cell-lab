@@ -1674,6 +1674,20 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     // 世界坐标 = 舞台局部坐标绕 Y 旋转 ROT_Y（与 group.rotation.y 同步 —— Html 世界对齐）
     const push = (zh: string, latin: string, lx: number, ly: number, lz: number, r: number) =>
       T.push({ zh, latin, pos: { x: lx * cR + lz * sR, y: ly, z: -lx * sR + lz * cR }, r });
+    // v28 折线命中体推入器（细胞骨架条形结构全段可悬停 —— 用户「细胞骨架还是只能放在
+    //   中心才行, 而不是条形的任意位置」根治: 间期/子细胞微管阵列从单点区域锚迁移为
+    //   逐管折线, 指到阵列中任何一根的任何一段都能感应, 套环/信息卡锚定在指针命中处）
+    const pushPoly = (zh: string, latin: string, localPts: THREE.Vector3[], r: number, hitPx: number) => {
+      const mid = localPts[Math.floor(localPts.length / 2)];
+      T.push({
+        zh,
+        latin,
+        pos: { x: mid.x * cR + mid.z * sR, y: mid.y, z: -mid.x * sR + mid.z * cR },
+        r,
+        poly: localPts.map((p) => ({ x: p.x * cR + p.z * sR, y: p.y, z: -p.x * sR + p.z * cR })),
+        hitPx,
+      });
+    };
     const PZ = poleZ(Math.min(6, PHASE_BOUNDS[phase] + 0.4));
     // 常驻: 中心体 ×2（除间期贴核位）
     if (phase >= 1) {
@@ -1681,16 +1695,49 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       push('中心体（中心粒对）', 'Centrosome', -0.5, 0, PZ, 1.8);
     } else {
       push('中心体（已复制, 贴核）', 'Centrosome', 0.5, 1.1, 1.5, 1.8);
-      // v26 间期细胞骨架锚点（微管阵列 + 皮层肌动蛋白 —— 悬停可发现性）
-      push('微管（间期放射阵列）', 'Interphase microtubules', mtoC.x + 1.4, mtoC.y + 0.6, mtoC.z + 1.1, 2.2);
+      // v28 间期微管阵列逐管折线命中体（旧 v26 单点区域锚 —— 管身任意位置可指认;
+      //   端点解算与 update() 同源: 静态球面膜内二次方程正根（间期膜恒球, mtoC/dirs 静态））
+      for (const d of interDirs) {
+        const b = d.dot(mtoC);
+        const cc = (R_CELL - 0.35) ** 2 - mtoC.lengthSq();
+        const len = Math.max(0.5, -b + Math.sqrt(Math.max(0.01, b * b + cc)));
+        pushPoly(
+          '微管（间期放射阵列）',
+          'Interphase microtubules',
+          [mtoC, mtoC.clone().addScaledVector(d, len * 0.5), mtoC.clone().addScaledVector(d, len)],
+          0.5,
+          15,
+        );
+      }
       const aDir = new THREE.Vector3(0.42, 0.18, 0.89).normalize().multiplyScalar(R_CELL - 0.6);
       push('皮层肌动蛋白网', 'Cortical actin', aDir.x, aDir.y, aDir.z, 2.4);
     }
-    // v26b 子细胞微管阵列锚点（分离完成相位 —— 双子细胞各自重建的骨架可发现）
+    // v28b 子细胞微管阵列逐管折线命中体（分离完成相位 —— 旧 v26b 双子各 1 点区域锚;
+    //   端点解算与 update() 同源（快照 tA: 中心体位 = 确定性 lerp 公式, 子细胞球 rD/zD 同窗）
     if (phase >= 7) {
-      const zD7 = THREE.MathUtils.lerp(5.55, 7.35, ramp(Math.min(6.9, PHASE_BOUNDS[phase] + 0.4), 6.15, 7));
-      push('微管（子细胞放射阵列）', 'Daughter cell microtubules', 1.6, 0.4, -zD7 + 1.2, 2.2);
-      push('微管（子细胞放射阵列）', 'Daughter cell microtubules', -1.6, 0.4, zD7 - 1.2, 2.2);
+      const tA7 = Math.min(6.9, PHASE_BOUNDS[phase] + 0.4);
+      const zD7 = THREE.MathUtils.lerp(5.55, 7.35, ramp(tA7, 6.15, 7));
+      const rD7 = THREE.MathUtils.lerp(5.15, 6.45, ramp(tA7, 6.15, 6.9));
+      const half = Math.floor(dauMTDirs.length / 2);
+      const mtoD7 = [new THREE.Vector3(0.5, 0, -PZ), new THREE.Vector3(-0.5, 0.05, PZ)];
+      for (let side = 0; side < 2; side++) {
+        const mtc = mtoD7[side];
+        const ctr = new THREE.Vector3(0, 0, side === 0 ? -zD7 : zD7); // 子细胞球心
+        for (let i = 0; i < half; i++) {
+          const d = dauMTDirs[side * half + i];
+          const rel = mtc.clone().sub(ctr);
+          const b = rel.dot(d);
+          const cc = (Math.max(1, rD7) - 0.35) ** 2 - rel.lengthSq();
+          const len = Math.max(0.4, -b + Math.sqrt(Math.max(0.01, b * b + cc)));
+          pushPoly(
+            '微管（子细胞放射阵列）',
+            'Daughter cell microtubules',
+            [mtc, mtc.clone().addScaledVector(d, len * 0.5), mtc.clone().addScaledVector(d, len)],
+            0.5,
+            14,
+          );
+        }
+      }
     }
     // v20 线粒体锚点逐颗跟随相位（用户反馈「黄圈里的线粒体悬停无反应」）:
     //   旧版仅 2 个静态锚（间期位）—— 8 颗线粒体大多不在感应域内; 现按 update 同源运动学
