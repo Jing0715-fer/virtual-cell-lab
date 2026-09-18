@@ -1,10 +1,14 @@
 'use client';
 
 /**
- * 细胞器悬停标记系统 v21（用户反馈: 「只显示pathway悬停信息 · 边必须放线的中心才显示 · 高亮应是整条线」）
+ * 细胞器悬停标记系统 v29（用户反馈: 「核孔复合物/灰色管状/红色球形细胞器悬停没有反应」）
+ *   - v29 归一化深度仲裁: 边/折线与细胞器各自除以自身捕获域再比较 —— 细胞器屏幕足迹
+ *     整体归属本体（穿行线仅在指针明显更贴近线时胜出）。旧「原始像素距离 0.55×」让
+ *     穿行的信号边/微管折线在大细胞器足迹内处处抢占 —— 指向溶酶体/线粒体/高尔基本体
+ *     却弹「信号边」信息卡 = 用户「红色球形体悬停没反应」的根因。
  *   - v21 双通道命中引擎: 细胞器锤点（v20 像素精准算法保留）与信号边折线（全段任意点可悬停 ——
  *     每边一个折线命中体, 指针到投影线段的像素距离 <14px 即命中; 「必须放线的中心」根治）分开评分;
- *     仲裁规则: 边仅在「无细胞器命中」或「边像素距离 < 0.55×细胞器像素距离」时胜出 ——
+ *     仲裁规则: 边仅在「无细胞器命中」或「边归一化深度 < 0.55×细胞器归一化深度」时胜出 ——
  *     指向细胞器本体时永远显示细胞器（「只显示pathway信息」根治）。
  *   - v21 整线高亮: 悬停边经 onHoverEdge(refId) 上报 → EdgeLayer 全段提亮 + 线宽加倍 + 呼吸脉冲
  *     （「高亮应该是整个线, 而不是只是线的中心」根治）。
@@ -156,6 +160,8 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
 }) {
   const { lang } = useLang();
   const [hovered, setHovered] = useState<HoverTarget | null>(null);
+  /** v29 QA: 实例标识（诊断多实例并存 —— 分裂演示与主视图同时挂载时状态互相覆盖） */
+  const instId = useRef(Math.random().toString(36).slice(0, 5));
   /** v20 命中捕获半径（像素 —— 视网膜套环尺寸真源） */
   const [capPx, setCapPx] = useState(48);
   const ray = useRef(new THREE.Ray());
@@ -179,7 +185,9 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
     // v21 QA 插桩（__cellQaProbe 门控 —— 与分裂演示 __mitoQaProbe 同一方法论; 零常态成本）
     if (typeof window !== 'undefined' && (window as { __cellQaProbe?: boolean }).__cellQaProbe) {
       (window as unknown as { __cellQaTargets?: HoverTarget[] }).__cellQaTargets = targets;
+      const pc = state.camera as THREE.PerspectiveCamera;
       (window as unknown as { __cellQaState?: Record<string, unknown> }).__cellQaState = {
+        inst: instId.current,
         hovered: hovered?.zh ?? null,
         enabled,
         locateNonce: locate?.nonce ?? null,
@@ -187,6 +195,17 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
         forcedUntil: forcedUntil.current,
         now,
         ptr: [state.pointer.x, state.pointer.y],
+        // v29 QA: 相机快照（外部投影诊断 —— 目标屏幕位推算）
+        cam: {
+          pos: [state.camera.position.x, state.camera.position.y, state.camera.position.z],
+          q: [state.camera.quaternion.x, state.camera.quaternion.y, state.camera.quaternion.z, state.camera.quaternion.w],
+          fov: pc.fov ?? 50,
+          aspect: pc.aspect,
+          size: [state.size.width, state.size.height],
+          // v29 QA: 真源投影矩阵 + 世界逆矩阵（引擎 .project() 同一数据 —— 外部重建零误差）
+          pm: [...pc.projectionMatrix.elements],
+          mwi: [...state.camera.matrixWorldInverse.elements],
+        },
       };
     }
     if (locate && locate.nonce !== lastNonce.current) {
@@ -232,6 +251,8 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
      *  边仅在「明显更近」时胜出 —— 指向细胞器本体时永远显示细胞器（用户反馈「只显示pathway信息」根治） */
     let bestEdge: HoverTarget | null = null;
     let bestEdgeDist = Infinity;
+    /** v29 胜者边捕获域（归一化深度仲裁 —— edgeDist/bestEdgeCap vs orgDist/bestCap） */
+    let bestEdgeCap = 14;
     let bestEdgePos: Vec3 | null = null;
     /** v21 边命中最近点沿折线参数（0..1 —— 高亮脉冲粒子定位） */
     for (const t of targets) {
@@ -282,6 +303,9 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
         // v21 命中阈值: 默认 14px（线宽 ~2-4px + 手抖余量）; v28 hitPx 按结构管径自适应
         const edgeCap = t.hitPx ?? 14;
         if (minD > edgeCap || minI < 0) continue;
+        // v29c 近并列边距: 信号边要取代已持有的细胞器条形折线（SER 管/胆小管/骨架纤维）
+        //   须再近 2px —— 边弧恰从管端掠过时不再截胡（用户所指是细胞器而非变径弧线）
+        const displaceMargin = t.kind === 'edge' && bestEdge !== null && bestEdge.kind !== 'edge' ? 2 : 0;
         // 折线最近点世界坐标（命中点即套环锚 —— 视网膜环就在指针处）
         const pA = t.poly[minI], pB = t.poly[minI + 1];
         const hitPos = {
@@ -289,8 +313,9 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
           y: pA.y + (pB.y - pA.y) * minK,
           z: pA.z + (pB.z - pA.z) * minK,
         };
-        if (minD < bestEdgeDist) {
+        if (minD < bestEdgeDist - displaceMargin) {
           bestEdgeDist = minD;
+          bestEdgeCap = edgeCap;
           bestEdge = t;
           bestEdgePos = hitPos;
         }
@@ -328,11 +353,18 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
         bestPixelDist = pixelDist;
       }
     }
-    /* v21 仲裁: 边胜出仅当 (无细胞器命中) 或 (边像素距离显著更近 —— 指针实际落在线上而非细胞器本体)
-     *  阈值 0.55×: 指向细胞器本体（像素距离小）时边永远让位; 指向穿过细胞器上空的线时边照常可指认 */
+    /* v29 归一化深度仲裁: 双方像素距离各除以自身捕获域 —— 指针在细胞器足迹内的相对深度 vs
+     *   在折线感应带内的相对深度。大细胞器（溶酶体/线粒体/高尔基, 屏幕足迹 30-60px）的本体
+     *   任何位置都归属本体; 穿行线（信号边/微管折线, 感应带 11-15px）仅在指针显著更贴近线
+     *   （深度比 < 0.55）时胜出。旧「原始像素 0.55×」以细胞器锚心距为基准 —— 锚心偏在足迹
+     *   一侧时整片身体被细线抢占（用户「红色球形体悬停没反应」根治）。
+     *   v29b 核心区绝对归属: 指针深入足迹内圈（orgDepth < 0.3）时本体无条件胜出 —— 穿行边
+     *   恰从本体中心上方掠过时不再截胡（用户所指是整个身体而非 2px 细线）。 */
     let winner: HoverTarget | null = best;
     if (bestEdge) {
-      if (!best || bestEdgeDist < bestPixelDist * 0.55) {
+      const edgeDepth = bestEdgeDist / Math.max(6, bestEdgeCap);
+      const orgDepth = bestPixelDist / Math.max(6, bestCap);
+      if (!best || (orgDepth > 0.3 && edgeDepth < orgDepth * 0.55)) {
         winner = { ...bestEdge, pos: bestEdgePos ?? bestEdge.pos };
         bestCap = 18;
       }

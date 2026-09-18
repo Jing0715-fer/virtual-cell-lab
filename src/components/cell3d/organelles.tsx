@@ -1124,6 +1124,14 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         inst.renderOrder = 55;
         group.add(inst);
       }
+      // v29 逐孔悬停锚: 每枚核孔环各自小锚（r 0.3）—— 指到任何一枚孔环即现「核孔复合体」信息卡。
+      //   旧版仅 primary 核 1 个 label 派生锚（r 1.7）—— 其余百余枚孔环全部无响应
+      //   （用户「核孔复合物没有悬停」根因）。小半径在评分中亦占优（0.22·r 惩罚 0.066 vs
+      //   核被膜锚 0.54）: 孔上指认孔、膜面指认核被膜 —— 双层错开不互扰。
+      for (const m of mats) {
+        const e = m.elements;
+        hover.push({ pos: { x: e[12], y: e[13], z: e[14] }, r: 0.3, zh: '核孔复合体', latin: 'Nuclear pore complex', group: 'nuclear' });
+      }
       // 胞质丝（NPC 胞质面 8 根柔性丝 —— 出核 mRNA/货物对接轨; 低端设备省略）
       if (!perf) {
         const filGeo = track(new THREE.CapsuleGeometry(0.011, 0.26, 3, 5));
@@ -1165,9 +1173,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         group.add(fil);
       }
     }
-    if (primary) {
-      labels.push({ pos: nucPointK(new THREE.Vector3(Math.cos(0.35) * Math.cos(1.9), Math.sin(0.35), Math.cos(0.35) * Math.sin(1.9)), 0.42), zh: '核孔复合体', latin: 'Nuclear pore complex' });
-    }
+    // v29: 旧 NPC 单点 label 派生锚退役 —— 逐孔锚承担感应与目录（同名去重 = 单目录条目）;
+    //   外置 r1.7 大域锚会在膜面无孔处误报「核孔」。
     // v19 逐核悬停锚点（双核肝细胞的次核此前无任何核区锚点 —— 指到次核只能命中 ER/双核错标）:
     //   核被膜（顶面贴面）/ 核仁（本体位）/ 异染色质（边集带）各核独立感应; 半径随核尺寸缩放。
     // v21 核区锚点群: 大核屏幕足迹 ≫ 64px 捕获钳 —— 单锚留洞（指向核面中部常无响应）;
@@ -1856,7 +1863,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   if (spec.glycogen) {
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
     const serN = perf ? 7 : 12;
-    const serFirst = new THREE.Vector3();
+    /** v29 逐管控制折线（全段折线命中体真源 —— 替换旧每 3 管 1 点锚） */
+    const serPolys: THREE.Vector3[][] = [];
     for (let i = 0; i < serN; i++) {
       const pts: THREE.Vector3[] = [];
       for (let k = 0; k <= 5; k++) {
@@ -1868,9 +1876,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
           Math.cos((hash01(`se${i}`, 3) - 0.5) * 2.2 + Math.sin(t * 4 + i) * 0.14) * Math.sin(hash01(`se${i}`, 5) * Math.PI * 2 + t * 0.9),
         ).normalize();
         const p = insidePos(seDir, 0.28 + hash01(`se${i}`) * 0.52 + t * 0.14, 0.12, 0.35);
-        if (i === 0 && k === 2) serFirst.copy(p);
         pts.push(new THREE.Vector3(p.x, p.y, p.z));
       }
+      serPolys.push(pts);
       parts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 20, 0.085, 7)) });
     }
     // 管系 junction 节点（三通小室）
@@ -1894,23 +1902,20 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     }));
     ser.renderOrder = cutaway ? 97.1 : 45; // v22 剖面窗口化（SER 管网剖开直读）
     group.add(ser);
-    // v21 SER 管网多锚承担目录与感应（旧首管 label 派生锚退役）
-    {
-      const serAnchors: THREE.Vector3[] = [];
-      for (let i = 0; i < serN; i += 3) {
-        const mid = new THREE.CatmullRomCurve3([
-          insidePos(new THREE.Vector3(
-            Math.cos((hash01(`se${i}`, 3) - 0.5) * 2.2) * Math.cos(hash01(`se${i}`, 5) * Math.PI * 2),
-            Math.sin((hash01(`se${i}`, 3) - 0.5) * 2.2),
-            Math.cos((hash01(`se${i}`, 3) - 0.5) * 2.2) * Math.sin(hash01(`se${i}`, 5) * Math.PI * 2),
-          ).normalize(), 0.28 + hash01(`se${i}`) * 0.52, 0.12, 0.35),
-          serFirst,
-        ]).getPoint(0.5);
-        serAnchors.push(mid);
-      }
-      for (const a of serAnchors) {
-        hover.push({ pos: { x: a.x, y: a.y, z: a.z }, r: 0.85, zh: '滑面内质网', latin: 'Smooth ER', group: 'endomembrane' });
-      }
+    // v29 SER 全段折线命中体: 逐管 6 点折线（hitPx 13）—— 管身任意位置可指认,
+    //   套环/信息卡锚定在指针命中处。旧版每 3 管仅 1 个 r0.85 点锚 —— 管身大部无响应
+    //   （用户「灰色的管状细胞器没有悬停」根因）; 目录条目由同名去重自动合并。
+    for (const pts of serPolys) {
+      const mid = pts[2];
+      hover.push({
+        pos: { x: mid.x, y: mid.y, z: mid.z },
+        r: 0.5,
+        poly: pts.map((p) => ({ x: p.x, y: p.y, z: p.z })),
+        hitPx: 13,
+        zh: '滑面内质网',
+        latin: 'Smooth ER',
+        group: 'endomembrane',
+      });
     }
   }
 
@@ -2103,10 +2108,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       m.makeScale(r, r, r);
       m.setPosition(p.x, p.y, p.z);
       inst.setMatrixAt(i, m);
-      // v21 逐颗悬停锚（隔颗采样 —— 小囊泡密集, 全量会挤压其他细胞器仲裁）
-      if (i % 2 === 0) {
-        hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: 0.46, zh: '运输囊泡', latin: 'Transport vesicle', group: 'endomembrane' });
-      }
+      // v29 逐颗悬停锚（全量 —— 旧隔颗采样在小囊泡间留洞）; v29 归一化深度仲裁后
+      //   小锚不再挤压其他细胞器（0.22·r 惩罚仅 0.10, 足迹内永远优先于穿行线）
+      hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: 0.46, zh: '运输囊泡', latin: 'Transport vesicle', group: 'endomembrane' });
     }
     inst.instanceMatrix.needsUpdate = true;
     inst.renderOrder = cutaway ? 97.2 : 46; // v22 剖面窗口化（运输囊泡逐颗剖开）
@@ -2729,7 +2733,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
             { x: cAx - tangent.x * halfLen, y: cAy - tangent.y * halfLen, z: cAz - tangent.z * halfLen },
             { x: cAx + tangent.x * halfLen, y: cAy + tangent.y * halfLen, z: cAz + tangent.z * halfLen },
           ],
-          hitPx: 11,
+          hitPx: 12, // v29 11→12: 归一化仲裁后细胞器锤点优先有保障 —— 轮廓壳胶囊感应带放宽 1px
           zh: '皮层肌动蛋白网',
           latin: 'Cortical actin',
           group: 'cytoskeleton',
@@ -2782,7 +2786,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
           pos: { x: pts[Math.floor(pts.length / 2)].x, y: pts[Math.floor(pts.length / 2)].y, z: pts[Math.floor(pts.length / 2)].z },
           r: 0.4,
           poly: pts.map((p) => ({ x: p.x, y: p.y, z: p.z })),
-          hitPx: 12,
+          hitPx: 13, // v29 12→13: 同上 —— 归一化仲裁保障下细丝感应带放宽
           zh: '胞质肌动蛋白网',
           latin: 'Cytoplasmic actin network',
           group: 'cytoskeleton',
@@ -3347,7 +3351,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       cDir.clone().multiplyScalar(cR - 0.08),
       cDir.clone().multiplyScalar(cR).addScaledVector(t1, 1.8),
     ];
-    const canal = new THREE.Mesh(track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(cpts), 28, 0.28, 12)), canMat);
+    const canalCurve = new THREE.CatmullRomCurve3(cpts);
+    const canal = new THREE.Mesh(track(new THREE.TubeGeometry(canalCurve, 28, 0.28, 12)), canMat);
     canal.renderOrder = 62;
     group.add(canal);
     // 管周短微绒毛环（肝细胞微绒毛面向胆小管的真实位形）
@@ -3384,7 +3389,27 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         group.add(bile);
       }
     }
-    labels.push({ pos: cDir.clone().multiplyScalar(cR + 1.5).addScaledVector(t1, 1.2), zh: '胆小管（胆汁）', latin: 'Bile canaliculus' });
+    // v29 胆小管全段折线命中体: 7 点折线沿管道（hitPx 15 —— 管 0.28 粗）。
+    //   旧版标签锚在管外 1.5 单位空中 —— 管本体（顶面琥珀金管 + 微绒毛环 + 胆汁微粒）
+    //   全部无响应（用户「灰色管状/红色球形体悬停没反应」同族缺口）; 标签归位管心。
+    labels.push({ pos: canalCurve.getPoint(0.5).clone(), zh: '胆小管（胆汁）', latin: 'Bile canaliculus' });
+    {
+      const canalPoly: { x: number; y: number; z: number }[] = [];
+      for (let k = 0; k <= 6; k++) {
+        const cp = canalCurve.getPoint(k / 6);
+        canalPoly.push({ x: cp.x, y: cp.y, z: cp.z });
+      }
+      const canalMid = canalPoly[3];
+      hover.push({
+        pos: { x: canalMid.x, y: canalMid.y, z: canalMid.z },
+        r: 0.6,
+        poly: canalPoly,
+        hitPx: 15,
+        zh: '胆小管（胆汁）',
+        latin: 'Bile canaliculus',
+        group: 'endomembrane',
+      });
+    }
   }
 
   if (spec.ttubules) {

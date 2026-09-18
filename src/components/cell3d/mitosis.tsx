@@ -1695,6 +1695,14 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       push('中心体（中心粒对）', 'Centrosome', -0.5, 0, PZ, 1.8);
     } else {
       push('中心体（已复制, 贴核）', 'Centrosome', 0.5, 1.1, 1.5, 1.8);
+      // v29 间期核孔逐孔锚: 与 npcs InstancedMesh 同源确定性 hash 位（nl/no）——
+      //   演示视图同享「指到任何一枚核孔环即现信息卡」（主视图 v29 同步根治）
+      for (let i = 0; i < (perf ? 18 : 30); i++) {
+        const lat = Math.asin((hash01(`nl${i}`) - 0.5) * 1.9);
+        const lon = hash01(`no${i}`) * Math.PI * 2;
+        const d = new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)).multiplyScalar(NUC_R);
+        push('核孔复合体', 'Nuclear pore complex', d.x, d.y, d.z, 0.3);
+      }
       // v28 间期微管阵列逐管折线命中体（旧 v26 单点区域锚 —— 管身任意位置可指认;
       //   端点解算与 update() 同源: 静态球面膜内二次方程正根（间期膜恒球, mtoC/dirs 静态））
       for (const d of interDirs) {
