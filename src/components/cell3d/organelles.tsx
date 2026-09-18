@@ -1830,6 +1830,16 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       ribos2.renderOrder = 44;
     }
     group.add(ribos2);
+    // v27 外周管网悬停锚点（用户「管状上面有黄色小球的是什么」—— 该结构 = 外周粗面内质网
+    //   （管 + 膜旁核糖体）, 旧版完全无锚点不可指认。每条管取 t 0.3/0.65 两点沿管分布,
+    //   r 1.2 小锚评分优势 —— 指向管身/金珠串时胜出; 与核周 RER 冠独立命名（教学区分度:
+    //   核周千层饼冠 vs 胞质外周管网 —— 同一连续膜系统的两个区室域））
+    for (let pi = 0; pi < periphCurves.length; pi++) {
+      for (const tt of [0.3, 0.65]) {
+        const ap = periphCurves[pi].getPoint(tt);
+        hover.push({ pos: { x: ap.x, y: ap.y, z: ap.z }, r: 1.2, zh: '粗面内质网·外周管网', latin: 'Peripheral rough ER', group: 'endomembrane' });
+      }
+    }
   }
 
   // 滑面内质网（肝细胞解毒管系 —— CYP450 管网）
@@ -2570,6 +2580,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
     let mtMid = new THREE.Vector3();
     const mtTotal = Math.round(spec.microtubules * (perf ? 1.2 : 2.2)) + (perf ? 4 : 6);
+    // v27 微管悬停锚点采样根（方位均匀隔取 —— 全阵列各象限均有感应域）
+    const mtAnchorEvery = Math.max(3, Math.floor(mtTotal / 6));
+    const mtAnchorPts: THREE.Vector3[] = [];
     for (let i = 0; i < mtTotal; i++) {
       const mtDir = new THREE.Vector3(
         Math.cos((hash01(`t${i}`) - 0.5) * 2.4) * Math.cos(hash01(`t${i}`, 3) * Math.PI * 2),
@@ -2582,6 +2595,10 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       ctrl.y += (hash01(`t${i}`, 9) - 0.5) * 1.6;
       const curve = new THREE.QuadraticBezierCurve3(c, ctrl, end);
       if (i === 0) curve.getPoint(0.42, mtMid); // v19: 微管锚点取首根微管中段真实管位（旧 c·2.5 悬空）
+      // v27 每采样根取中段/远段两点（远段近膜区 —— 贯穿胞质的管道全程可指认）
+      if (i % mtAnchorEvery === 0) {
+        mtAnchorPts.push(curve.getPoint(0.45, new THREE.Vector3()), curve.getPoint(0.78, new THREE.Vector3()));
+      }
       parts.push({ geo: track(new THREE.TubeGeometry(curve, 26, 0.042, 8)) });
     }
     const mts = new THREE.Mesh(track(mergeGeoms(parts)), mat({
@@ -2598,6 +2615,12 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     }));
     mts.renderOrder = 44;
     group.add(mts);
+    // v27 微管悬停锚点落位（旧版仅静态标注无感应 —— 用户「细胞骨架没有悬停效果」根治:
+    //   微管是主视图最显眼的骨架成分（粗壮绿色管道贯穿胞质）, 每采样根 2 锚沿管分布;
+    //   r 1.15 小于线粒体 1.7/ER 2.1 —— 重叠区评分优势（0.22·r 惩罚项）指向管身时微管胜出）
+    for (const ap of mtAnchorPts) {
+      hover.push({ pos: { x: ap.x, y: ap.y, z: ap.z }, r: 1.15, zh: '微管（中心体放射）', latin: 'Microtubules', group: 'cytoskeleton' });
+    }
 
     // 中间丝（核周波形蛋白笼 —— 核被膜到质膜的力学支架, 与微管正交的第三套骨架）
     // v6: 严格自成形核面拉到类型化膜面（旧球形插值在窄轴穿膜、长轴悬空）
@@ -2606,6 +2629,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       const ifN = perf ? 8 : 14;
       const ifParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
       let ifMid = new THREE.Vector3();
+      // v27 中间丝悬停锚点（旧版仅静态标注 —— 每 4 丝取中段, 核周→膜面支架全程可指认）
+      const ifAnchorPts: THREE.Vector3[] = [];
       for (let i = 0; i < ifN; i++) {
         const lat = (hash01(`if${i}`) - 0.5) * 2.2;
         const lon = hash01(`if${i}`, 3) * Math.PI * 2;
@@ -2621,7 +2646,10 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
           const to = d.clone().multiplyScalar(Math.max(1.2, cellSurf(d, R, SHAPE, -0.45)));
           const p = from.lerp(to, t);
           pts.push(p);
-          if (i === 0 && k === 3) ifMid.copy(p);
+          if (k === 3 && i % 4 === 0) {
+            ifMid.copy(p); // 首丝中段（i=0）承载静态标注
+            ifAnchorPts.push(p.clone());
+          }
         }
         ifParts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 22, 0.02, 5)) });
       }
@@ -2639,6 +2667,10 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       group.add(ifs);
       // v19 锚点归位: 中间丝首丝中段本体位（旧 1.15× 外飘）
       labels.push({ pos: { x: ifMid.x, y: ifMid.y, z: ifMid.z }, zh: '中间丝（波形蛋白）', latin: 'Intermediate filaments' });
+      // v27 悬停锚点（r 1.05 小锚 —— 评分优势; 与微管同属 cytoskeleton 组目录可发现）
+      for (const ip of ifAnchorPts) {
+        hover.push({ pos: { x: ip.x, y: ip.y, z: ip.z }, r: 1.05, zh: '中间丝（波形蛋白）', latin: 'Intermediate filaments', group: 'cytoskeleton' });
+      }
     }
 
     // v19 锚点归位: 首根微管中段真实管位（旧 c·2.5-0.5 悬空在胞质空域）
@@ -2672,10 +2704,17 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     }
     group.add(actins);
     // v14 悬停锚点: 皮层肌动蛋白（膜面内网 —— 无静态标注, 悬停发现）
+    // v27 对侧补锚: 单锚仅覆盖一个象限的膜面网 —— 环绕膜面 3 处方位分布
     {
       const aDir = new THREE.Vector3(0.42, 0.18, 0.89).normalize();
       const ar = cellSurf(aDir, R, SHAPE, -0.62);
       hover.push({ pos: { x: aDir.x * ar, y: aDir.y * ar, z: aDir.z * ar }, r: 2.3, zh: '皮层肌动蛋白网', latin: 'Cortical actin', group: 'cytoskeleton' });
+      const aDir2 = new THREE.Vector3(-0.55, -0.25, -0.8).normalize();
+      const ar2 = cellSurf(aDir2, R, SHAPE, -0.62);
+      hover.push({ pos: { x: aDir2.x * ar2, y: aDir2.y * ar2, z: aDir2.z * ar2 }, r: 2.1, zh: '皮层肌动蛋白网', latin: 'Cortical actin', group: 'cytoskeleton' });
+      const aDir3 = new THREE.Vector3(-0.3, 0.86, 0.4).normalize();
+      const ar3 = cellSurf(aDir3, R, SHAPE, -0.62);
+      hover.push({ pos: { x: aDir3.x * ar3, y: aDir3.y * ar3, z: aDir3.z * ar3 }, r: 2.1, zh: '皮层肌动蛋白网', latin: 'Cortical actin', group: 'cytoskeleton' });
     }
 
     // v26 胞质肌动蛋白网（参照图: 「橙黄细丝数量非常多、密度很高, 缠绕细胞器、
@@ -2725,10 +2764,14 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       }));
       actNet.renderOrder = 44;
       group.add(actNet);
-      // 悬停锚点: 代表束中段本体位（目录可发现性）
+      // 悬停锚点: 代表束中段本体位（目录可发现性）+ v27 方位补锚 ×2（单锚覆盖不足 —— 网遍全胞质）
       {
         const anp = insidePos(new THREE.Vector3(0.55, -0.3, 0.78).normalize(), 0.5, 0.06, 0.3);
         hover.push({ pos: { x: anp.x, y: anp.y, z: anp.z }, r: 2.1, zh: '胞质肌动蛋白网', latin: 'Cytoplasmic actin network', group: 'cytoskeleton' });
+        const anp2 = insidePos(new THREE.Vector3(-0.72, 0.35, 0.6).normalize(), 0.55, 0.06, 0.3);
+        hover.push({ pos: { x: anp2.x, y: anp2.y, z: anp2.z }, r: 1.9, zh: '胞质肌动蛋白网', latin: 'Cytoplasmic actin network', group: 'cytoskeleton' });
+        const anp3 = insidePos(new THREE.Vector3(0.1, -0.75, -0.65).normalize(), 0.6, 0.06, 0.3);
+        hover.push({ pos: { x: anp3.x, y: anp3.y, z: anp3.z }, r: 1.9, zh: '胞质肌动蛋白网', latin: 'Cytoplasmic actin network', group: 'cytoskeleton' });
       }
     }
   }

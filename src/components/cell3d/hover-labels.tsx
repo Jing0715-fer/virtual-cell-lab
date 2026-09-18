@@ -71,6 +71,8 @@ export const ORG_INFO: Record<string, { zh: string; en: string }> = {
   Heterochromatin: { zh: '高度压缩的沉默染色质 · 核边缘聚集', en: 'Condensed silent chromatin at the periphery' },
   Mitochondrion: { zh: '氧化磷酸化产能车间 · 内膜折叠成板层嵴', en: 'Powerhouse — oxidative phosphorylation on cristae' },
   'Rough ER': { zh: '核糖体满铺的囊池网 · 分泌蛋白与膜蛋白合成', en: 'Ribosome-studded cisternae — secretory protein synthesis' },
+  'Peripheral rough ER': { zh: '外周管状 ER + 膜旁核糖体金珠 · 与核周囊池连续的胞质管网', en: 'Peripheral tubular ER studded with ribosomes — continuous with perinuclear cisternae' },
+  'Cytoplasmic actin network': { zh: '胞质肌动蛋白网 · 皮层下应力纤维与细丝交织的收缩网络', en: 'Cytoplasmic actin — stress fibers and thin filaments interweaving' },
   'Smooth ER': { zh: '无核糖体管网 · 脂质合成与 Ca²⁺ 储库', en: 'Ribosome-free tubules — lipid synthesis, Ca²⁺ store' },
   'Golgi apparatus': { zh: '顺→反扁平囊堆 · 糖基化修饰与分选枢纽', en: 'cis→trans stack — glycosylation and sorting hub' },
   'Transport vesicle': { zh: '膜运输载体 · ER→高尔基→质膜航线', en: 'Membrane carriers between compartments' },
