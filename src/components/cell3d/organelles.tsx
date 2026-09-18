@@ -43,6 +43,7 @@ import { displaceGeometry, fbm3, fibSphere, hash01, mergeGeoms, sph } from './pr
 import { glowSpriteTexture, organicNormalMap, speckleNormalMap, stripeNormalMap } from './textures';
 import { createTimeUniform, glowMaterial, organelleMaterial, volumeMaterial, REF, type TimeUniform } from './materials';
 import { autophagyLevel, AUTOPHAGY_VISIBLE_THRESHOLD } from '@/lib/simulation/autophagy';
+import { secretionLevel } from '@/lib/simulation/secretion';
 import { useLabStore } from '@/store/lab-store';
 import { useLang } from '@/lib/i18n';
 import { OrganelleHoverLayer, dedupeTargets, type HoverTarget, type HoverGroupKey, type LocateReq } from './hover-labels';
@@ -58,8 +59,9 @@ export interface AnatomyLabel {
 export interface CellBodyBuild {
   group: THREE.Group;
   /** 帧驱动; ulk1 = 自噬驱动水平（0-1, 缺省 0 —— 无 ULK1 通路自噬系统静默）;
-   *  clip = 全局裁剪平面（剖面模式单一真源 —— v23 示教锚动态吸附） */
-  update: (t: number, ulk1?: number, clip?: THREE.Plane | null) => void;
+   *  clip = 全局裁剪平面（剖面模式单一真源 —— v23 示教锚动态吸附）;
+   *  v36 sec = 分泌驱动水平（0-1 —— 组成型分泌流速率/亮度随信号活性增强） */
+  update: (t: number, ulk1?: number, sec?: number, clip?: THREE.Plane | null) => void;
   labels: AnatomyLabel[];
   /** v14 悬停标记目标（全细胞器 —— 含多锚点同名目标, 感应域并集） */
   hover: HoverTarget[];
@@ -4226,8 +4228,22 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       plane: qaPlane,
     });
   }
-  const update = (t: number, ulk1 = 0, clip: THREE.Plane | null = null) => {
+  /* v36 分泌流驱动时钟: 累积式相位推进（速率随引擎信号活性增强 —— 旧 (t+offset)%period
+   *   直读在速率变化时相位跳变; 累积时钟保证连续） */
+  let secLastT = 0;
+  let secClock = 0;
+  const update = (t: number, ulk1 = 0, sec = 0, clip: THREE.Plane | null = null) => {
     uTime.value = t;
+    // 分泌驱动时钟推进（基础 0.55 + 信号驱动 × 1.15 —— 配体注入级联点亮后巡航加速）
+    {
+      const dtS = Math.min(0.12, Math.max(0, t - secLastT));
+      secLastT = t;
+      secClock += dtS * (0.55 + Math.min(1, Math.max(0, sec)) * 1.15);
+      // v36 QA 插桩（驱动水平/累积时钟 —— 仅显式探测时写入）
+      if (typeof window !== 'undefined' && (window as { __secQaProbe?: boolean }).__secQaProbe) {
+        (window as unknown as { __secQa?: unknown }).__secQa = { sec: Math.min(1, Math.max(0, sec)), clock: secClock, t };
+      }
+    }
     // v23 剖面示教锚动态吸附（先于漂移循环 —— pinned 颗位置由吸附循环接管）
     if (showcaseAnchors.length > 0) applyShowcase(clip);
     for (const m of mitos) {
@@ -4364,13 +4380,18 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       }
     }
 
-    /* ---- v35 TGN→质膜 组成型分泌流四相生命周期（常驻循环; 出芽→巡航→停靠→胞吐融合） ---- */
+    /* ---- v35 TGN→质膜 组成型分泌流四相生命周期（常驻循环; 出芽→巡航→停靠→胞吐融合）
+       * v36 引擎联动: 相位时钟改累积式（secClock —— 速率随信号活性）; 亮度随驱动增强 ---- */
     const SEC_BUD = 0.09;
     const SEC_DOCK = 0.72;
     const SEC_FUSE = 0.86;
+    const secDrive = Math.min(1, Math.max(0, sec));
     for (const sv of secVesicles) {
-      const u = (((t + sv.offset) % sv.period) + sv.period) % sv.period / sv.period;
+      // v36 累积时钟相位（速率连续可变; 拖尾同步跟随）
+      const u = (((sv.offset + secClock / sv.period) % 1) + 1) % 1;
       const smooth = (x: number) => x * x * (3 - 2 * x);
+      // 驱动亮度: 基础 0.85 → 信号满驱动 1.7（「信号→分泌增强」可视叙事）
+      sv.bodyMat.emissiveIntensity = 0.85 + secDrive * 0.85;
       // 帧内可见性总开关（ budding 前与融合末尾隐藏几何体 —— 透明度之外的硬开关）
       const alive = u < 0.985;
       if (u < SEC_BUD) {
@@ -4531,11 +4552,14 @@ export const CellBody = ({ spec, tint, dim, showAnatomy, perf, cutaway, locate, 
 
   // 帧驱动: 传入 ULK1 自噬驱动水平（无 ULK1 通路 → 0 → 自噬系统静默）
   // v23: 同时传全局裁剪平面（剖面模式单一真源 —— 示教锚动态吸附切平面）
+  // v36: 同时传分泌驱动水平（信号活性 → TGN 分泌流速率/亮度联动 —— getState 帧读零重渲染）
   useFrame((state) => {
     const planes = state.gl.clippingPlanes;
+    const st = useLabStore.getState();
     build.update(
       state.clock.elapsedTime,
-      autophagyLevel(useLabStore.getState().nodeStates),
+      autophagyLevel(st.nodeStates),
+      secretionLevel(st.nodeStates),
       planes && planes.length > 0 ? planes[0] : null,
     );
   });

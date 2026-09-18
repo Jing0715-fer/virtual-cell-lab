@@ -2620,3 +2620,82 @@ Stage Summary:
   ②减数分裂演示（复用相位时钟+三网体系范式）③神经元树突/轴突条形结构折线命中体接入
   ④图版导出多面板版式（2×2 对照图版: 不同细胞类型/相位拼版 + 共享图注）⑤分泌流接入引擎
   事件（配体注入后分泌速率可视增强 —— 与信号模拟联动）
+
+---
+Task ID: 50
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户第 23 轮需求 —— 继续下一阶段开发和持续打磨整个项目（落地 worklog v35 建议②③: 减数分裂演示 + 中期染色体 hover 锚动态跟随 + 分泌流接入引擎事件联动）
+
+Work Log:
+- 【旗舰: 减数分裂 3D 演示（meiosis.tsx 新建 ~1700 行 —— 复用有丝分裂成熟范式）】
+  · 时间轴: t∈[0,11] 12 相位 × 7s —— 间期(S 复制)→前期Ⅰ联会(交叉)→前中期Ⅰ(NEBD)→
+    中期Ⅰ四分体(马勒定向)→后期Ⅰ同源分离→末期Ⅰ(保持凝聚 35%)→胞裂Ⅰ(z 轴)→间期Ⅱ
+    (无复制!教学点)→中期Ⅱ(双小纺锤体 y 轴)→后期Ⅱ姐妹分离(Rec8 切割)→胞裂Ⅱ(双缢裂)→
+    配子×4(独立分配)
+  · 染色体体系: 5 对同源(pat 暖调 #9a82b6 / mat 冷调 #8078a8 双色编码 —— 独立分配直接
+    可读)—— 联会位并肩 ±0.85→列队并拢、交叉金点(Octahedron 脉冲, 后期Ⅰ滑向端部
+    ramp 脱落)、同源分离(patSide 逐对随机)、MII rotation.x lerp→-π/2(局部 z→世界 y,
+    臂落水平面)、姐妹 cZW 分离机制复刻(钳制 zCap2 = rD1·0.82-armR)
+  · 膜层三层交接: MI 单膜 z 轴 morph(复刻 profile)→双子球 crossfade [5.15,5.6]→
+    MII 双子膜 y 轴 morph(球期 scale 控径 + morph 期顶点重写 y-L2/xz-r2(v))→
+    四配子球 crossfade [9.2,9.65]((0,±yG,±zD2) 拉开 3.55→5.2)
+  · 纺锤体: MI 单大(星体/极间/动粒 —— 马勒定向: 每条同源两姐妹动粒连同一极, getWorldPosition
+    动粒盘精确锚定) + MII 双小(每子细胞 ±PZ2=2.9 y 轴, 姐妹连异极同有丝分裂; 独立星体
+    InstancedMesh 4×7 根钳子细胞球内)
+  · 核被膜: 间期核→NEBDⅠ碎片→MI 双子核(间期Ⅱ完整)→NEBDⅡ再崩解(双源爆散)→四配子核
+  · 细胞器: 线粒体/囊泡/核糖体双段分配(MI→两子 + MII→四配子, clampCell 三段钳制:
+    单膜回转面/双子 y-morph 回转面/四球) + 高尔基(间期主栈→四配子迷你栈 4 层) +
+    RER 间期核周冠(球冠壳层×3 简化版)
+  · 收缩环: MI 单环(z=0 竖直) + MII 双环(水平 rotation.x=π/2, y=±zD1, 半径随 r2(0.5)·rD1)
+  · QA 插桩: __meiQaProbe/__meiSeekT(时序修正: useFrame 补相位号不覆盖 update 详细数据)
+- 【UI 集成（virtual-cell-3d.tsx + lab-store + i18n）】
+  · lab-store: divisionMode 'mitosis'|'meiosis' + setDivisionMode(模式切换归零相位重播)
+  · HUD 面板: 双 tab(Split/Dna 图标, teal/fuchsia 双主题) + 标题/计数/相位 chips/描述/
+    endHint 全部动态切换(divisionPhases 数组) + 减数舞台相机 dist 28(4 配子更宽)
+  · Canvas: MitosisStage/MeiosisStage 二选一渲染(切换即 dispose 重建)
+  · i18n: mei.title/tabMitosis/tabMeiosis/endHint 4 键
+- 【中期染色体 hover 锚动态跟随（mitosis.tsx —— worklog v35 建议①）】
+  · chrPosAt(ci, tA) 确定性位置求解(update 运动学同源公式: condense/congress/segregate/
+    clusterTight/膜回转面钳制全复刻) —— targets 的 phase 2/3 中期锚(旧静态 2 点)升级
+    逐条跟随(每 3 条取 1), phase 4 姐妹分离锚升级每条两单体(gz±cZW)
+- 【分泌流引擎联动（organelles.tsx + secretion.ts 新建 —— worklog v35 建议⑤）】
+  · lib/simulation/secretion.ts: secretionLevel(nodeStates) = 已激活节点平均活性×1.9
+    (静息 0 → 级联点亮趋 1)
+  · SecVesicle 相位时钟改累积式(secClock += dt×(0.55+drive×1.15) —— 旧 (t+offset)%period
+    直读在速率变化时相位跳变) + bodyMat.emissiveIntensity 0.85→1.7 随驱动
+  · CellBodyBuild.update 签名 +sec 参数(可选, 零破坏) + CellBody useFrame getState 帧读
+    secretionLevel(零重渲染) + __secQaProbe QA 插桩
+- 【QA（agent-browser 交互级 + 探针数值真源 + 像素量化; lint 零错误; console/dev.log 全绿）】
+  · 减数模式: 双 tab 出现 ✓ → 切换 12 相位 chips ✓(联会/四分体/同源分离/无复制/Rec8/
+    双缢裂/配子全列) → 后期Ⅰ探针 t=3.23 phase=4 pat:4/mat:4(同源对半) chiasma 0.99 ✓
+  · 配子相位: quadOp 0.41/dauOp 0.29/memOp 0(三层膜交接) + cells 1/-1 ✓; 截图结构差异
+    5.83%(形态学变化确认) ✓
+  · 悬停: 配子相位 hover → Gamete 卡 ✓; 中期Ⅰ hover → 四分体卡 ✓
+  · 有丝回归: 切回正常 + 动态锚 3 个真实列队位(1.8,0.5,1.1 等) + 后期 6 个两极成对
+    (-3.2/+4.7 等) ✓
+  · MII 姐妹分离: seek 8.4 → cA-cB 偏移差 -2.3~-2.9(深度分离) ✓
+  · 分泌联动: 播放前 sec=0 → 播放 18s sec=1.000(级联点亮驱动爬升) + clock 加速 ✓
+  · 自动播放推进 t 0.19→0.34(SwiftShader 低帧率下仍推进) ✓
+  · 回归: i18n 中/英 ✓ 375×780 scrollW=375 无溢出 ✓
+- 【事故处置】bunx tsc 全项目扫描再次 OOM 杀死 dev server（v34 同款事故重犯 —— 教训:
+  tsc 检查改用 grep 过滤输出后仍需警惕, 最好限定文件清单）; 用 (cmd &) 子 shell 形式
+  setsid 启动恢复（跨命令存活验证 HTTP 200）
+
+Stage Summary:
+- 用户「继续下一阶段开发和持续打磨」落地三项: ①减数分裂全周期 3D 演示（旗舰 —— 两次
+  连续分裂教学叙事: 联会/交叉/马勒定向/同源分离/无复制间期Ⅱ/姐妹分离/四配子, 父/母本
+  双色独立分配直读, 两轮正交缢裂 z/y 轴, 三层膜 crossfade 交接体系）②有丝分裂中期/
+  后期染色体 hover 锚逐条动态跟随（确定性公式重解范式再沉淀）③TGN 分泌流接入引擎
+  （累积时钟速率联动 + 亮度驱动 —— 「信号→分泌增强」可视叙事闭环）
+- 架构沉淀: ①「累积式相位时钟」范式（速率连续可变无跳变 —— 速率受外部驱动调制的粒子
+  系统通用通道）②「运动学同源公式重解」范式（update 与 targets 共享确定性位置解 ——
+  悬停锚与渲染零漂移）③双轴正交缢裂（MI z/MII y —— 两次分裂空间叙事分离可读）
+- 产出: meiosis.tsx（新建）/ secretion.ts（新建）/ mitosis.tsx（chrPosAt 动态锚）/
+  organelles.tsx（sec 参数 + 累积时钟 + 探针）/ virtual-cell-3d.tsx（双 tab + 模式
+  渲染）/ lab-store.ts（divisionMode）/ i18n.tsx（4 键）
+- 未解决/风险: ①减数分裂 perf 模式 4 对同源（真机 5 对）②SwiftShader 低帧率下自动播放
+  推进慢（真机无）③MII 中心体淡出时序 [9.4,9.9] 与四配子核重建 [8.55,9.4] 重叠 ——
+  视觉可接受④交叉滑向端部仅 y 向偏移（未做沿臂滑移 —— 简化可接受）
+- 下阶段建议: ①图版导出多面板版式（2×2 对照: 不同细胞类型/相位拼版 + 共享图注）②减数
+  分裂交叉互换片段色互换（pat/mat 臂段交换视觉化）③神经元树突/轴突条形结构折线命中体
+  接入④引导模式（tour）接入减数分裂站点叙事⑤分泌流事件流（配体注入 → 分泌加速事件卡）

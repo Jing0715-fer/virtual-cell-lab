@@ -24,6 +24,9 @@ interface LabStore {
   /** v15 细胞分裂 3D 演示开关（workspace 视图切换器 Tab 与 cell3d HUD 双入口共用单一真源） */
   mitosisOpen: boolean;
   setMitosisOpen: (v: boolean) => void;
+  /** v36 分裂演示模式: 有丝分裂（2 子细胞） / 减数分裂（4 配子）—— HUD 面板双 tab */
+  divisionMode: 'mitosis' | 'meiosis';
+  setDivisionMode: (m: 'mitosis' | 'meiosis') => void;
 
   // 通路图数据
   graph: PathwayGraph | null;
@@ -83,6 +86,7 @@ export const useLabStore = create<LabStore>((set, get) => ({
   pathwayId: 'hsa04010',
   view: 'cell3d',
   mitosisOpen: false,
+  divisionMode: 'mitosis',
   graph: null,
   graphLoading: false,
   graphError: null,
@@ -125,6 +129,8 @@ export const useLabStore = create<LabStore>((set, get) => ({
   setView: (v) => set({ view: v }),
 
   setMitosisOpen: (v) => set({ mitosisOpen: v }),
+
+  setDivisionMode: (m) => set({ divisionMode: m }),
 
   setGraphState: (loading, error, graph) => set({ graphLoading: loading, graphError: error, graph }),
 

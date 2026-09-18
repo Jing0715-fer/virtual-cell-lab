@@ -1742,6 +1742,39 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   };
 
   /* ---------- 相位感知悬停目标 ---------- */
+  /* v36 染色体确定性位置求解（update 运动学同源公式重解 —— 悬停锚逐条跟随赤道板列队/分离位;
+   *   同 v20 线粒体逐颗跟随范式: 静态近似锚 → 动态真位锚） */
+  const chrPosAt = (ci: number, tA: number): { x: number; y: number; z: number; cZW: number } => {
+    const chr = chromosomes[ci];
+    if (!chr) return { x: 0, y: 0, z: 0, cZW: 0 };
+    const condense = ramp(tA, 0.42, 1.45);
+    const decondense = ramp(tA, 4.3, 5.5);
+    const congress = ramp(tA, 1.4, 2.75);
+    const segregate = ramp(tA, 3.05, 3.85);
+    const clusterTight = ramp(tA, 4.0, 4.6);
+    const PZA = poleZ(tA);
+    const { L: memL, r: rProfile } = membraneProfile(tA);
+    const scl = (1.62 + hash01(`cs${ci}`) * 0.42) * (0.55 + condense * 0.45) * (1 + decondense * 0.12);
+    const armR = chr.armLocal * scl + 0.16;
+    const k = clamp01(congress + chr.delay * 0.12);
+    const v = chr.home.clone().lerp(chr.plate, k);
+    const tightXY = Math.max(0.1, 1 - clusterTight * 0.42 - segregate * 0.34 - decondense * 0.45);
+    const yFac = 1 - clusterTight * 0.3 - segregate * 0.18;
+    const flatZ = 1 - ramp(tA, 1.4, 2.6) * 0.92;
+    const gz = v.z * flatZ;
+    const sepA = clamp01(segregate - chr.delay * 0.3);
+    const reach = PZA * 0.92;
+    const stagW = (0.105 + sepA * 0.1) * scl;
+    const zCapW = Math.max(0.6, memL * 0.9 - armR);
+    const cZW = Math.min(0.08 + sepA * reach, zCapW);
+    const xyLim = Math.max(0.55, rProfile(((gz + cZW) / memL + 1) / 2) * 0.96 - armR - stagW);
+    return {
+      x: THREE.MathUtils.clamp(v.x * tightXY, -xyLim, xyLim),
+      y: THREE.MathUtils.clamp(v.y * yFac, -xyLim, xyLim),
+      z: gz,
+      cZW,
+    };
+  };
   const targets = (phase: number): HoverTarget[] => {
     const T: HoverTarget[] = [];
     const cR = Math.cos(ROT_Y), sR = Math.sin(ROT_Y);
@@ -1954,8 +1987,13 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       push('极微管（中央重叠区）', 'Polar microtubules', 0, 0, 0, 1.8);
     }
     if (phase === 2 || phase === 3) {
-      push('中期染色体（X 形）', 'Metaphase chromosome', 2.1, 1.2, 0, 2.2);
-      push('中期染色体（X 形）', 'Metaphase chromosome', -2.4, -0.8, 0, 2.2);
+      // v36 动态锚: 逐条跟随赤道板列队位（确定性公式重解 —— 每 3 条取 1 避免锚过密）
+      const tA = Math.min(6.9, PHASE_BOUNDS[phase] + 0.4);
+      chromosomes.forEach((_, ci) => {
+        if (ci % 3 !== 0) return;
+        const p = chrPosAt(ci, tA);
+        push('中期染色体（X 形）', 'Metaphase chromosome', p.x, p.y, p.z, 1.5);
+      });
     }
     if (phase === 3) {
       push('赤道板（中期板）', 'Metaphase plate', 0, 0, 0, 2.6);
@@ -1963,8 +2001,14 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       push('动粒微管（张力）', 'Kinetochore fibers', 1.2, 0.7, -2.4, 2.2);
     }
     if (phase === 4) {
-      push('姐妹染色单体分离', 'Sister chromatids', 0, 0, -PZ * 0.55, 2.6);
-      push('姐妹染色单体分离', 'Sister chromatids', 0, 0, PZ * 0.55, 2.6);
+      // v36 动态锚: 逐条跟随姐妹单体分离位（每条染色体 → 两单体锚 gz ± cZW）
+      const tA = Math.min(6.9, PHASE_BOUNDS[4] + 0.4);
+      chromosomes.forEach((_, ci) => {
+        if (ci % 3 !== 0) return;
+        const p = chrPosAt(ci, tA);
+        push('姐妹染色单体分离', 'Sister chromatids', p.x, p.y, p.z - p.cZW, 1.5);
+        push('姐妹染色单体分离', 'Sister chromatids', p.x, p.y, p.z + p.cZW, 1.5);
+      });
       push('纺锤体拉长（极分离）', 'Spindle elongation', 0, 0, 0, 2.4);
     }
     if (phase >= 4) {

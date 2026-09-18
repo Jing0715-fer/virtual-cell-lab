@@ -19,7 +19,7 @@ import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, ChromaticAberration, DepthOfField, Noise, N8AO, Vignette } from '@react-three/postprocessing';
 import type { DepthOfFieldEffect } from 'postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Eye, Tags, Focus, RotateCw, RotateCcw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick, ListTree, Split, Play, Pause, LocateFixed, Camera, Loader2, CheckCircle2 } from 'lucide-react';
+import { Eye, Tags, Focus, RotateCw, RotateCcw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick, ListTree, Split, Play, Pause, LocateFixed, Camera, Loader2, CheckCircle2, Dna } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
@@ -29,6 +29,7 @@ import { layout3D, projectLayoutToPlane, EDGE_COLORS, type CellBodySpec, type Ve
 import { buildGuidedTour, tourIntro } from '@/lib/simulation/guided-tour';
 import { CellBody } from './organelles';
 import { MITOSIS_PHASES, MitosisStage } from './mitosis';
+import { MEIOSIS_PHASES, MeiosisStage } from './meiosis';
 import { FlyToController, HOVER_GROUP_LABEL, HOVER_GROUP_ORDER, type HoverTarget, type LocateReq } from './hover-labels';
 import { MoleculeLayer, KIND_COLORS, type SimSnapshot } from './molecules';
 import { DrugMoleculeLayer } from './drug-molecules';
@@ -551,6 +552,10 @@ export function VirtualCell3D() {
   // v15: mitosis 改由 lab-store 单一真源驱动 —— workspace 视图切换器 Tab 与 HUD 按钮双入口等价
   const mitosis = useLabStore((s) => s.mitosisOpen);
   const setMitosis = useLabStore((s) => s.setMitosisOpen);
+  // v36 分裂演示模式（有丝/减数）—— HUD 面板双 tab 切换, 相位数组/时钟长度随模式切换
+  const divisionMode = useLabStore((s) => s.divisionMode);
+  const setDivisionMode = useLabStore((s) => s.setDivisionMode);
+  const divisionPhases = divisionMode === 'meiosis' ? MEIOSIS_PHASES : MITOSIS_PHASES;
   const [mitoPlaying, setMitoPlaying] = useState(true);
   const [mitoSpeed, setMitoSpeed] = useState(1);
   const [mitoPhase, setMitoPhase] = useState(0);
@@ -579,9 +584,20 @@ export function VirtualCell3D() {
       setOrgIndexOpen(false);
       setCamMode('overview');
       seekMitosis(0, true);
-      // 相机飞近分裂舞台（复用定位飞行: 目标原点, 距离 23 —— 染色体主角可读尺寸）
+      // v36 减数分裂舞台更宽（4 配子拉开 ±yG/±zD）—— 相机拉远一档
       locateNonce.current += 1;
-      setLocateReq({ nonce: locateNonce.current, target: { pos: { x: 0, y: 0, z: 0 }, r: 3, zh: 'mitosis', latin: 'stage' }, dist: 23 });
+      setLocateReq({ nonce: locateNonce.current, target: { pos: { x: 0, y: 0, z: 0 }, r: 3, zh: 'mitosis', latin: 'stage' }, dist: divisionMode === 'meiosis' ? 28 : 23 });
+    }
+  };
+  /** v36 模式切换: 重置相位到 0 并自动开播（两种演示时钟长度不同 —— 相位索引必须归零） */
+  const switchDivisionMode = (m: 'mitosis' | 'meiosis') => {
+    if (m === divisionMode) return;
+    setDivisionMode(m);
+    setMitoPhase(0);
+    seekMitosis(0, true);
+    if (m === 'meiosis') {
+      locateNonce.current += 1;
+      setLocateReq({ nonce: locateNonce.current, target: { pos: { x: 0, y: 0, z: 0 }, r: 3, zh: 'meiosis', latin: 'stage' }, dist: 28 });
     }
   };
   // 网页内全屏（用户需求: 不再调用原生 Fullscreen API 接管整个物理屏幕）:
@@ -983,16 +999,29 @@ export function VirtualCell3D() {
             <Lightformer intensity={0.35} color="#16283a" position={[0, -12, 0]} scale={[14, 14, 1]} rotation-x={Math.PI / 2} />
           </Environment>
           {mitosis ? (
-            <MitosisStage
-              playing={mitoPlaying}
-              speed={mitoSpeed}
-              seek={mitoSeek}
-              onPhaseChange={setMitoPhase}
-              onEnded={() => setMitoPlaying(false)}
-              showAnatomy={showAnatomy}
-              perf={perfMode}
-              onProgress={onMitoProgress}
-            />
+            divisionMode === 'meiosis' ? (
+              <MeiosisStage
+                playing={mitoPlaying}
+                speed={mitoSpeed}
+                seek={mitoSeek}
+                onPhaseChange={setMitoPhase}
+                onEnded={() => setMitoPlaying(false)}
+                showAnatomy={showAnatomy}
+                perf={perfMode}
+                onProgress={onMitoProgress}
+              />
+            ) : (
+              <MitosisStage
+                playing={mitoPlaying}
+                speed={mitoSpeed}
+                seek={mitoSeek}
+                onPhaseChange={setMitoPhase}
+                onEnded={() => setMitoPlaying(false)}
+                showAnatomy={showAnatomy}
+                perf={perfMode}
+                onProgress={onMitoProgress}
+              />
+            )
           ) : (
             <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} cutaway={clipView} sim={sim} snapPlane={snapPlane} locate={locateReq} onHoverTargets={onHoverTargets} />
           )}
@@ -1343,16 +1372,45 @@ export function VirtualCell3D() {
 
       {/* v14 底部中央: 细胞分裂演示控制台（相位时间轴 + 播放/速度/重播 + 双语描述卡） */}
       {mitosis && (
-        <div className="absolute bottom-3 left-1/2 z-20 w-[min(94%,640px)] -translate-x-1/2">
+        <div className="absolute bottom-3 left-1/2 z-20 w-[min(94%,680px)] -translate-x-1/2">
           <div className="rounded-xl border border-teal-500/25 bg-slate-950/88 p-3 shadow-[0_8px_32px_rgba(0,0,0,0.45)] backdrop-blur-lg">
             <div className="flex items-center gap-2">
-              <Split className="h-3.5 w-3.5 shrink-0 text-teal-400" />
-              <span className="text-[12px] font-semibold text-slate-100">{t('mit.title')}</span>
+              {divisionMode === 'meiosis' ? <Dna className="h-3.5 w-3.5 shrink-0 text-fuchsia-300" /> : <Split className="h-3.5 w-3.5 shrink-0 text-teal-400" />}
+              {/* v36 双模式 tab: 有丝分裂（2 子细胞）/ 减数分裂（两次分裂 → 4 配子） */}
+              <div className="flex items-center overflow-hidden rounded-lg border border-white/10" role="tablist">
+                <button
+                  role="tab"
+                  aria-selected={divisionMode === 'mitosis'}
+                  onClick={() => switchDivisionMode('mitosis')}
+                  className={`flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium transition ${
+                    divisionMode === 'mitosis'
+                      ? 'bg-teal-500/25 text-teal-100'
+                      : 'bg-white/[0.03] text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  <Split className="h-2.5 w-2.5" />
+                  <span className="hidden sm:inline">{t('mei.tabMitosis')}</span>
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={divisionMode === 'meiosis'}
+                  onClick={() => switchDivisionMode('meiosis')}
+                  className={`flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium transition ${
+                    divisionMode === 'meiosis'
+                      ? 'bg-fuchsia-500/25 text-fuchsia-100'
+                      : 'bg-white/[0.03] text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  <Dna className="h-2.5 w-2.5" />
+                  <span className="hidden sm:inline">{t('mei.tabMeiosis')}</span>
+                </button>
+              </div>
+              <span className="text-[12px] font-semibold text-slate-100">{divisionMode === 'meiosis' ? t('mei.title') : t('mit.title')}</span>
               <span className="shrink-0 rounded border border-teal-500/30 bg-teal-500/10 px-1.5 py-px font-mono text-[8px] leading-tight text-teal-300">
-                {Math.min(mitoPhase + 1, MITOSIS_PHASES.length)} / {MITOSIS_PHASES.length}
+                {Math.min(mitoPhase + 1, divisionPhases.length)} / {divisionPhases.length}
               </span>
               <span className="hidden font-mono text-[8px] italic text-slate-500 sm:inline">
-                {MITOSIS_PHASES[mitoPhase]?.latin}
+                {divisionPhases[mitoPhase]?.latin}
               </span>
               <div className="ml-auto flex items-center gap-1">
                 <button
@@ -1400,16 +1458,18 @@ export function VirtualCell3D() {
               </div>
             </div>
 
-            {/* 相位时间轴 chips（点击跳转） */}
+            {/* 相位时间轴 chips（点击跳转） —— v36 动态相位数组（有丝 8 / 减数 12） */}
             <div className="lab-scrollbar mt-2.5 flex items-center gap-1 overflow-x-auto pb-0.5">
-              {MITOSIS_PHASES.map((p, i) => (
+              {divisionPhases.map((p, i) => (
                 <button
                   key={p.key}
                   onClick={() => seekMitosis(i)}
                   title={lang === 'zh' ? p.descZh : p.descEn}
                   className={`shrink-0 rounded-lg border px-2 py-1 text-[9.5px] font-medium transition ${
                     i === mitoPhase
-                      ? 'border-teal-400/60 bg-teal-500/20 text-teal-100 shadow-[0_0_12px_rgba(45,212,191,0.25)]'
+                      ? divisionMode === 'meiosis'
+                        ? 'border-fuchsia-400/60 bg-fuchsia-500/20 text-fuchsia-100 shadow-[0_0_12px_rgba(232,121,249,0.25)]'
+                        : 'border-teal-400/60 bg-teal-500/20 text-teal-100 shadow-[0_0_12px_rgba(45,212,191,0.25)]'
                       : i < mitoPhase
                         ? 'border-teal-500/25 bg-teal-500/8 text-teal-300/70 hover:bg-teal-500/15'
                         : 'border-white/10 bg-white/[0.03] text-slate-500 hover:text-slate-300'
@@ -1428,14 +1488,14 @@ export function VirtualCell3D() {
 
             {/* 当前相位双语描述（关键分子事件） */}
             <p className="mt-2 text-[10.5px] leading-relaxed text-slate-300">
-              <span className="mr-1.5 font-semibold text-teal-300">{lang === 'zh' ? MITOSIS_PHASES[mitoPhase]?.zh : MITOSIS_PHASES[mitoPhase]?.en}</span>
+              <span className={`mr-1.5 font-semibold ${divisionMode === 'meiosis' ? 'text-fuchsia-300' : 'text-teal-300'}`}>{lang === 'zh' ? divisionPhases[mitoPhase]?.zh : divisionPhases[mitoPhase]?.en}</span>
               <span className="text-slate-500">·</span>
-              <span className="ml-1.5">{lang === 'zh' ? MITOSIS_PHASES[mitoPhase]?.descZh : MITOSIS_PHASES[mitoPhase]?.descEn}</span>
+              <span className="ml-1.5">{lang === 'zh' ? divisionPhases[mitoPhase]?.descZh : divisionPhases[mitoPhase]?.descEn}</span>
             </p>
-            {!mitoPlaying && mitoPhase >= 6 && (
+            {!mitoPlaying && mitoPhase >= divisionPhases.length - 2 && (
               <p className="mt-1 flex items-center gap-1 text-[9px] text-amber-300/80">
                 <RotateCcw className="h-2.5 w-2.5" />
-                {t('mit.endHint')}
+                {divisionMode === 'meiosis' ? t('mei.endHint') : t('mit.endHint')}
               </p>
             )}
           </div>

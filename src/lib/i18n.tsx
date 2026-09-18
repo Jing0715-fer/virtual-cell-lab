@@ -124,6 +124,11 @@ export const T: Record<string, Entry> = {
   'mit.replay': { zh: '重播', en: 'Replay' },
   'mit.speed': { zh: '速度', en: 'Speed' },
   'mit.endHint': { zh: '一轮完成 — 点击重播', en: 'Cycle complete — hit replay' },
+  // v36 减数分裂演示（两次分裂 → 4 配子）
+  'mei.title': { zh: '减数分裂 · 3D 演示', en: 'Meiosis · 3D demo' },
+  'mei.tabMitosis': { zh: '有丝分裂', en: 'Mitosis' },
+  'mei.tabMeiosis': { zh: '减数分裂', en: 'Meiosis' },
+  'mei.endHint': { zh: '两次分裂完成 · 4 配子 — 点击重播', en: 'Two divisions done · 4 gametes — hit replay' },
   'cam.overview': { zh: '全景', en: 'Overview' },
   'cam.membrane': { zh: '质膜近景', en: 'Membrane' },
   'cam.nucleus': { zh: '核内视角', en: 'Nucleus' },
