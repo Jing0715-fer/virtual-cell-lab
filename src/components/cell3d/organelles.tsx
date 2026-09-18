@@ -2009,6 +2009,73 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
      * → 剖面视图中高尔基以其真实 3D 形态呈现于「核旁窗口」; 完整视图（剖切关闭）恢复常规序列 46/47。 */
     golgi.renderOrder = cutaway ? 100 : 46;
     g.add(golgi);
+    /* v34 CGN/TGN 极性管网（用户「pathway/细胞精细度打磨」轮）:
+     *   真实高尔基体两极各有管网状「门房」—— 顺面 CGN（cis-Golgi network, 细管, 接收 ER 来的
+     *   COPII 小泡, 与 ER 薰衣草同色系建立「入货侧」视觉叙事）与反面 TGN（trans-Golgi network,
+     *   更粗的膨大管网, 分选出口 → 分泌泡/网格蛋白囊泡/溶酶体酶航线）。
+     *   几何: 沿囊盘椭圆轮廓的参数弧管（rr 径向 45-85% + y 微波动）—— 「贴着囊堆两极的弧形管网」
+     *   剪影, 与纯扁囊堆拉开极性层次; junction 三通小球延续 SER 管系语言。 */
+    const netParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4; color?: THREE.Color }[] = [];
+    const cgnCurves: THREE.Vector3[][] = [];
+    const tgnCurves: THREE.Vector3[][] = [];
+    const polarNetPts = (baseY: number, seed: string, rr0: number, rr1: number, wob: number): THREE.Vector3[] => {
+      const pts: THREE.Vector3[] = [];
+      const a0 = hash01(seed, 11) * Math.PI * 2;
+      const arc = Math.PI * (1.15 + hash01(seed, 13) * 0.55); // 大弧 ~1.2-1.7π → 环状管网读感
+      for (let k = 0; k <= 6; k++) {
+        const t = k / 6;
+        const ang = a0 + t * arc;
+        const rr = GOLGI_SEMI_B * (rr0 + hash01(seed, k + 3) * (rr1 - rr0));
+        pts.push(new THREE.Vector3(
+          Math.cos(ang) * rr * GOLGI_ASPECT * (0.9 + Math.sin(t * Math.PI) * 0.12),
+          baseY + Math.sin(t * Math.PI) * wob + (hash01(seed, k + 40) - 0.5) * wob * 0.5,
+          Math.sin(ang) * rr,
+        ));
+      }
+      return pts;
+    };
+    {
+      const cgnN = perf ? 2 : 3;
+      const tgnN = perf ? 2 : 3;
+      // CGN: cis 面下方细管（radius 0.068 —— 与 SER 0.085 同语言更纤细）+ 薰衣草亮族（erSheetHi 同色）
+      const cgnY = -GOLGI_STACK_H * 0.5 - 0.17 * GOLGI_SCALE;
+      for (let i = 0; i < cgnN; i++) {
+        const pts = polarNetPts(cgnY, `cgn${i}`, 0.42 + i * 0.09, 0.7 + i * 0.06, 0.13 * GOLGI_SCALE);
+        cgnCurves.push(pts);
+        netParts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.068 * GOLGI_SCALE, 7)) });
+      }
+      // TGN: trans 面上方膨大粗管（radius 0.105 —— 比 CGN 粗 55%, 出口「膨大」极性剪影）
+      const tgnY = GOLGI_STACK_H * 0.5 + 0.21 * GOLGI_SCALE;
+      for (let i = 0; i < tgnN; i++) {
+        const pts = polarNetPts(tgnY, `tgn${i}`, 0.5 + i * 0.08, 0.82 + i * 0.05, 0.17 * GOLGI_SCALE);
+        tgnCurves.push(pts);
+        netParts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 26, 0.105 * GOLGI_SCALE, 8)) });
+      }
+      // junction 三通小球（管网交接读感 —— 与 SER 管系同语言）
+      const jGeo = track(new THREE.SphereGeometry(0.1 * GOLGI_SCALE, 8, 6));
+      for (let j = 0; j < 5; j++) {
+        const onCgn = j < 3;
+        const curves = onCgn ? cgnCurves : tgnCurves;
+        const pts = curves[j % curves.length];
+        const p = pts[Math.floor(hash01(`gnj${j}`) * (pts.length - 2)) + 1];
+        netParts.push({ geo: jGeo, matrix: new THREE.Matrix4().setPosition(p.x, p.y, p.z) });
+      }
+      const net = new THREE.Mesh(track(mergeGeoms(netParts)), mat({
+        // CGN/TGN 同族半透明藕荷（golgiVesicle 中调 —— 与扁囊堆极性渐变衔接; CGN/TGN 双色区分交给几何层次与出芽方向）
+        color: REF.golgiVesicle,
+        transmission: transOn ? 0.12 : 0,
+        thickness: 0.4,
+        roughness: 0.3,
+        opacity: transOn ? 1 : 0.62,
+        clearcoat: 0.5,
+        emissive: '#80749c',
+        emissiveIntensity: 0.5,
+        sheen: 0.5,
+        sheenColor: '#c8c0dc',
+      }));
+      net.renderOrder = cutaway ? 100 : 46;
+      g.add(net);
+    }
     // trans 面出芽囊泡（反面网 TGN —— 衣被蛋白斑点, 大且多）
     const budGeo = track(new THREE.SphereGeometry(1, 12, 10));
     const budMat = mat({
@@ -2034,7 +2101,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         mm.makeScale(r, r, r);
         mm.setPosition(
           Math.cos(ang) * rr * GOLGI_ASPECT,
-          GOLGI_STACK_H * 0.5 + (0.08 + hash01(`gv${v}`, 5) * 0.3) * GOLGI_SCALE,
+          // v34: TGN 管网（+0.21*scale 处）上方出芽 —— 「从 TGN 分选出口萌出」位语义
+          GOLGI_STACK_H * 0.5 + (0.44 + hash01(`gv${v}`, 5) * 0.3) * GOLGI_SCALE,
           Math.sin(ang) * rr,
         );
         buds.setMatrixAt(v, mm);
@@ -2066,7 +2134,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         mm.makeScale(r, r, r);
         mm.setPosition(
           Math.cos(ang) * rr * GOLGI_ASPECT,
-          -GOLGI_STACK_H * 0.5 - (0.1 + hash01(`cgv${v}`, 5) * 0.16) * GOLGI_SCALE,
+          // v34: CGN 管网（-0.17*scale 处）下方入货 —— 「ER 来的 COPII 小泡抵达 CGN」位语义
+          -GOLGI_STACK_H * 0.5 - (0.36 + hash01(`cgv${v}`, 5) * 0.22) * GOLGI_SCALE,
           Math.sin(ang) * rr,
         );
         cisBuds.setMatrixAt(v, mm);
@@ -2085,8 +2154,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       const pv = new THREE.Vector3(p.x, p.y, p.z);
       /* v21 外包络: 堆轴近径向（GOLGI_AXIS 与 GOLGI_DIR 夹角 ~23°）—— 径向占用 = 半堆高 + 短半轴分量
        * + 长轴切向投影余量; 取保守值（半堆高 + 短半轴 0.55 + 0.3 冗余）而非长半轴全量（旧算法会把
-       * 切向延伸误算成径向 → 囊堆被无谓拉近, 破坏「脱离核旁」语义）。 */
-      const need = GOLGI_STACK_H * 0.5 + GOLGI_SEMI_B * 0.55 + 0.3;
+       * 切向延伸误算成径向 → 囊堆被无谓拉近, 破坏「脱离核旁」语义）。
+       * v34: +0.9*scale —— CGN/TGN 管网 + 出芽囊泡在两极的额外延伸（TGN 芽顶 ≈ 半堆高 + 0.74*scale）。 */
+      const need = GOLGI_STACK_H * 0.5 + 0.9 * GOLGI_SCALE + GOLGI_SEMI_B * 0.5 + 0.26;
       const pl = pv.length();
       if (pl > 1e-6) {
         const lim = cellSurf(pv.clone().normalize(), R, SHAPE, -0.55) - need;
@@ -2105,19 +2175,43 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       zh: '高尔基体（顺→反）', latin: 'Golgi apparatus',
     });
     /* v21 悬停锚点群: 扁长囊堆屏幕足迹大（长轴 ~4.9 单位 ≈ 180px）远超 64px 捕获钳 ——
-     *   单中心锚留洞; 沿堆轴三锚（cis 中 / trans）+ 长轴两端两锚 → 任意指向囊堆均可命中。 */
+     *   单中心锚留洞; 沿堆轴三锚（cis 中 / trans）+ 长轴两端两锚 → 任意指向囊堆均可命中。
+     * v34 极性分区: cis 锚 / trans 锚升级为 CGN / TGN 专词条（入货码头 / 分选出口教学叙述）,
+     *   + CGN/TGN 管网全段折线命中体（localToWorld 变换到世界坐标 —— 管身任意位置可指认）。 */
     {
       const axisV = GOLGI_AXIS.clone();
       const midP = new THREE.Vector3(p.x, p.y, p.z);
-      const cisP = midP.clone().addScaledVector(axisV, -GOLGI_STACK_H * 0.34);
-      const transP = midP.clone().addScaledVector(axisV, GOLGI_STACK_H * 0.34);
+      const cisP = midP.clone().addScaledVector(axisV, -(GOLGI_STACK_H * 0.5 + 0.17 * GOLGI_SCALE));
+      const transP = midP.clone().addScaledVector(axisV, GOLGI_STACK_H * 0.5 + 0.21 * GOLGI_SCALE);
       // 长轴方向: 堆轴 × 世界 up 叉乘（局部 x 在世界中的近似方向）
       const longV = new THREE.Vector3().crossVectors(axisV, new THREE.Vector3(0, 1, 0)).normalize();
       if (longV.lengthSq() < 0.01) longV.set(1, 0, 0);
       const endA = midP.clone().addScaledVector(longV, GOLGI_DISK_R * 0.62);
       const endB = midP.clone().addScaledVector(longV, -GOLGI_DISK_R * 0.62);
-      for (const [ap, ar] of [[midP, 1.5], [cisP, 1.35], [transP, 1.35], [endA, 1.2], [endB, 1.2]] as [THREE.Vector3, number][]) {
+      for (const [ap, ar] of [[midP, 1.45], [endA, 1.2], [endB, 1.2]] as [THREE.Vector3, number][]) {
         hover.push({ pos: { x: ap.x, y: ap.y, z: ap.z }, r: ar, zh: '高尔基体（顺→反）', latin: 'Golgi apparatus', group: 'endomembrane' });
+      }
+      hover.push({ pos: { x: cisP.x, y: cisP.y, z: cisP.z }, r: 1.3, zh: '高尔基体·顺面网 CGN', latin: 'CGN · cis-Golgi network', group: 'endomembrane' });
+      hover.push({ pos: { x: transP.x, y: transP.y, z: transP.z }, r: 1.3, zh: '高尔基体·反面网 TGN', latin: 'TGN · trans-Golgi network', group: 'endomembrane' });
+      // v34 CGN/TGN 管网折线命中体（局部 → 世界: g 位姿已定, 手动 updateMatrixWorld 后 localToWorld）
+      g.updateMatrixWorld(true);
+      for (const [curves, zh, latin] of [
+        [cgnCurves, '高尔基体·顺面网 CGN', 'CGN · cis-Golgi network'],
+        [tgnCurves, '高尔基体·反面网 TGN', 'TGN · trans-Golgi network'],
+      ] as [THREE.Vector3[][], string, string][]) {
+        for (const pts of curves) {
+          const world = pts.map((v) => g.localToWorld(v.clone()));
+          const mid = world[Math.floor(world.length / 2)];
+          hover.push({
+            pos: { x: mid.x, y: mid.y, z: mid.z },
+            r: 1.0,
+            poly: world.map((v) => ({ x: v.x, y: v.y, z: v.z })),
+            hitPx: 12,
+            zh,
+            latin,
+            group: 'endomembrane',
+          });
+        }
       }
     }
   }

@@ -357,7 +357,7 @@ export function extractCoreSubgraph(
     const e = entryById.get(id);
     if (!e || !selectable(e)) continue;
     const cls = classOf(e);
-    const outs = outAdj.get(id) ?? [];
+    const outs = outAdj.get(id) ?? new Set<number>();
     if (outs.size === 0) continue;
     // 已有下游出路（出边目标入选）→ 无需拯救
     let hasSelectedOut = false;
@@ -386,7 +386,7 @@ export function extractCoreSubgraph(
     if (!e || !selectable(e)) continue;
     const cls = classOf(e);
     if (!['kinase', 'adapter', 'gtpase', 'phosphatase'].includes(cls.kind)) continue;
-    const outs = outAdj.get(id) ?? [];
+    const outs = outAdj.get(id) ?? new Set<number>();
     if (outs.size === 0) continue;
     let hasSelectedOut = false;
     for (const o of outs) if (selected.has(o)) { hasSelectedOut = true; break; }
@@ -413,7 +413,7 @@ export function extractCoreSubgraph(
     if (!e || !selectable(e)) continue;
     const cls = classOf(e);
     if (cls.kind !== 'ligand') continue;
-    const outs = outAdj.get(id) ?? [];
+    const outs = outAdj.get(id) ?? new Set<number>();
     if (outs.size === 0) continue; // 图内本无下游（输出型配体如 IFNB1）
     let hasSelectedOut = false;
     for (const o of outs) if (selected.has(o)) { hasSelectedOut = true; break; }
@@ -436,7 +436,7 @@ export function extractCoreSubgraph(
     if (!e || !selectable(e)) continue;
     const cls = classOf(e);
     if (TERMINAL_NODE_KINDS.has(cls.kind)) continue;
-    const outs = outAdj.get(id) ?? [];
+    const outs = outAdj.get(id) ?? new Set<number>();
     if (outs.size === 0) continue;
     let hasSelectedOut = false;
     for (const o of outs) if (selected.has(o)) { hasSelectedOut = true; break; }

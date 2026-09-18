@@ -1450,6 +1450,61 @@ export function VirtualCell3D() {
               {/* 分子功能注释 */}
               <p className="px-4 pb-1 pt-2 text-[11.5px] leading-[1.8] text-slate-300">{tourStep.text}</p>
 
+              {/* v34 末站总结卡: 级联完整点亮 —— mini 站点时间线（全点亮）+ 续跑/重讲双出口 */}
+              {tourIdx >= tour.length - 1 && tour.length > 1 && (
+                <div className="mx-4 mt-3 overflow-hidden rounded-xl border border-emerald-500/30 bg-gradient-to-b from-emerald-950/30 via-teal-950/20 to-transparent">
+                  {/* 顶部荧光缘 */}
+                  <div className="h-px w-full bg-gradient-to-r from-transparent via-emerald-400/60 to-transparent" />
+                  <div className="px-3 pb-3 pt-2.5">
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles className="h-3.5 w-3.5 text-emerald-300" />
+                      <span className="text-[11.5px] font-semibold text-emerald-200">
+                        {lang === 'zh' ? '完整级联已点亮' : 'Cascade fully lit'}
+                      </span>
+                      <span className="ml-auto font-mono text-[9px] tabular-nums text-emerald-400/70">
+                        {tour.length} {lang === 'zh' ? '站' : 'stops'} · {graph.meta.id}
+                      </span>
+                    </div>
+                    {/* mini 站点时间线: 每站一点全亮 + 分子标签 + 流向连线 */}
+                    <div className="mt-2.5 flex items-start gap-0 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                      {tour.map((s, i) => (
+                        <div key={s.nodeId} className="flex shrink-0 items-start">
+                          <div className="flex w-[54px] flex-col items-center gap-1">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_7px_rgba(52,211,153,0.9)]" />
+                            <span className="w-full truncate text-center font-mono text-[8px] leading-tight text-emerald-200/75" title={s.label}>
+                              {s.label}
+                            </span>
+                          </div>
+                          {i < tour.length - 1 && (
+                            <div className="mt-[3px] h-px w-3.5 shrink-0 bg-gradient-to-r from-emerald-400/55 to-emerald-400/25" />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {/* 双出口: 续跑动态流 / 重新引导 */}
+                    <div className="mt-2.5 flex gap-2">
+                      <button
+                        onClick={() => {
+                          openTour(false);
+                          useLabStore.getState().play();
+                        }}
+                        className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-emerald-500/45 bg-emerald-500/20 px-3 py-1.5 text-[10.5px] font-medium text-emerald-200 transition hover:bg-emerald-500/30 hover:shadow-[0_0_16px_rgba(52,211,153,0.35)]"
+                      >
+                        <Play className="h-3 w-3" />
+                        {lang === 'zh' ? '退出并播放动态流' : 'Exit & play'}
+                      </button>
+                      <button
+                        onClick={() => openTour(true)}
+                        className="flex items-center justify-center gap-1.5 rounded-lg border border-white/12 bg-white/5 px-3 py-1.5 text-[10.5px] text-slate-400 transition hover:text-slate-200"
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        {lang === 'zh' ? '重新引导' : 'Restart'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* 控制条: 分段进度 + 自动倒计时环 + 逐站导航 */}
               <div className="mt-2 flex items-center gap-2 border-t border-white/8 bg-white/[0.02] px-3 py-2">
                 <div className="flex flex-1 items-center gap-[3px] overflow-x-auto">

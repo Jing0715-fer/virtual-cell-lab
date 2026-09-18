@@ -325,6 +325,39 @@ export function PathwayMapView() {
         </div>
       </div>
 
+      {/* v34 图例（右下角）: 四类节点视觉语义速读 —— 首次看 KEGG 原版布局的解码钥匙 */}
+      <div className="absolute bottom-3 right-3 select-none rounded-lg border border-white/10 bg-slate-950/85 px-2.5 py-2 backdrop-blur">
+        <div className="mb-1.5 text-[8px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          {lang === 'zh' ? '图例' : 'Legend'}
+        </div>
+        <div className="grid grid-cols-1 gap-1.5 text-[9.5px] text-slate-400">
+          <span className="flex items-center gap-1.5">
+            <span className="h-3 w-5 shrink-0 rounded-[3px] border-[1.5px] border-emerald-400 bg-emerald-500/35" />
+            {lang === 'zh' ? '演示子图分子（激活发光）' : 'Sim subgraph (active)'}
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-3 w-5 shrink-0 rounded-[3px] border-[0.9px] border-slate-500 bg-slate-800" />
+            {lang === 'zh' ? '通路其余分子（可点击）' : 'Other map entries'}
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-3 w-5 shrink-0 rounded-full border-[1.5px] border-amber-600 bg-amber-500/25" />
+            {lang === 'zh' ? '化合物 / 代谢物' : 'Compound / metabolite'}
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-3 w-5 shrink-0 rounded-[3px] border border-teal-600 border-dashed bg-teal-800/25" />
+            {lang === 'zh' ? '联通通路（可跳转）' : 'Linked pathway'}
+          </span>
+        </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-white/8 pt-1.5 text-[9px] text-slate-500">
+          {([['#34d399', lang === 'zh' ? '激活' : 'activation'], ['#fb7185', lang === 'zh' ? '抑制' : 'inhibition'], ['#fbbf24', lang === 'zh' ? '表达' : 'expression'], ['#64748b', lang === 'zh' ? '结合' : 'binding'], ['#2dd4bf', lang === 'zh' ? '间接' : 'indirect']] as [string, string][]).map(([c, lab]) => (
+            <span key={c} className="flex items-center gap-1">
+              <span className="h-[2px] w-3.5 rounded-full" style={{ background: c }} />
+              {lab}
+            </span>
+          ))}
+        </div>
+      </div>
+
       {/* 非核心分子信息卡（点击全图中未进入演示子图的 gene/compound 节点） */}
       {pick && (
         <div

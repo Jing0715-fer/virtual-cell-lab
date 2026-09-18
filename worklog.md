@@ -2495,3 +2495,62 @@ Stage Summary:
   已有快照管道, 补 HUD 入口与图注版式）③减数分裂演示（复用相位时钟+三网体系范式）④其余
   条形结构（神经元树突/轴突等）折线命中体接入 ⑤引导模式结束后自动弹出「完整级联已点亮」
   总结卡（复用 tourIntro 版式）
+
+---
+Task ID: 48
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户第 21 轮需求 —— 继续打磨 pathway 展示的精细度和美观度, 打磨整个项目尤其是细节, 打磨 3D 细胞的精细度
+
+Work Log:
+- 【3D 细胞精细度: 高尔基体 CGN/TGN 极性管网（organelles.tsx +110 行）】
+  · 几何: polarNetPts() 参数弧管工厂（沿囊盘椭圆轮廓: rr 径向 45-85% + y 微波动 + 大弧
+    1.2-1.7π 环状读感）; cis 面下方 CGN 细管 ×3（r 0.068, 与 SER 0.085 同语言更纤细）,
+    trans 面上方 TGN 膨大粗管 ×3（r 0.105, 比 CGN 粗 55% 「出口膨大」极性剪影）;
+    junction 三通小球 ×5 延续 SER 管系语言; 材质 golgiVesicle 藕荷中调半透明
+  · 位语义: trans 出芽囊泡挪至 TGN 管上方（+0.44~0.74 scale, 「从 TGN 分选出口萌出」）,
+    cis 入货小泡挪至 CGN 管下方（-0.36~-0.58, 「ER 来的 COPII 抵达 CGN」）
+  · 外包络: need + 0.9*scale（管网+出芽在两极的额外延伸, TGN 芽顶 ≈ 半堆高+0.74 scale）
+  · 悬停分区: cis/trans 点锚升级 CGN/TGN 专词条（zh/latin/note）+ 管网全段折线命中体
+    （localToWorld 世界变换, hitPx 12, 管身任意位置可指认）; ORG_INFO 新增 CGN/TGN 双语
+    科学描述（入货码头/分选出口教学叙述）
+- 【pathway 美观度: 引导结束总结卡（virtual-cell-3d.tsx +55 行）】
+  · 末站（tourIdx >= length-1）渲染「完整级联已点亮」: Sparkles 标题 + mini 站点时间线
+    （10 点全亮 emerald + 分子 label + 流向渐变连线, 横向滚动隐藏滚动条）+ 双出口
+    （「退出并播放动态流」→ openTour(false)+play() 续跑动态模拟 / 「重新引导」→ openTour(true)）
+- 【pathway 美观度: 2D 通路图图例（pathway-map-view.tsx +33 行）】
+  · 右下角双语图例: 四类节点视觉语义（演示子图分子翡翠发光框/其余分子灰框/化合物琥珀圆/
+    联联通路 teal 虚线框）+ 边类型色标（激活翡翠/抑制玫红/表达琥珀/结合石板/间接青）
+- 【编译卫生: tsc src 100% 干净（历史首清）】
+  · molecular-notes.ts: NODE_NOTES 15 个 + CURATED_EVENTS 9 个重复键（同分子跨通路章节
+    重复注释, 运行时后者覆盖前者 —— 删除先出现行, 零行为变化纯编译卫生）
+  · subgraph.ts: outAdj.get(id) ?? [] 的 never[] 无 .size → ?? new Set<number>()（4 处）
+- 【QA（agent-browser 交互级; lint 零错误; tsc src 零错误; console/page errors 零）】
+  · 目录: 「28 个细胞器」含三个高尔基词条（总述/CGN/TGN）✓
+  · 定位 CGN → 特写截图 qa-shots/task48-golgi.png; 中心区藕荷族 32.1%, 三带分布
+    顶 24.7%/中 25.7%/底 43.0%（管网渲染于囊堆两极确认）✓
+  · 网格扫掠 64 点: 悬停命中卡「高尔基体·顺面网 CGN」出现（折线命中体 localToWorld 正确）✓
+  · 引导: 开卡 01/1/10 → 进度条直达 FOS（10/10）→ 总结卡渲染（完整级联已点亮+10 站+
+    双按钮）→ 点「退出并播放动态流」→ 引导退出+running（暂停按钮出现）+T+2.5s 推进 ✓
+    （截图 qa-shots/task48-tour-summary.png; 注意: 9 次同步 click 因 setState 闭包只生效
+    1 次 —— 跳站用进度条 aria-label「跳转到 FOS」按钮）
+  · 2D 图谱: 图例 9 项全渲染（截图 qa-shots/task48-map-legend.png）✓
+  · 回归: 双语 中/EN → EN h1 → 切回 zh ✓; 375×780 scrollW=clientW=375 无横向溢出 ✓
+- 【事故处置】bunx tsc 全项目扫描内存峰值致 dev server OOM 被杀（worklog v32 「勿重启」
+  约束被打破一次, 无奈重启）; 重启后全链路重验通过。后续 tsc 检查用 grep 过滤 src/ 目录,
+  避免全项目扫描
+
+Stage Summary:
+- 用户三项诉求落地: ①pathway 精细度/美观度（引导收尾叙事完整化 + 2D 图解码钥匙）②3D 细胞
+  精细度（高尔基体从「纯扁囊堆」升级为「CGN 入货码头 → 扁囊堆加工 → TGN 分选出口」全极性
+  叙事, 悬停分区教学化）③全项目细节（tsc src 100% 干净, 37 个历史类型错误清零）
+- 架构沉淀: 「局部坐标系折线命中体 → localToWorld 世界变换」范式（管状细胞器悬停全段命中
+  的通用通道, SER 范式的坐标系泛化版）
+- 产出: organelles.tsx（CGN/TGN 管网+分区悬停）/ virtual-cell-3d.tsx（总结卡）/
+  pathway-map-view.tsx（图例）/ hover-labels.tsx（ORG_INFO 词条）/
+  molecular-notes.ts（重复键清零）/ subgraph.ts（类型修复）
+- 未解决/风险: ①dev server 重启后缓冲丢失（Chromium 内存压力仍在, tsc 全扫勿再跑）②无头
+  环境 SwiftShader 低帧率（真机无）③VLM 持续 429
+- 下阶段建议: ①中期染色体 hover 锚随姐妹染色单体分离动态跟随（mitosis.tsx, 金盘式动态锚）②
+  「发表模式」整页截图导出（scene-capture 快照管道 + HUD 入口 + 图注版式）③减数分裂演示
+  （复用相位时钟+三网体系）④神经元树突/轴突条形结构折线命中体接入 ⑤TGN 出芽囊泡「分泌
+  泡沿轨运输到质膜」的动态流演示（结合 mrna-flow 范式）

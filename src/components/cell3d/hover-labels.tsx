@@ -84,6 +84,8 @@ export const ORG_INFO: Record<string, { zh: string; en: string }> = {
   'Cytoplasmic actin network': { zh: '胞质肌动蛋白网 · 皮层下应力纤维与细丝交织的收缩网络', en: 'Cytoplasmic actin — stress fibers and thin filaments interweaving' },
   'Smooth ER': { zh: '无核糖体管网 · 脂质合成与 Ca²⁺ 储库', en: 'Ribosome-free tubules — lipid synthesis, Ca²⁺ store' },
   'Golgi apparatus': { zh: '顺→反扁平囊堆 · 糖基化修饰与分选枢纽', en: 'cis→trans stack — glycosylation and sorting hub' },
+  'CGN · cis-Golgi network': { zh: '顺面高尔基网 · 入货码头 —— 接收内质网 COPII 运输小泡, 首轮糖基化检查站', en: 'Cis entry network receiving ER-derived COPII carriers' },
+  'TGN · trans-Golgi network': { zh: '反面高尔基网 · 分选出口 —— 分泌泡/网格蛋白囊泡/溶酶体酶三条航线在此分运', en: 'Trans exit hub — secretory, clathrin and lysosomal routes' },
   'Transport vesicle': { zh: '膜运输载体 · ER→高尔基→质膜航线', en: 'Membrane carriers between compartments' },
   Lysosome: { zh: 'pH≈4.5 酸性水解酶仓 · 降解与回收', en: 'Acidic hydrolase compartment for turnover' },
   'Multivesicular body': { zh: '多泡体（晚期内体）· ESCRT 分选出芽腔内囊泡, 送抵溶酶体降解', en: 'Late endosome — ESCRT-sorted intraluminal vesicles fated for lysosomal degradation' },
