@@ -66,6 +66,8 @@ export interface CellBodyBuild {
   labels: AnatomyLabel[];
   /** v14 悬停标记目标（全细胞器 —— 含多锚点同名目标, 感应域并集） */
   hover: HoverTarget[];
+  /** v54 剖面投影分子集写入（示教锚面内避让 —— SceneContents 布局变化时调用, 零重建） */
+  setPlaneMols: (mols: AvoidPoint[] | null) => void;
   dispose: () => void;
 }
 
@@ -664,7 +666,14 @@ function surf(dir: THREE.Vector3, R: number, freq: number, amp: number, seed: nu
 
 /* ============ 主构建 ============ */
 
-export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, perf = false, cutaway = false): CellBodyBuild {
+export interface AvoidPoint {
+  x: number;
+  y: number;
+  z: number;
+  r: number;
+}
+
+export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, perf = false, cutaway = false, avoid?: AvoidPoint[]): CellBodyBuild {
   const group = new THREE.Group();
   const R = spec.membraneR;
   const N = spec.nucleusR;
@@ -968,6 +977,89 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     return new THREE.Vector3(d.x * t, d.y * t, d.z * t);
   };
 
+  /* ============ v54 空旷域净空引擎（用户「避免细胞器堆叠或和 pathway 堆叠，尽量在空旷
+   * 的地方展示游离的细胞器」） ============
+   * 真源: avoidPts/avoidRads 足迹登记表 —— 播种通路分子云（布局真源 3D 基准, 不随切深变化
+   * → 拖切深滑杆不重建）+ 核实例 + ER 冠带 + 高尔基; 之后每个游离细胞器入册 → 后者避开前者。
+   * openPos: 在 (dir, frac) 提示位附近确定性扰动出 K 个候选, 取净空最大者 —— 提示位保持
+   * 「随机散布读感」（候选围绕原位, 不聚堆）, 净空评分软约束（挤满时退化为最小亏, 永不穿膜
+   * /入核 —— insidePos 硬约束不变）; 确定性 hash → dim 焦点重建零漂移。 */
+  const nucleiInst = nucleusInstances(SHAPE, R); // v54 上提（净空引擎需要; 原位置在核体构建段）
+  const avoidPts: THREE.Vector3[] = [];
+  const avoidRads: number[] = [];
+  const seedAvoid = (p: THREE.Vector3, r: number) => {
+    avoidPts.push(p);
+    avoidRads.push(r);
+  };
+  if (avoid) {
+    for (const a of avoid) seedAvoid(new THREE.Vector3(a.x, a.y, a.z), a.r);
+  }
+  // 核实例足迹（高尔基重定位评分用; insidePos lo 界已含核硬约束）
+  const nucAvoid: { p: THREE.Vector3; r: number }[] = nucleiInst.map((ni) => ({
+    p: new THREE.Vector3(ni.center.x, ni.center.y, ni.center.z),
+    r: N * ni.scale * 0.96,
+  }));
+  // ER 冠带足迹（核被膜外 ~1.2 的层叠冠区 —— 游离细胞器候选评分时避让; 粗播种: 冠轴方向
+  // 单点 + 锥面两对称点, r ≈ 冠层外缘 —— 轻_touch 不重构冠几何）
+  for (const ni of nucleiInst) {
+    const primary = ni.tag === 'A';
+    const crownAxis = nucleiInst.length > 1
+      ? new THREE.Vector3(primary ? -0.36 : 0.36, 0.28, -0.89).normalize()
+      : new THREE.Vector3(0.16, 0.3, -0.94).normalize();
+    const nucC2 = new THREE.Vector3(ni.center.x, ni.center.y, ni.center.z);
+    const Nn = N * ni.scale;
+    for (const off of [0.75, 1.35]) {
+      const d2 = crownAxis.clone();
+      seedAvoid(nucC2.clone().addScaledVector(d2, nucleusRadius(d2, SHAPE, Nn) + off), 0.95);
+    }
+  }
+  /** 净空评分: 与全部已登记足迹的最小间隙（负 = 交叠深度） */
+  const clearanceAt = (p: THREE.Vector3, r: number): number => {
+    let best = Infinity;
+    for (let i = 0; i < avoidPts.length; i++) {
+      const d = p.distanceTo(avoidPts[i]) - (avoidRads[i] + r);
+      if (d < best) best = d;
+    }
+    for (const na of nucAvoid) {
+      const d = p.distanceTo(na.p) - (na.r + r);
+      if (d < best) best = d;
+    }
+    return best;
+  };
+  /** 空旷域候选采样: 提示位 + K-1 个确定性扰动（方向倾斜 tilt 弧度内 + frac 摆动）,
+   *  取净空最大者入册并返回 —— 游离细胞器“居空旷处”的统一入口 */
+  const openPos = (
+    dir: THREE.Vector3,
+    frac: number,
+    r = 0.4,
+    pad = 0.5,
+    key = 'op',
+    tilt = 0.62,
+    register = true,
+  ): THREE.Vector3 => {
+    const hint = dir.clone().normalize();
+    const cands: THREE.Vector3[] = [insidePos(hint, frac, r, pad)];
+    for (let i = 1; i <= 5; i++) {
+      const ang = hash01(key, i * 13) * Math.PI * 2;
+      const t2 = tilt * (0.35 + hash01(key, i * 7) * 0.9);
+      const ax = new THREE.Vector3(hash01(key, i, 3) - 0.5, hash01(key, i, 5) - 0.5, hash01(key, i, 9) - 0.5).normalize();
+      const d2 = hint.clone().applyAxisAngle(ax, t2).normalize();
+      const f2 = Math.min(0.94, Math.max(0.06, frac + (hash01(key, i, 11) - 0.5) * 0.55));
+      cands.push(insidePos(d2, f2, r, pad));
+    }
+    let best = cands[0];
+    let bestScore = -Infinity;
+    for (const c of cands) {
+      const s = clearanceAt(c, r);
+      if (s > bestScore + 1e-9) {
+        bestScore = s;
+        best = c;
+      }
+    }
+    if (register) seedAvoid(best, r);
+    return best;
+  };
+
   /* ============ 高尔基位形常量（v21 —— 用户反馈「高尔基应该像内质网, 只是不连着细胞核」重建） ============
    * v15-v17 旧形态: 圆盘叠杯 + 弓形新月 + 梯骨小管 —— 侧视读感「长条形」;
    * v21 新形态: 与 ER 千层饼同构的「平行扁平囊堆」—— 椭圆扁平囊 ×6 层平行叠置（ER 视觉语言）,
@@ -995,6 +1087,49 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   const GOLGI_AXIS = new THREE.Vector3(0.7, 0.2, -0.69).normalize();
   /** 盘面自旋（绕堆轴 —— 花边瓣朝向变化, 打破轴对称） */
   const GOLGI_SPIN = 0.8;
+  /* v54 高尔基空旷域重定位（v52 遗留根治: 肝细胞双核下旧锚 nucPoint(幻影核) 与真实核盘
+   * 轻交叠）: 在 GOLGI_DIR 提示方位 ±0.45 rad 扰动出 6 个候选, 逐个按「核实例净空 + 分子云
+   * 净空」评分取最优, 再行外包络膜面硬钳（与 v21 同一钳制算法 —— 永不越膜）。
+   * 「后右上象限 z<0 + 脱离核旁」构图约束保持（候选围绕原方位, 不跨象限）。 */
+  const golgiEnvelopeClamp = (pv: THREE.Vector3): THREE.Vector3 => {
+    const need = GOLGI_STACK_H * 0.5 + 0.9 * GOLGI_SCALE + GOLGI_SEMI_B * 0.5 + 0.26;
+    const pl = pv.length();
+    if (pl > 1e-6) {
+      const lim = cellSurf(pv.clone().normalize(), R, SHAPE, -0.55) - need;
+      if (pl > lim && lim > N * 0.8) pv.setLength(lim);
+    }
+    return pv;
+  };
+  const GOLGI_POS = (() => {
+    const cands: THREE.Vector3[] = [golgiEnvelopeClamp(nucPoint(GOLGI_DIR, GOLGI_RADIAL))];
+    for (let i = 1; i <= 5; i++) {
+      const tilt = 0.45 * (0.4 + hash01('golgi54', i * 7) * 0.9);
+      const ax = new THREE.Vector3(hash01('golgi54', i, 3) - 0.5, hash01('golgi54', i, 5) - 0.5, hash01('golgi54', i, 9) - 0.5).normalize();
+      const d2 = GOLGI_DIR.clone().applyAxisAngle(ax, tilt).normalize();
+      const rad2 = GOLGI_RADIAL * (0.92 + hash01('golgi54', i, 11) * 0.3);
+      cands.push(golgiEnvelopeClamp(nucPoint(d2, rad2)));
+    }
+    // 评分: 核实例净空（双核真实包膜）为主 + 分子云净空为辅（1.6×权重差 —— 大结构优先避核）
+    const gr = GOLGI_DISK_R * 0.78;
+    let best = cands[0];
+    let bestScore = -Infinity;
+    for (const c of cands) {
+      let s = clearanceAt(c, gr * 0.6);
+      for (const na of nucAvoid) {
+        const d = c.distanceTo(na.p) - (na.r + gr);
+        if (d < s) s = d * 1.6;
+      }
+      if (s > bestScore + 1e-9) {
+        bestScore = s;
+        best = c;
+      }
+    }
+    return best;
+  })();
+  // 高尔基足迹入册（游离细胞器候选评分避开囊堆 + CGN/TGN 管网外延）
+  seedAvoid(GOLGI_POS, GOLGI_DISK_R * 0.88);
+  /** 结构种子数（分子云 + ER 冠 + 高尔基）—— 之后均为游离细胞器足迹（QA 统计分界） */
+  const structEnd = avoidPts.length;
 
   const nucMat = mat({
     // v12 参照图: 核被膜熏衣草灰紫族（实测 105,100,111）—— 高饱和玫瑰退役
@@ -1012,7 +1147,6 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     flow: { color: '#8a7a9a', strength: 0.1, scale: 0.5, speed: 0.04, rim: 0.28 },
   });
   /* ---- v8 多核循环: 肝细胞双核（每核独立包膜/核孔/染色质/核仁; 主核承载标注） ---- */
-  const nucleiInst = nucleusInstances(SHAPE, R);
   const nucleoli: THREE.Mesh[] = [];
   const nucleolusSpeckles: THREE.InstancedMesh[] = [];
   // 共享染色质资源（双核同材质/几何, 形态由各自种子决定）
@@ -1403,6 +1537,13 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     syncRefs: { pos: { x: number; y: number; z: number } }[];
   }
   const showcaseAnchors: ShowcaseAnchor[] = [];
+  /* v54 剖面示教锚的分子轮盘避让通道: 当前剖面投影分子集（{x,y,z,r} —— SceneContents 每次布局
+   * 变化时经 setPlaneMols 写入, 含切深变化; applyShowcase 帧内面内推离 —— 示教细胞器在剖面
+   * 视图中被推到分子轮盘外围的空旷带（用户「细胞器避免和 pathway 堆叠」的剖面端根治） */
+  let planeMols: AvoidPoint[] | null = null;
+  const setPlaneMols = (mols: AvoidPoint[] | null) => {
+    planeMols = mols;
+  };
 
   /* ================= v35 TGN→质膜 组成型分泌流（常驻循环粒子池） =================
    *  科学过程: TGN 分选出口出芽分泌泡 → 沿细胞骨架轨道巡航 → 质膜停靠 → 胞吐融合
@@ -1586,7 +1727,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       Math.sin((hash01(`m${i}`, 3) - 0.5) * 2.1),
       Math.cos((hash01(`m${i}`, 5) - 0.5) * 2.1) * Math.sin(hash01(`m${i}`, 7) * Math.PI * 2),
     ).normalize();
-    const p = insidePos(mDir, showcase ? 0.14 : 0.16 + hash01(`m${i}`) * 0.62, 1.15, 0.6);
+    const p = openPos(mDir, showcase ? 0.14 : 0.16 + hash01(`m${i}`) * 0.62, 1.15, 0.6, `mop${i}`, showcase ? 0.4 : 0.68);
     g.position.set(p.x, p.y, p.z);
     // 取向: 长轴对齐 + 确定性抖动; 圆形细胞保持全随机
     if (showcase) {
@@ -1822,7 +1963,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         Math.sin((hash01(`pr${ch}`, 3) - 0.5) * 2.4),
         Math.cos((hash01(`pr${ch}`, 3) - 0.5) * 2.4) * Math.sin(hash01(`pr${ch}`, 5) * Math.PI * 2),
       ).normalize();
-      const start = insidePos(prDir, 0.2 + hash01(`pr${ch}`) * 0.62, 0.1, 0.3);
+      const start = openPos(prDir, 0.2 + hash01(`pr${ch}`) * 0.62, 0.3, 0.3, `prp${ch}`);
       if (ch === Math.floor(chains * 0.4)) {
         hover.push({ pos: { x: start.x, y: start.y, z: start.z }, r: 2.2, zh: '游离多聚核糖体', latin: 'Polysomes', group: 'cytoskeleton' });
       }
@@ -2181,21 +2322,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
      *    「不连着细胞核」一眼可辨; 与旧核旁位（1.02 贴核）形成本质区别）
      *  - 朝向: 堆轴 GOLGI_AXIS（囊盘 ~55° 经典 3/4 视角 —— 椭圆囊面与层叠剖面双可读）
      *  - 防溢出: 整组外包络（长半轴×1.08 + 半堆高）膜面内 0.55 硬钳 */
-    const p = nucPoint(GOLGI_DIR, GOLGI_RADIAL);
-    {
-      const pv = new THREE.Vector3(p.x, p.y, p.z);
-      /* v21 外包络: 堆轴近径向（GOLGI_AXIS 与 GOLGI_DIR 夹角 ~23°）—— 径向占用 = 半堆高 + 短半轴分量
-       * + 长轴切向投影余量; 取保守值（半堆高 + 短半轴 0.55 + 0.3 冗余）而非长半轴全量（旧算法会把
-       * 切向延伸误算成径向 → 囊堆被无谓拉近, 破坏「脱离核旁」语义）。
-       * v34: +0.9*scale —— CGN/TGN 管网 + 出芽囊泡在两极的额外延伸（TGN 芽顶 ≈ 半堆高 + 0.74*scale）。 */
-      const need = GOLGI_STACK_H * 0.5 + 0.9 * GOLGI_SCALE + GOLGI_SEMI_B * 0.5 + 0.26;
-      const pl = pv.length();
-      if (pl > 1e-6) {
-        const lim = cellSurf(pv.clone().normalize(), R, SHAPE, -0.55) - need;
-        if (pl > lim && lim > N * 0.8) pv.setLength(lim);
-      }
-      p.x = pv.x; p.y = pv.y; p.z = pv.z;
-    }
+    /* v54: p 改用空旷域重定位结果 GOLGI_POS（净空引擎早期已按「双核真实包膜 + 通路分子云」
+     * 评分选定 + 同一外包络钳制; 下方原钳制块退役 —— 单一真源避免两处钳制漂移） */
+    const p = { x: GOLGI_POS.x, y: GOLGI_POS.y, z: GOLGI_POS.z };
     g.position.set(p.x, p.y, p.z);
     /* v21 朝向: 局部 +y(trans) 对齐显式堆轴 GOLGI_AXIS + 绕轴自旋 —— 显式世界向量直接锁定最终轴。 */
     const qAlign = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), GOLGI_AXIS);
@@ -2392,7 +2521,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         Math.sin((hash01(`v${i}`, 5) - 0.5) * 2.4),
         Math.cos((hash01(`v${i}`, 5) - 0.5) * 2.4) * Math.sin(hash01(`v${i}`, 7) * Math.PI * 2),
       ).normalize();
-      const p = insidePos(vDir, 0.35 + hash01(`v${i}`, 3) * 0.55, r, 0.4);
+      const p = openPos(vDir, 0.35 + hash01(`v${i}`, 3) * 0.55, r + 0.02, 0.4, `vo${i}`);
       if (i === 0) v0 = p;
       m.makeScale(r, r, r);
       m.setPosition(p.x, p.y, p.z);
@@ -2454,7 +2583,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
             Math.sin((hash01(`ly${i}`, 5) - 0.5) * 2.4),
             Math.cos((hash01(`ly${i}`, 5) - 0.5) * 2.4) * Math.sin(hash01(`ly${i}`, 7) * Math.PI * 2),
           ).normalize();
-          const p = insidePos(lyDir, 0.24 + hash01(`ly${i}`, 3) * 0.6, 0.52, 0.45);
+          const p = openPos(lyDir, 0.24 + hash01(`ly${i}`, 3) * 0.6, 0.55, 0.45, `lyo${i}`);
           const s = 0.75 + hash01(`lys${i}`) * 0.55;
           centers.push(new THREE.Vector3(p.x, p.y, p.z));
           scales.push(s);
@@ -2547,7 +2676,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         const jitter = new THREE.Vector3(hash01('mvb') - 0.5, hash01('mvb', 3) - 0.5, hash01('mvb', 5) - 0.5).multiplyScalar(1.1);
         const dirMvb = anchor.clone().add(jitter).normalize();
         const frac = Math.min(0.86, anchor.length() / R + 0.34);
-        const mp = insidePos(dirMvb, frac, 0.5, 0.46);
+        const mp = openPos(dirMvb, frac, 0.5, 0.46, 'mvbo');
         mvbG.position.copy(mp);
         group.add(mvbG);
         labels.push({ pos: { x: mp.x, y: mp.y, z: mp.z }, zh: '多泡体', latin: 'Multivesicular body' });
@@ -2600,7 +2729,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
           grains.renderOrder = 97.9;
         }
         lg.add(grains);
-        const lp = insidePos(new THREE.Vector3(-0.68, -0.42, 0.6).normalize(), 0.3, 0.55, 0.5);
+        const lp = openPos(new THREE.Vector3(-0.68, -0.42, 0.6).normalize(), 0.3, 0.55, 0.5, 'lsgh', 0.35);
         lg.position.copy(lp);
         group.add(lg);
         const lysoHov: HoverTarget = { pos: { x: lp.x, y: lp.y, z: lp.z }, r: 0.68, zh: '溶酶体（pH≈4.5）', latin: 'Lysosome', group: 'endomembrane' };
@@ -2748,7 +2877,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     // 自噬体标注（when: 'autophagy' —— 仅 ULK1 激活时由 CellBody 过滤显示; 锚定核周孵化带）
     if (lysoCenters.length > 0) {
       const auDir = new THREE.Vector3(Math.cos(-0.5) * Math.cos(2.2), Math.sin(-0.5), Math.cos(-0.5) * Math.sin(2.2));
-      const auPos = insidePos(auDir, 0.42, 0.8, 0.55);
+      const auPos = openPos(auDir, 0.42, 0.8, 0.55, 'auo');
       // v19 锚点归位: 自噬体本体位（旧 1.26×+0.6 外飘）
       labels.push({ pos: { x: auPos.x, y: auPos.y, z: auPos.z }, zh: '自噬体（ULK1 启动）', latin: 'Autophagosome', when: 'autophagy' });
     }
@@ -2796,7 +2925,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
             Math.sin((hash01(`px${i}`, 5) - 0.5) * 2.4),
             Math.cos((hash01(`px${i}`, 5) - 0.5) * 2.4) * Math.sin(hash01(`px${i}`, 7) * Math.PI * 2),
           ).normalize();
-          const p = insidePos(pxDir, 0.28 + hash01(`px${i}`, 3) * 0.58, 0.34, 0.42);
+          const p = openPos(pxDir, 0.28 + hash01(`px${i}`, 3) * 0.58, 0.4, 0.42, `pxo${i}`);
           const s = 0.7 + hash01(`pxs${i}`) * 0.5;
           pxCenters.push(new THREE.Vector3(p.x, p.y, p.z));
           eu.set(hash01(`pxr${i}`) * Math.PI, hash01(`pxr${i}`, 3) * Math.PI * 2, hash01(`pxr${i}`, 5) * Math.PI);
@@ -2851,7 +2980,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         pCore.rotation.set(0.5, 0.8, 0);
         pCore.renderOrder = 97.5;
         pg.add(pCore);
-        const pp = insidePos(new THREE.Vector3(-0.64, -0.52, -0.57).normalize(), 0.34, 0.5, 0.5);
+        const pp = openPos(new THREE.Vector3(-0.64, -0.52, -0.57).normalize(), 0.34, 0.5, 0.5, 'pxsh', 0.35);
         pg.position.copy(pp);
         group.add(pg);
         const pHov: HoverTarget = { pos: { x: pp.x, y: pp.y, z: pp.z }, r: 0.6, zh: '过氧化物酶体', latin: 'Peroxisome', group: 'endomembrane' };
@@ -2897,7 +3026,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         Math.sin((hash01(`ldl${i}`, 3) - 0.5) * 2.2),
         Math.cos((hash01(`ldl${i}`, 3) - 0.5) * 2.2) * Math.sin(hash01(`ldo${i}`, 5) * Math.PI * 2),
       ).normalize();
-      const p = insidePos(ldDir, 0.3 + hash01(`ldp${i}`) * 0.55, r + 0.08, 0.45);
+      const p = openPos(ldDir, 0.3 + hash01(`ldp${i}`) * 0.55, r + 0.08, 0.45, `ldo${i}`);
       d.position.set(p.x, p.y, p.z);
       d.renderOrder = cutaway ? 97.6 : 46; // v22 剖面窗口化（脂滴剖开）
       group.add(d);
@@ -3259,7 +3388,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         Math.sin(0.3 + rosette * 0.62),
         Math.cos(0.3 + rosette * 0.62) * Math.sin(1.2 + rosette * 1.7),
       ).normalize();
-      const cp = insidePos(gDir, 0.3 + (rosette % 3) * 0.22, 0.36, 0.45);
+      const cp = openPos(gDir, 0.3 + (rosette % 3) * 0.22, 0.42, 0.45, `gro${rosette}`);
       if (i === 0) gly0.copy(cp);
       // v21 逐玫瑰体悬停锚（每 rosette 首粒代表中心; 旧版仅首枚 —— 指到其余玫瑰体无响应）
       if (i % perRosette === 0) {
@@ -4154,6 +4283,27 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
           }
         };
         avoidNucleus();
+        // ②b v54 分子轮盘避让（面内）: 示教锚推出投影分子的净空圈 —— 剖面视图示教细胞器
+        //    不压分子节点/标签, 滑到轮盘外围空旷带（Gauss-Seidel 两轮: 推出一枚可能压上邻位）
+        const avoidMolecules = () => {
+          if (!planeMols) return;
+          for (const mp of planeMols) {
+            const need = mp.r + sa.avoidR + 0.3;
+            let ax = scTmp.x - mp.x;
+            let ay = scTmp.y - mp.y;
+            let az = scTmp.z - mp.z;
+            const al = Math.sqrt(ax * ax + ay * ay + az * az);
+            if (al >= need || al < 1e-4) continue;
+            ax /= al;
+            ay /= al;
+            az /= al;
+            scTmp.set(mp.x + ax * need, mp.y + ay * need, mp.z + az * need);
+          }
+          // 推离引入的法向残余清除（恢复严格贴面 —— 与 ④b 同一手法）
+          scTmp.addScaledVector(n, -(n.x * scTmp.x + n.y * scTmp.y + n.z * scTmp.z + clip.constant));
+        };
+        avoidMolecules();
+        avoidMolecules();
         // ③ 膜内钳（面内收缩）: o = −n·c（细胞中心垂足）; 沿 o→target 收缩到交线保守半径
         {
           const ox = -n.x * clip.constant;
@@ -4225,6 +4375,14 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       anchors: showcaseAnchors.map((sa) => ({
         pos: [sa.obj.position.x, sa.obj.position.y, sa.obj.position.z],
         home: [sa.home.x, sa.home.y, sa.home.z],
+        // v54: 锚到最近投影分子的净空（负 = 仍在分子净空圈内; 剖面视图分离度真源）
+        molClr: planeMols
+          ? Math.min(
+              ...planeMols.map((m) =>
+                Math.hypot(sa.obj.position.x - m.x, sa.obj.position.y - m.y, sa.obj.position.z - m.z) - m.r,
+              ),
+            )
+          : null,
       })),
       plane: qaPlane,
     });
@@ -4506,14 +4664,38 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     }
   }
 
-  return { group, update, labels, hover, dispose };
+  // v54 QA 插桩: 空旷域净空统计（agent-browser 活体验证「细胞器避开 pathway / 互不堆叠」）
+  if (typeof window !== 'undefined') {
+    const cloudN = avoid?.length ?? 0;
+    let minMol = Infinity; // 游离细胞器 → 分子云最小净空（负 = 交叠）
+    let minOrg = Infinity; // 游离细胞器两两最小净空
+    for (let i = structEnd; i < avoidPts.length; i++) {
+      for (let j = 0; j < cloudN; j++) {
+        const d = avoidPts[i].distanceTo(avoidPts[j]) - (avoidRads[i] + avoidRads[j]);
+        if (d < minMol) minMol = d;
+      }
+      for (let j = structEnd; j < avoidPts.length; j++) {
+        if (j === i) continue;
+        const d = avoidPts[i].distanceTo(avoidPts[j]) - (avoidRads[i] + avoidRads[j]);
+        if (d < minOrg) minOrg = d;
+      }
+    }
+    (window as unknown as Record<string, unknown>).__orgQa = {
+      cloud: cloudN,
+      placed: avoidPts.length - structEnd,
+      minMol: Number.isFinite(minMol) ? +minMol.toFixed(3) : null,
+      minOrg: Number.isFinite(minOrg) ? +minOrg.toFixed(3) : null,
+      golgiNuc: nucAvoid.map((na) => +(GOLGI_POS.distanceTo(na.p) - (na.r + GOLGI_DISK_R * 0.78)).toFixed(3)),
+    };
+  }
+  return { group, update, labels, hover, dispose, setPlaneMols };
 }
 
 /** 细胞体组件（仅 dim/规格/画质变化时重建, 动画走 imperative 帧驱动）
  *  v14: 解剖标注改为「悬停即现」（用户需求） —— 常显标签墙退役,
  *  OrganelleHoverLayer 按指针邻近检测显示单一标记卡（中文名 + 拉丁名 + 一句科学描述）; 全细胞器覆盖。
  *  v20: extraHover —— 信号传导边等外来悬停目标并入同一标记层（单一胜者, 不与细胞器互扰）。 */
-export const CellBody = ({ spec, tint, dim, showAnatomy, perf, cutaway, locate, onHoverTargets, extraHover, onHoverEdge }: {
+export const CellBody = ({ spec, tint, dim, showAnatomy, perf, cutaway, locate, onHoverTargets, extraHover, onHoverEdge, avoid, planeMols }: {
   spec: CellBodySpec;
   tint: string;
   dim: number;
@@ -4531,8 +4713,20 @@ export const CellBody = ({ spec, tint, dim, showAnatomy, perf, cutaway, locate, 
   extraHover?: HoverTarget[];
   /** v21 悬停边 id 上报（整线高亮联动） */
   onHoverEdge?: (id: string | null) => void;
+  /** v54 空旷域分子云（游离细胞器避让真源 —— 布局 3D 基准, 重建触发源之一） */
+  avoid?: AvoidPoint[];
+  /** v54 剖面投影分子集（示教锚面内避让 —— 随切深/通路变化实时写入, 不触发重建） */
+  planeMols?: AvoidPoint[] | null;
 }) => {
-  const build = useMemo(() => buildCellBody(spec, tint, dim, perf ?? false, cutaway ?? false), [spec, tint, dim, perf, cutaway]);
+  const build = useMemo(
+    () => buildCellBody(spec, tint, dim, perf ?? false, cutaway ?? false, avoid),
+    [spec, tint, dim, perf, cutaway, avoid],
+  );
+  // v54 剖面示教锚分子避让通道（可变引用写入 —— 零重建帧消费）
+  useEffect(() => {
+    build.setPlaneMols(planeMols ?? null);
+    return () => build.setPlaneMols(null);
+  }, [build, planeMols]);
   useEffect(() => () => build.dispose(), [build]);
   // 目录数据上报（去重: 同名多锚点只列一行）
   useEffect(() => {

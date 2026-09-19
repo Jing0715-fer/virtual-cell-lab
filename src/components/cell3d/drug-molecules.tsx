@@ -262,9 +262,15 @@ const DrugMolecule3D = memo(function DrugMolecule3D({ drug, target, sim, showLab
     // v53 剖面完整性: 材质豁免裁剪恒完整; 完全落入剖掉前半区 → 整组隐藏
     // （逼近路径前段位于剖掉区, 与旧 WebGL 裁剪行为等效 —— 越过切面后现身）
     const cp = sim.current.clipPlane;
+    g.getWorldPosition(_dw);
+    // v54 视距恒定尺寸: 与分子节点同一 (dist/D0)^0.9 补偿（停泊靶点的节点屏上恒定,
+    // 药物球棍模型同步补偿 —— 「视角拉大时大小不变」的药物侧一致读感）
+    const camDistD = state.camera.position.distanceTo(_dw);
+    const d0 = sim.current.viewDist ?? 30;
+    const zoomS = camDistD <= d0 ? 1 : Math.min(2.75, (camDistD / d0) ** 0.9);
+    g.scale.setScalar(0.21 * zoomS);
     if (cp) {
-      g.getWorldPosition(_dw);
-      g.visible = cp.distanceToPoint(_dw) > -0.55;
+      g.visible = cp.distanceToPoint(_dw) > -0.55 * Math.max(1, zoomS);
     } else {
       g.visible = true;
     }

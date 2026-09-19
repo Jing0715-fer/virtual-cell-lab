@@ -77,6 +77,9 @@ export interface SimSnapshot {
   hoverNode?: string | null;
   /** 剖面模式: 全局裁剪平面（null = 未开启; 分子标签层据此隐藏被剖掉的前半分子标签） */
   clipPlane?: THREE.Plane | null;
+  /** v54 视距恒定尺寸基准（类型化全景机位距离 spec.viewDist —— 相机拉远时节点按
+   *  (dist/D0)^0.9 补偿缩放, 屏上读感恒定; 缺省 30） */
+  viewDist?: number;
 }
 
 interface MoleculeProps {
@@ -289,13 +292,22 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
     // v53 剖面完整性: 分子材质豁免 WebGL 裁剪（节点在切面处恒渲染完整球体 —— 用户
     // 「50% 处显示完整」）; 仅「完全落入剖掉前半区」的分子整组隐藏（半径含受体胶囊全长）
     const clipPlane = sim.current.clipPlane;
-    const effR = isReceptor ? 1.2 : Math.max(node.r, 0.5);
+    // v54 视距恒定尺寸（用户「视角拉大时节点大小应该不变」）: 相机拉远时按 (dist/D0)^0.9
+    // 补偿缩放节点整组（球体/光环/状态环/P 珠/标签锚偏移/拾取代理同步 —— 屏上读感一致,
+    // 悬停命中域与可见分子严格对齐的不变量保持）; 近距 ≤D0 恒 1（近距离检查细节不反向缩小）;
+    // 0.9 幂部分补偿 = 保留深度线索（「变化比较小」）, 最大拉远 80 时屏上尺寸仅缩 ~12%;
+    // 上限 2.75 防深景视觉爆炸。标签为 DOM 屏幕空间本就恒定像素 —— 节点补偿后两者屏上同步
+    const camDist = grp ? state.camera.position.distanceTo(_wp) : 30;
+    const d0 = sim.current.viewDist ?? 30;
+    const zoomS = camDist <= d0 ? 1 : Math.min(2.75, (camDist / d0) ** 0.9);
+    if (grp) grp.scale.setScalar(zoomS);
+    const effR = (isReceptor ? 1.2 : Math.max(node.r, 0.5)) * zoomS;
     const d = clipPlane && grp ? clipPlane.distanceToPoint(_wp) : 1;
     const clipped = d < -effR;
     if (grp) grp.visible = !clipped;
-    // 标签距离淡出: 近距全显 → 远距降至 0.4（深度暗示 + 降低远景标签密度; 概览机位 ≈31 保持高可读）
-    const camDist = grp ? state.camera.position.distanceTo(_wp) : 30;
-    const distFade = camDist <= 26 ? 1 : Math.max(0.4, 1 - (camDist - 26) * (0.6 / 34));
+    // 标签距离淡出: 近距全显 → 远距降至 0.55（v54: 0.4→0.55 + 斜率放缓 —— 节点已视距恒定,
+    // 远景标签与节点屏上同步可读「更清晰查看细节」; 深度暗示由 0.45 衰减幅度保留）
+    const distFade = camDist <= 26 ? 1 : Math.max(0.55, 1 - (camDist - 26) * (0.45 / 54));
     // 信号抵达闪光（事件脉冲层写入时间戳, 650ms 衰减）
     let flash = 0;
     const pAt = sim.current.pulseAt?.[node.id];

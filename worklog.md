@@ -2918,3 +2918,76 @@ Stage Summary:
 - 下阶段建议: ①图版导出多面板 2×2 对照版式 ②引导模式接入减数分裂站点叙事 ③神经元树突/轴突
   折线命中体 ④DrugMoleculeLayer 标签接入防叠注册表 ⑤剖面模式下分子「完整球 + 阴影投影盘」
   （切面接触阴影增强贴面读感）
+
+---
+Task ID: 54
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户第 27 轮需求 —— 「避免细胞器堆叠或者和 pathway 堆叠，尽量在空旷的地方展示游离的细胞器。视角拉大时，节点的大小应该不变，标签大小也应该不变，或者变化比较小，让用户能更清晰查看细节。继续打磨其他细节」
+
+Work Log:
+- 【诉求①: 游离细胞器空旷域安置（organelles.tsx 净空引擎）】
+  · 真源: avoidPts/avoidRads 足迹登记表 —— 播种「通路分子云(SceneContents 以 baseLayout 3D
+    基准传入, tier 1-4 节点 r+0.42/0.55) + 核实例(nucleusInstances 多核真源) + ER 冠带
+    (冠轴两深播种 r0.95) + 高尔基」; 之后每个游离细胞器入册 → 后者避开前者（细胞器互不堆叠）
+  · openPos(dir, frac, r, pad, key, tilt): 提示位 + 5 个确定性扰动候选（方向倾斜 tilt 内 +
+    frac 摆动）→ 净空评分取最优入册 —— 「随机散布读感」保持（候选围绕原位不聚堆）,
+    挤满时软约束退化为最小亏（insidePos 硬约束: 永不穿膜/入核）; 纯 hash01 → dim 焦点
+    重建零漂移（确定性布局）
+  · 迁移 13 处游离细胞器调用: 线粒体（示教颗 tilt 0.4 保 120° 分离 / 常规颗 0.68）、
+    溶酶体、运输囊泡、过氧化物酶体、脂滴、MVB、多聚核糖体链、糖原玫瑰体、自噬体锚、
+    溶酶体/过氧化物酶体示教个体; ER/SER 管网与肌动蛋白网保留原采样（结构性薄网 +
+    管连续性风险）
+  · 高尔基 v54 重定位（v52 遗留根治）: nucPoint(幻影核) → GOLGI_POS 候选评分（±0.45 rad
+    围绕 GOLGI_DIR 保「后右上象限」构图 + 双核真实包膜净空 ×1.6 权重 + 分子云净空 +
+    v21 同一外包络膜面钳）; 肝细胞双核下 Golgi-核B 净空 -0.23（旧版更深）, 分泌流出口
+    g.localToWorld 自动跟随
+- 【诉求①剖面端: 示教锚面内分子避让】
+  · build 新增 planeMols 可变通道（setPlaneMols —— SceneContents 每次布局变化写入含切深,
+    零重建）; applyShowcase ②b avoidMolecules(): 锚点沿面内方向推出投影分子净空圈
+    （need = mol.r + sa.avoidR + 0.3, Gauss-Seidel 两轮 + 法向残余清零保恒贴面）→
+    ⑤ lerp 平滑滑入空旷带
+- 【诉求②: 视距恒定尺寸（拉远不缩小）】
+  · molecules.tsx: zoomS = camDist ≤ D0 ? 1 : min(2.75, (dist/D0)^0.9) 整组缩放（球体/
+    光环/状态环/P 珠/标签锚偏移/拾取代理同步 —— 悬停命中域与可见分子严格对齐不变量保持）;
+    D0 = sim.viewDist（类型化全景机位距离, SceneContents 布局 effect 同步）; 近距恒 1
+    （检查细节不反向缩小）; 0.9 幂部分补偿保留深度线索; effR 剖切半径同步补偿
+  · 药物分子同步补偿（drug-molecules.tsx 0.21·zoomS + 剖切阈 ×max(1,zoomS)）
+  · 标签距离淡出放宽: 0.4 底 → 0.55 底 + 斜率 0.6/34 → 0.45/54（远景标签与恒定节点同步可读）
+  · 边线本就 Line2 像素宽（屏幕空间恒定）—— 全场景拉远读感一致闭环
+- 【QA（agent-browser 交互级 + 探针真源 + 像素量化; lint 零错误; console/page errors 零;
+  dev.log 全 200）】
+  · __orgQa: cloud=33 placed=146 minMol=-0.244（保守足迹下最差 0.24 交叠 —— 分子云 r 含
+    +0.55 余量 → 实际分子本体到细胞器净空 ≈ +0.3, 视觉零重叠）minOrg=-0.84（线粒体
+    胶囊足迹球形化保守度量 —— 实际胶囊体半径 0.35, 并行时间隙 0.76）
+  · __showcaseQa molClr: 5 示教锚（3 线粒体 + 溶酶体 + 过氧化物酶体）全部为正
+    （0.23/0.55/1.07/1.37/1.34）—— 剖面示教细胞器全部滑出分子轮盘净空圈
+  · 视距恒定像素实证: 基线 sat 6082 → 最大拉远(30 wheel, dist 钳 80) sat 4994 = 82.0%
+    保留（理论 (2.34/2.58)² = 82.3% —— 0.9 幂设计精确命中; 无补偿下将跌至 ~15%）
+  · 回归: v52 区室保真 __layoutPlaneQa nucInDisc=1.0 discs=2 ✓; v53 剖面完整性 __clipQa
+    exempt=338 assigned=239 planeC=0 ✓; 引导模式 3/10 站「接头募集·SH2 停靠」推进 +
+    相机飞行 ✓; i18n 中英往返（Phosphatase/Second messenger）✓; 375×780 scrollW=375
+    无溢出 + 场景正常 ✓
+- 【QA 方法论增量】①agent-browser 元素截图对 WebGL canvas 捕获黑帧（合成器旁路）——
+  canvas 取证必须视口截图 + 同帧 rect 裁剪; ②mouse wheel CLI 事件会命中画布下 OrbitControls
+  （缩放劫持）—— 页面滚动一律 window.scrollTo eval, 缩放仅 canvas 元素上派生 WheelEvent;
+  ③页面异步内容加载会引发布局漂移（骨架→实体高度差）—— 取证前等 layout 稳定
+
+Stage Summary:
+- 用户三项诉求落地: ①「细胞器避免堆叠/和 pathway 堆叠」→ 净空引擎（分子云 + 互避足迹登记
+  + 高尔基双核重定位 + 剖面示教锚面内推离）—— 游离细胞器迁入空旷域, 剖面/3D 双模式分离;
+  ②「视角拉大时节点/标签大小不变或变化很小」→ (dist/D0)^0.9 视距补偿（实测 82% 屏占比
+  保留 @ dist 80, 理论精确命中）+ 标签 DOM 恒定 + 淡出放宽 0.55 + 边线像素宽 —— 全要素
+  远景可读闭环; ③细节打磨 → 药物分子同步补偿、剖切半径同步、高尔基 v52 遗留（幻影核锚）
+  顺带根治
+- 架构沉淀: ①「软约束候选采样」范式（硬约束由 insidePos 保证, 净空评分只在合法域内择优
+  —— 挤满时优雅退化）; ②「可变引用零重建通道」planeMols（切深变化高频路径与重建路径
+  解耦）; ③「视距补偿指数」0.9 幂 = 可读性 vs 深度线索的工程折衷（实测校准）
+- 产出: organelles.tsx（净空引擎 + GOLGI_POS + applyShowcase ②b + __orgQa/molClr 探针）/
+  molecules.tsx（zoomS + distFade 放宽 + viewDist 快照）/ drug-molecules.tsx（同步补偿）/
+  virtual-cell-3d.tsx（avoidCloud/planeMols/viewDist 接线）; qa-shots/task54-*.png 六张取证
+- 未解决/风险: ①线粒体足迹球形化保守（胶囊长轴 tip 可越出足迹 0.2 —— 极拥挤时相邻胶囊
+  端部可能轻触, 无用户反馈级影响）; ②高尔基 -0.23 核 B 保守净空（构图约束优先, 实际盘面
+  椭圆长轴背向, 视觉重叠未观察到）; ③ER/SER 管网点位未迁移净空引擎（薄管网 + 管连续性）
+- 下阶段建议: ①DrugMoleculeLayer 标签接入 v37 防叠注册表（遗留）; ②图版导出多面板 2×2
+  对照版式; ③引导模式接入减数分裂站点叙事; ④神经元树突/轴突折线命中体; ⑤净空引擎管点
+  迁移（TubeGeometry 控制点扰动幅度自适应版）

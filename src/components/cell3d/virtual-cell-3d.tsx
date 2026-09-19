@@ -27,7 +27,7 @@ import { EDGE_EVENT_KIND, PHASES } from '@/lib/simulation/engine';
 import type { SimEvent } from '@/lib/simulation/engine';
 import { layout3D, projectLayoutToPlane, EDGE_COLORS, type CellBodySpec, type Vec3 } from '@/lib/simulation/layout3d';
 import { buildGuidedTour, tourIntro } from '@/lib/simulation/guided-tour';
-import { CellBody } from './organelles';
+import { CellBody, type AvoidPoint } from './organelles';
 import { MITOSIS_PHASES, MitosisStage } from './mitosis';
 import { MEIOSIS_PHASES, MeiosisStage } from './meiosis';
 import { FlyToController, HOVER_GROUP_LABEL, HOVER_GROUP_ORDER, type HoverTarget, type LocateReq } from './hover-labels';
@@ -324,11 +324,30 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, cutaway, sim, sna
     () => (graph ? layout3D(graph.core.nodes, graph.core.edges, morph) : null),
     [graph, morph],
   );
+  /* v54 空旷域分子云（用户「避免细胞器堆叠或和 pathway 堆叠」）: 布局 3D 基准节点集
+   * （膜受体 + 胞质级联; 核内 TF/基因由核硬约束天然隔离, 胞外配体在膜外）—— CellBody
+   * 游离细胞器 openPos 候选净空评分真源。基于 baseLayout（非投影 layout）→ 拖切深滑杆
+   * 不触发细胞体重建（重建代价大）; identity 仅随通路/细胞类型变化。 */
+  const avoidCloud = useMemo(() => {
+    if (!baseLayout) return undefined;
+    const pts: AvoidPoint[] = [];
+    for (const n of baseLayout.nodes) {
+      if (n.tier < 1 || n.tier > 4) continue;
+      pts.push({ x: n.pos.x, y: n.pos.y, z: n.pos.z, r: n.r + (n.tier === 1 ? 0.42 : 0.55) });
+    }
+    return pts.length ? pts : undefined;
+  }, [baseLayout]);
   // 剖面贴附: 整个信号级联投影到剖切面 → 演示在切面上完整可见（教科书式"切片上画通路"）
   const layout = useMemo(
     () => (baseLayout && snapPlane ? projectLayoutToPlane(baseLayout, snapPlane) : baseLayout),
     [baseLayout, snapPlane],
   );
+  /* v54 剖面投影分子集（示教锚面内避让通道）: 贴面模式下的投影节点（含标签占位半径）;
+   * 常规 3D 模式 null。随切深变化实时更新（可变引用写入, 零细胞体重建）。 */
+  const planeMols = useMemo(() => {
+    if (!snapPlane || !layout) return null;
+    return layout.nodes.map((n) => ({ x: n.pos.x, y: n.pos.y, z: n.pos.z, r: Math.max(0.4, n.r + 0.14) }));
+  }, [layout, snapPlane]);
   // v21 信号边悬停目标（每边一个折线命中体 —— 全段可悬停; 仅主视图信号层存在时）
   // v23 note 源/靶分子对: 节点 id → label 映射（合成配体等无基因名节点回退显示名）
   const nodeLabelMap = useMemo(() => {
@@ -360,7 +379,7 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, cutaway, sim, sna
         />
       </mesh>
       {/* 剖面贴附模式: 核内部标注让位（核盘自带剖面标注）—— 消除核区标签互叠 */}
-      <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} cutaway={cutaway} locate={locate} onHoverTargets={onHoverTargets} extraHover={edgeHover} onHoverEdge={onHoverEdge} />
+      <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} cutaway={cutaway} locate={locate} onHoverTargets={onHoverTargets} extraHover={edgeHover} onHoverEdge={onHoverEdge} avoid={avoidCloud} planeMols={planeMols} />
       <EdgeLayer edges={layout.edges} sim={sim} hoveredEdgeId={hoverEdgeId} />
       <MoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />
       {/* 激酶抑制剂 3D 药物分子（球棍模型，结合靶点） */}
@@ -703,7 +722,7 @@ export function VirtualCell3D() {
   }, [tourOpen, tour.length, openTour]);
 
   // 模拟快照: zustand 订阅写入可变引用（避免逐 tick React 重渲染）
-  const sim = useRef<SimSnapshot>({ nodeStates: {}, signalFlux: {}, injected: {}, inhibition: {}, focus: false, tourNode: null, tourNeighbors: null, tourVisited: null, tourLitEdges: null, tourPulse: null, pulseAt: {}, edgePulse: {}, clipPlane: null });
+  const sim = useRef<SimSnapshot>({ nodeStates: {}, signalFlux: {}, injected: {}, inhibition: {}, focus: false, tourNode: null, tourNeighbors: null, tourVisited: null, tourLitEdges: null, tourPulse: null, pulseAt: {}, edgePulse: {}, clipPlane: null, viewDist: FALLBACK_SPEC.viewDist });
   // v33 引导↔模拟联动发射守卫（复合键 tourKey:idx —— 通路上层 graph/effLayout 变化重跑 effect 不重复发射）
   const tourSyncRef = useRef('');
   // v33 信号阶段指示（引导推进 → computePhase 逐级点亮: 静息→配体结合→受体激活→级联→转录）
@@ -735,6 +754,10 @@ export function VirtualCell3D() {
     }),
     [layout],
   );
+  // v54 视距恒定尺寸基准同步（类型化全景机位距离 —— 分子/药物层 (dist/D0)^0.9 补偿消费）
+  useEffect(() => {
+    sim.current.viewDist = layoutSpec.viewDist;
+  }, [layoutSpec.viewDist]);
   // 剖面贴附平面（与剖切控制器同参数, 向保留侧偏移 0.3 → 分子半球完整可见不被裁; 扫描范围按形状法向轴延伸）
   const snapPlane = useMemo(() => {
     if (!clipView || !sectionSnap) return null;
