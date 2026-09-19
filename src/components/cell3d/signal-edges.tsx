@@ -10,6 +10,10 @@
  *   hoveredEdgeId 命中的边全段提亮 + 线宽加倍 + 呼吸脉冲; 其余边照常。
  * v37: 悬停分子 → 邻接边联动（sim.hoverNode 帧通道）—— 邻接边整线增亮 + 线宽 1.75×,
  *   非邻接边压暗至 35%（「这个分子的上下游是谁」一眼可读）; 教学引导优先级更高。
+ * v55: X-ray 覆盖层渲染（用户「连线不要被其他细胞器等覆盖住」）—— 边线/流粒子/教学彗星
+ *   全部 depthTest off + renderOrder 118-120（高于剖面盘 96-98 与剖开窗口细胞器 97-101）+
+ *   depthWrite off（不阻挡后绘覆盖物）→ 信号拓扑在细胞器/核/剖盘后方依旧完整可读;
+ *   悬停 raycast 为 CPU 侧几何求交, 与深度测试无关 —— 命中域不变。
  */
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
@@ -115,6 +119,10 @@ function EdgeLine({ edge, sim, hoveredEdgeId }: EdgeProps) {
       dashed={dashed}
       dashSize={dashed ? 0.35 : undefined}
       gapSize={dashed ? 0.22 : undefined}
+      /* v55 X-ray 覆盖层: 不被细胞器/核/剖盘遮挡 —— 信号拓扑恒可读 */
+      depthTest={false}
+      depthWrite={false}
+      renderOrder={118}
     />
   );
 }
@@ -170,9 +178,10 @@ export function FlowParticles({ edges, sim }: { edges: Edge3D[]; sim: { current:
   });
 
   return (
-    <instancedMesh ref={instRef} args={[undefined, undefined, Math.max(1, edges.length * PER)]} frustumCulled={false} renderOrder={95}>
+    <instancedMesh ref={instRef} args={[undefined, undefined, Math.max(1, edges.length * PER)]} frustumCulled={false} renderOrder={119} raycast={() => null}>
       <sphereGeometry args={[1, 8, 8]} />
-      <meshBasicMaterial transparent opacity={0.95} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+      {/* v55 X-ray: 流粒子随边线一同穿透可读（additive 辉光叠加于任何前景细胞器之上） */}
+      <meshBasicMaterial transparent opacity={0.95} blending={THREE.AdditiveBlending} depthWrite={false} depthTest={false} toneMapped={false} />
     </instancedMesh>
   );
 }
@@ -251,13 +260,13 @@ export function TourCascadePulse({ sim }: { sim: { current: SimSnapshot } }) {
 
   return (
     <group>
-      <mesh ref={headRef} raycast={() => null} renderOrder={96} visible={false}>
+      <mesh ref={headRef} raycast={() => null} renderOrder={120} visible={false}>
         <sphereGeometry args={[0.15, 12, 10]} />
-        <meshBasicMaterial ref={headMat} transparent opacity={0.98} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+        <meshBasicMaterial ref={headMat} transparent opacity={0.98} blending={THREE.AdditiveBlending} depthWrite={false} depthTest={false} toneMapped={false} />
       </mesh>
-      <instancedMesh ref={trailRef} args={[undefined, undefined, TRAIL]} frustumCulled={false} raycast={() => null} renderOrder={96} visible={false}>
+      <instancedMesh ref={trailRef} args={[undefined, undefined, TRAIL]} frustumCulled={false} raycast={() => null} renderOrder={120} visible={false}>
         <sphereGeometry args={[0.115, 10, 8]} />
-        <meshBasicMaterial ref={trailMat} transparent opacity={0.8} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+        <meshBasicMaterial ref={trailMat} transparent opacity={0.8} blending={THREE.AdditiveBlending} depthWrite={false} depthTest={false} toneMapped={false} />
       </instancedMesh>
     </group>
   );

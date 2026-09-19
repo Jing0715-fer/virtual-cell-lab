@@ -374,6 +374,28 @@ function erRimCuts(
   }
   return rim;
 }
+/** v55 层缘极角轮廓工厂（几何工厂/核糖体采样/解析净空三真源共用 —— lobes/相位由
+ *  layer.seed 派生; 抽取自 erLamellaGeometry 内联副本, 数值严格一致） */
+function erLayerRimAt(
+  layer: ErLamellaLayer,
+  cuts: ErLamellaOpts['cuts'],
+  e1: THREE.Vector3,
+  e2: THREE.Vector3,
+): (lon: number) => number {
+  const seed = layer.seed;
+  const lobes = 4 + Math.floor(hash01(`erl${seed}`) * 3);
+  const lobeAmp = 0.085 + hash01(`era${seed}`) * 0.06;
+  const p1 = hash01(`erp${seed}`) * Math.PI * 2;
+  const lobes2 = 7;
+  const lobe2Amp = lobeAmp * 0.42;
+  const p2 = hash01(`erq${seed}`) * Math.PI * 2;
+  const band = 0.3;
+  return (lon: number): number =>
+    erRimCuts(
+      layer.cone - band + lobeAmp * (0.58 * Math.sin(lobes * lon + p1) + 0.42 * Math.sin(lobes2 * lon + p2)),
+      lon, cuts, e1, e2,
+    );
+}
 /** 核周层叠囊冠单层几何（球冠壳: 外/内双面 + 缘带缝合） */
 export function erLamellaGeometry(opts: ErLamellaOpts & { layer: ErLamellaLayer }): THREE.BufferGeometry {
   const thickness = opts.thickness ?? 0.085;
@@ -384,21 +406,8 @@ export function erLamellaGeometry(opts: ErLamellaOpts & { layer: ErLamellaLayer 
   if (e1.lengthSq() < 1e-4) e1 = new THREE.Vector3(1, 0, 0).cross(U);
   e1.normalize();
   const e2 = new THREE.Vector3().crossVectors(U, e1).normalize();
-  const seed = opts.layer.seed;
-  // 边缘花边参数（4-6 主瓣 + 7 瓣副调制, 逐层种子 → 层叠错落迷宫边缘）
-  const lobes = 4 + Math.floor(hash01(`erl${seed}`) * 3);
-  const lobeAmp = 0.085 + hash01(`era${seed}`) * 0.06;
-  const p1 = hash01(`erp${seed}`) * Math.PI * 2;
-  const lobes2 = 7;
-  const lobe2Amp = lobeAmp * 0.42;
-  const p2 = hash01(`erq${seed}`) * Math.PI * 2;
-  const band = 0.3; // 花边带宽度（自锥缘向内）
   /** 环向 lon 处的边缘极角轮廓（中心圆整 → 边缘波浪; v19 再叠加冠缘缺口内收） */
-  const rimAt = (lon: number): number =>
-    erRimCuts(
-      opts.layer.cone - band + lobeAmp * (0.58 * Math.sin(lobes * lon + p1) + 0.42 * Math.sin(lobes2 * lon + p2)),
-      lon, opts.cuts, e1, e2,
-    );
+  const rimAt = erLayerRimAt(opts.layer, opts.cuts, e1, e2);
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
@@ -459,18 +468,7 @@ export function erLamellaRibosomes(
   if (e1.lengthSq() < 1e-4) e1 = new THREE.Vector3(1, 0, 0).cross(U);
   e1.normalize();
   const e2 = new THREE.Vector3().crossVectors(U, e1).normalize();
-  const lobes = 4 + Math.floor(hash01(`erl${opts.layer.seed}`) * 3);
-  const lobeAmp = 0.085 + hash01(`era${opts.layer.seed}`) * 0.06;
-  const p1 = hash01(`erp${opts.layer.seed}`) * Math.PI * 2;
-  const lobes2 = 7;
-  const lobe2Amp = lobeAmp * 0.42;
-  const p2 = hash01(`erq${opts.layer.seed}`) * Math.PI * 2;
-  const band = 0.3;
-  const rimAt = (lon: number): number =>
-    erRimCuts(
-      opts.layer.cone - band + lobeAmp * (0.58 * Math.sin(lobes * lon + p1) + 0.42 * Math.sin(lobes2 * lon + p2)),
-      lon, opts.cuts, e1, e2,
-    );
+  const rimAt = erLayerRimAt(opts.layer, opts.cuts, e1, e2);
   const pts: THREE.Vector3[] = [];
   const d = new THREE.Vector3();
   for (let k = 0; k < count; k++) {
@@ -965,12 +963,13 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   };
   /** 射线自细胞中心沿 dir 的核占用边界（体内采样避核基准） */
   const nucExit = (dir: THREE.Vector3): number => nucleusRayExit(dir, SHAPE, N, R);
-  /** 类型化体内采样: dir 方向在 [核边界+pad+r, 膜面-(r+0.35)] 区间按 frac 插值（0=贴核, 1=贴膜）。
+  /** 类型化体内采样: dir 方向在 [核边界+pad+r, 膜面-(memR+0.35)] 区间按 frac 插值（0=贴核, 1=贴膜）。
    *  杆状/梭状/柱状窄轴处自动收缩、长轴端自动延展 —— 细胞器永远在真实形状体内。
-   *  挤压方向（核几乎贴膜, 如神经元顶区/梭形尖端/上皮基底极）: 硬钳至膜面内 —— 宁可轻擦核面也不穿膜 */
-  const insidePos = (dir: THREE.Vector3, frac: number, r = 0.4, pad = 0.5): THREE.Vector3 => {
+   *  挤压方向（核几乎贴膜, 如神经元顶区/梭形尖端/上皮基底极）: 硬钳至膜面内 —— 宁可轻擦核面也不穿膜。
+   *  v55 memR: 膜内钳半径（默认 = r; 线粒体等胶囊体用实体半径 —— 外周带不再被球形化保守足迹吃掉） */
+  const insidePos = (dir: THREE.Vector3, frac: number, r = 0.4, pad = 0.5, memR = r): THREE.Vector3 => {
     const d = dir.clone().normalize();
-    const outer = cellSurf(d, R, SHAPE, -Math.max(0.3, r + 0.35));
+    const outer = cellSurf(d, R, SHAPE, -Math.max(0.3, memR + 0.35));
     const lo = nucExit(d) + pad + r;
     const hi = Math.max(lo + 0.25, outer);
     const t = Math.min(lo + (hi - lo) * Math.min(1, Math.max(0, frac)), outer);
@@ -980,54 +979,204 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   /* ============ v54 空旷域净空引擎（用户「避免细胞器堆叠或和 pathway 堆叠，尽量在空旷
    * 的地方展示游离的细胞器」） ============
    * 真源: avoidPts/avoidRads 足迹登记表 —— 播种通路分子云（布局真源 3D 基准, 不随切深变化
-   * → 拖切深滑杆不重建）+ 核实例 + ER 冠带 + 高尔基; 之后每个游离细胞器入册 → 后者避开前者。
+   * → 拖切深滑杆不重建）+ 高尔基; 之后每个游离细胞器入册 → 后者避开前者。
    * openPos: 在 (dir, frac) 提示位附近确定性扰动出 K 个候选, 取净空最大者 —— 提示位保持
    * 「随机散布读感」（候选围绕原位, 不聚堆）, 净空评分软约束（挤满时退化为最小亏, 永不穿膜
-   * /入核 —— insidePos 硬约束不变）; 确定性 hash → dim 焦点重建零漂移。 */
+   * /入核 —— insidePos 硬约束不变）; 确定性 hash → dim 焦点重建零漂移。
+   * v55 增量: ①种子分型（结构足迹 vs 游离足迹）+ 实体半径 bodyR —— 线粒体胶囊的球形化保守
+   * 足迹（r 1.15）不再压迫静态结构（冠层/分子云/高尔基/核）, 膜内钳同步放宽（胶囊实体半径）;
+   * ②ER 冠带从「冠轴 2 球粗播种」升级为全参数解析净空（erCrowns + erCrownClearance ——
+   * 与 RER 几何构建共用同一层参数/层径真源, 见下块注释）;
+   * ③同组豁免（管-自身链连续性: 曲线自身控制点/采样点不互斥）。 */
   const nucleiInst = nucleusInstances(SHAPE, R); // v54 上提（净空引擎需要; 原位置在核体构建段）
   const avoidPts: THREE.Vector3[] = [];
   const avoidRads: number[] = [];
-  const seedAvoid = (p: THREE.Vector3, r: number) => {
+  /** v55 种子分型: true = 结构足迹（分子云/高尔基 —— 用调用方实体半径 bodyR 评分）;
+   * false = 游离细胞器足迹（至斥仍用注册半径 —— 胶囊朝向无关安全） */
+  const avoidIsStruct: boolean[] = [];
+  /** v55 实体半径（QA 真实净空度量 + 结构物评分; 默认 = 注册半径） */
+  const avoidBody: number[] = [];
+  /** v55 同组标记（≥0: 管链等连续结构 —— 组内互不排斥, QA 同组跳过） */
+  const avoidGroup: number[] = [];
+  let avoidGroupSeq = 0;
+  const seedAvoid = (p: THREE.Vector3, r: number, opts?: { struct?: boolean; body?: number; group?: number }) => {
     avoidPts.push(p);
     avoidRads.push(r);
+    avoidIsStruct.push(!!opts?.struct);
+    avoidBody.push(opts?.body ?? r);
+    avoidGroup.push(opts?.group ?? -1);
   };
   if (avoid) {
-    for (const a of avoid) seedAvoid(new THREE.Vector3(a.x, a.y, a.z), a.r);
+    for (const a of avoid) seedAvoid(new THREE.Vector3(a.x, a.y, a.z), a.r, { struct: true });
   }
   // 核实例足迹（高尔基重定位评分用; insidePos lo 界已含核硬约束）
   const nucAvoid: { p: THREE.Vector3; r: number }[] = nucleiInst.map((ni) => ({
     p: new THREE.Vector3(ni.center.x, ni.center.y, ni.center.z),
     r: N * ni.scale * 0.96,
   }));
-  // ER 冠带足迹（核被膜外 ~1.2 的层叠冠区 —— 游离细胞器候选评分时避让; 粗播种: 冠轴方向
-  // 单点 + 锥面两对称点, r ≈ 冠层外缘 —— 轻_touch 不重构冠几何）
-  for (const ni of nucleiInst) {
-    const primary = ni.tag === 'A';
-    const crownAxis = nucleiInst.length > 1
-      ? new THREE.Vector3(primary ? -0.36 : 0.36, 0.28, -0.89).normalize()
-      : new THREE.Vector3(0.16, 0.3, -0.94).normalize();
-    const nucC2 = new THREE.Vector3(ni.center.x, ni.center.y, ni.center.z);
-    const Nn = N * ni.scale;
-    for (const off of [0.75, 1.35]) {
-      const d2 = crownAxis.clone();
-      seedAvoid(nucC2.clone().addScaledVector(d2, nucleusRadius(d2, SHAPE, Nn) + off), 0.95);
+  /* ============ v55 ER 冠层解析净空（用户「线粒体和内质网空间上都有冲突」根治） ============
+   * 旧粗播种（冠轴 2 球 r0.95）只覆盖冠轴 ±1 rad —— 而层叠囊冠壳覆盖锥角 2.0-2.35 rad
+   * （核周 ~80% 方位!）, 大片冠层壳面漏网 → 线粒体/游离细胞器落入层叠冠内 = 「穿模」。
+   * 新: 每核冠层全参数计划 erCrowns（层轴抖动/锥角/偏移/种子与 RER 几何构建共用同一
+   * hash 真源 → 解析避让与实际渲染几何严格一致, 零视觉漂移）+ erCrownClearance 解析距离
+   * （冠内径向差 | 冠外援环最近距）, 融入 clearanceAt → 全部 openPos 调用方自动获得精确冠层避让。 */
+  const multiNuc = nucleiInst.length > 1;
+  const erCrowns = nucleiInst.map((nucInst): {
+    center: THREE.Vector3;
+    opts: ErLamellaOpts;
+    layers: { layer: ErLamellaLayer; e1: THREE.Vector3; e2: THREE.Vector3; rimAt: (lon: number) => number }[];
+    primary: boolean;
+  } => {
+    const primary = nucInst.tag === 'A';
+    const seedTag = primary ? 'er' : 'erB';
+    const layers = Math.max(3, perf ? 3 : Math.min(7, spec.erSheets + 3 - (primary || !multiNuc ? 0 : 1)));
+    const nucCK2 = new THREE.Vector3(nucInst.center.x, nucInst.center.y, nucInst.center.z);
+    const Nn2 = N * nucInst.scale;
+    const seed2 = primary ? 7 : 23; // 与该核被膜同一 FBM 种子 —— 冠层严格贴合同一核面起伏
+    /** 该核面半径（与核被膜/核孔同源真源; 不含偏移） */
+    const surf2 = (dir: THREE.Vector3): number => {
+      const d = dir.clone().normalize();
+      return nucleusRadius(d, SHAPE, Nn2) + (fbm3(d.x * NUC_FREQ, d.y * NUC_FREQ, d.z * NUC_FREQ, 3, seed2) - 0.5) * 2 * nucAmp;
+    };
+    // 冠轴: 单核 → 后上原版（开口朝前下, v17 已验证构图）; v19 双核 → 左右镜像外倾
+    const crownAxis = !multiNuc
+      ? new THREE.Vector3(0.16, 0.3, -0.94).normalize()
+      : new THREE.Vector3(primary ? -0.36 : 0.36, 0.28, -0.89).normalize();
+    // v19 同伴核实例（双核避让数据源）
+    const sibling = multiNuc ? nucleiInst[primary ? 1 : 0] : null;
+    const erOpts: ErLamellaOpts = {
+      radiusAt: surf2,
+      center: nucCK2,
+      clampAt: (d) => cellSurf(d, R, SHAPE, -0.6),
+      vault: null,
+      avoid: sibling
+        ? {
+            center: new THREE.Vector3(sibling.center.x, sibling.center.y, sibling.center.z),
+            radius: N * sibling.scale * 1.06 + 0.16,
+          }
+        : null,
+      cuts: sibling
+        ? [
+            {
+              dir: new THREE.Vector3(
+                sibling.center.x - nucCK2.x,
+                sibling.center.y - nucCK2.y,
+                sibling.center.z - nucCK2.z,
+              ).normalize(),
+              w: 1.05,
+              depth: 0.62,
+            },
+          ]
+        : null,
+    };
+    const layerPlans: { layer: ErLamellaLayer; e1: THREE.Vector3; e2: THREE.Vector3; rimAt: (lon: number) => number }[] = [];
+    for (let L = 0; L < layers; L++) {
+      // 逐层冠轴微错位（±0.1 rad —— 层缘不齐 = 参照图「层叠迷宫」边缘读感）
+      const axis = crownAxis.clone();
+      axis.applyAxisAngle(new THREE.Vector3(0, 1, 0), (hash01(`${seedTag}ax${L}`) - 0.5) * 0.22);
+      axis.applyAxisAngle(new THREE.Vector3(1, 0, 0), (hash01(`${seedTag}ay${L}`) - 0.5) * 0.14);
+      const layer: ErLamellaLayer = {
+        offset: 0.16 + L * 0.155,
+        cone: 2.02 + L * 0.055, // 外层覆盖更广（向细胞质深处延伸）
+        axis: axis.normalize(),
+        seed: 5 + L * 13 + (primary ? 0 : 60), // 次核层花边相位独立
+      };
+      const U = layer.axis;
+      let e1 = new THREE.Vector3(0, 1, 0).cross(U);
+      if (e1.lengthSq() < 1e-4) e1 = new THREE.Vector3(1, 0, 0).cross(U);
+      e1 = e1.normalize();
+      const e2 = new THREE.Vector3().crossVectors(U, e1).normalize();
+      layerPlans.push({ layer, e1, e2, rimAt: erLayerRimAt(layer, erOpts.cuts, e1, e2) });
     }
-  }
-  /** 净空评分: 与全部已登记足迹的最小间隙（负 = 交叠深度） */
-  const clearanceAt = (p: THREE.Vector3, r: number): number => {
+    return { center: nucCK2, opts: erOpts, layers: layerPlans, primary };
+  });
+  /** v55 ER 冠层解析净空: 点 p 到任一冠层囊片的符号间隙（冠内: 到囊片中面的径向差 − 半厚;
+   * 冠外: 同经度冠缘环最近点距 − 缘半宽）。out.q 返回最近冠面点（applyShowcase 面内推离
+   * 方向真源）。与 erLamellaGeometry 共用 erLayerRadius/rimAt 真源 —— 度量即几何。 */
+  const _crownD = new THREE.Vector3();
+  const _crownQ = new THREE.Vector3();
+  const erCrownClearance = (p: THREE.Vector3, rr: number, out?: { q: THREE.Vector3 }): number => {
+    let best = Infinity;
+    for (const crown of erCrowns) {
+      const vx = p.x - crown.center.x;
+      const vy = p.y - crown.center.y;
+      const vz = p.z - crown.center.z;
+      const len = Math.sqrt(vx * vx + vy * vy + vz * vz);
+      if (len < 1e-4) {
+        if (-rr < best) {
+          best = -rr;
+          if (out) out.q.set(crown.center.x, crown.center.y - 1, crown.center.z);
+        }
+        continue;
+      }
+      const dx = vx / len;
+      const dy = vy / len;
+      const dz = vz / len;
+      for (const lp of crown.layers) {
+        const ax = lp.layer.axis;
+        const cosP = Math.max(-1, Math.min(1, dx * ax.x + dy * ax.y + dz * ax.z));
+        const polar = Math.acos(cosP);
+        const lon = Math.atan2(dx * lp.e2.x + dy * lp.e2.y + dz * lp.e2.z, dx * lp.e1.x + dy * lp.e1.y + dz * lp.e1.z);
+        const rim = lp.rimAt(lon);
+        _crownD.set(dx, dy, dz);
+        const rL = erLayerRadius(_crownD, lp.layer, crown.opts, lp.e1, lp.e2);
+        let gap: number;
+        if (polar <= rim) {
+          // 冠内: 囊片双面位于 [rL-0.085, rL], 中面 rL-0.0425
+          gap = Math.abs(len - (rL - 0.0425)) - 0.0425;
+          if (gap < best) {
+            best = gap;
+            if (out) {
+              const rr2 = len > rL - 0.0425 ? rL : rL - 0.085;
+              out.q.set(crown.center.x + dx * rr2, crown.center.y + dy * rr2, crown.center.z + dz * rr2);
+            }
+          }
+        } else {
+          // 冠外: 最近缘环点（同经度, 极角收到冠缘）
+          const cl = Math.cos(lon);
+          const sl = Math.sin(lon);
+          const cr = Math.cos(rim);
+          const sr = Math.sin(rim);
+          _crownD.set(
+            cr * ax.x + sr * (lp.e1.x * cl + lp.e2.x * sl),
+            cr * ax.y + sr * (lp.e1.y * cl + lp.e2.y * sl),
+            cr * ax.z + sr * (lp.e1.z * cl + lp.e2.z * sl),
+          ).normalize();
+          const rR = erLayerRadius(_crownD, lp.layer, crown.opts, lp.e1, lp.e2);
+          const qx = crown.center.x + _crownD.x * rR;
+          const qy = crown.center.y + _crownD.y * rR;
+          const qz = crown.center.z + _crownD.z * rR;
+          gap = Math.sqrt((p.x - qx) * (p.x - qx) + (p.y - qy) * (p.y - qy) + (p.z - qz) * (p.z - qz)) - 0.05;
+          if (gap < best) {
+            best = gap;
+            if (out) out.q.set(qx, qy, qz);
+          }
+          _crownD.set(dx, dy, dz); // 复原（后续层继续用原方向）
+        }
+      }
+    }
+    return best - rr;
+  };
+  /** 净空评分: 与全部已登记足迹的最小间隙（负 = 交叠深度）; v55 双半径 + 同组豁免 + 冠层解析项 */
+  const clearanceAt = (p: THREE.Vector3, r: number, bodyR = r, skipGroup = -1): number => {
     let best = Infinity;
     for (let i = 0; i < avoidPts.length; i++) {
-      const d = p.distanceTo(avoidPts[i]) - (avoidRads[i] + r);
+      if (skipGroup >= 0 && avoidGroup[i] === skipGroup) continue;
+      const d = p.distanceTo(avoidPts[i]) - (avoidRads[i] + (avoidIsStruct[i] ? bodyR : r));
       if (d < best) best = d;
     }
     for (const na of nucAvoid) {
-      const d = p.distanceTo(na.p) - (na.r + r);
+      const d = p.distanceTo(na.p) - (na.r + bodyR);
       if (d < best) best = d;
     }
+    const ec = erCrownClearance(p, bodyR);
+    if (ec < best) best = ec;
     return best;
   };
   /** 空旷域候选采样: 提示位 + K-1 个确定性扰动（方向倾斜 tilt 弧度内 + frac 摆动）,
-   *  取净空最大者入册并返回 —— 游离细胞器“居空旷处”的统一入口 */
+   *  取净空最大者入册并返回 —— 游离细胞器“居空旷处”的统一入口。
+   *  v55 opts: bodyR（实体半径 —— 对结构足迹/核/冠层的评分口径, 默认 = r）/
+   *  memR（膜内钳半径, 默认 = r）/ group（≥0 同组豁免 —— 管链自身连续性）。 */
   const openPos = (
     dir: THREE.Vector3,
     frac: number,
@@ -1036,27 +1185,31 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     key = 'op',
     tilt = 0.62,
     register = true,
+    v55?: { bodyR?: number; memR?: number; group?: number },
   ): THREE.Vector3 => {
+    const bodyR = v55?.bodyR ?? r;
+    const memR = v55?.memR ?? r;
+    const grp = v55?.group ?? -1;
     const hint = dir.clone().normalize();
-    const cands: THREE.Vector3[] = [insidePos(hint, frac, r, pad)];
+    const cands: THREE.Vector3[] = [insidePos(hint, frac, r, pad, memR)];
     for (let i = 1; i <= 5; i++) {
       const ang = hash01(key, i * 13) * Math.PI * 2;
       const t2 = tilt * (0.35 + hash01(key, i * 7) * 0.9);
       const ax = new THREE.Vector3(hash01(key, i, 3) - 0.5, hash01(key, i, 5) - 0.5, hash01(key, i, 9) - 0.5).normalize();
       const d2 = hint.clone().applyAxisAngle(ax, t2).normalize();
       const f2 = Math.min(0.94, Math.max(0.06, frac + (hash01(key, i, 11) - 0.5) * 0.55));
-      cands.push(insidePos(d2, f2, r, pad));
+      cands.push(insidePos(d2, f2, r, pad, memR));
     }
     let best = cands[0];
     let bestScore = -Infinity;
     for (const c of cands) {
-      const s = clearanceAt(c, r);
+      const s = clearanceAt(c, r, bodyR, grp);
       if (s > bestScore + 1e-9) {
         bestScore = s;
         best = c;
       }
     }
-    if (register) seedAvoid(best, r);
+    if (register) seedAvoid(best, r, { body: bodyR, group: grp });
     return best;
   };
 
@@ -1126,8 +1279,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     }
     return best;
   })();
-  // 高尔基足迹入册（游离细胞器候选评分避开囊堆 + CGN/TGN 管网外延）
-  seedAvoid(GOLGI_POS, GOLGI_DISK_R * 0.88);
+  // 高尔基足迹入册（游离细胞器候选评分避开囊堆 + CGN/TGN 管网外延; v55 结构足迹分型）
+  seedAvoid(GOLGI_POS, GOLGI_DISK_R * 0.88, { struct: true });
   /** 结构种子数（分子云 + ER 冠 + 高尔基）—— 之后均为游离细胞器足迹（QA 统计分界） */
   const structEnd = avoidPts.length;
 
@@ -1727,7 +1880,11 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       Math.sin((hash01(`m${i}`, 3) - 0.5) * 2.1),
       Math.cos((hash01(`m${i}`, 5) - 0.5) * 2.1) * Math.sin(hash01(`m${i}`, 7) * Math.PI * 2),
     ).normalize();
-    const p = openPos(mDir, showcase ? 0.14 : 0.16 + hash01(`m${i}`) * 0.62, 1.15, 0.6, `mop${i}`, showcase ? 0.4 : 0.68);
+    // v55 双半径: 注册足迹 r 1.15（互斥安全 —— 胶囊朝向无关）, 实体半径 bodyR 0.5（对
+    // 冠层/分子云/高尔基/核的评分口径）, 膜内钳 memR 0.8（长轴水平占位 —— 外周带可用）;
+    // 冠层解析项 → 深冠方位候选自动滑到冠层外缘带（lo 界天然 ≥ 冠外面+body）, 「线粒体
+    // 嵌入 ER 千层饼」根治
+    const p = openPos(mDir, showcase ? 0.14 : 0.16 + hash01(`m${i}`) * 0.62, 1.15, 0.6, `mop${i}`, showcase ? 0.45 : 0.68, true, { bodyR: 0.5, memR: 0.8 });
     g.position.set(p.x, p.y, p.z);
     // 取向: 长轴对齐 + 确定性抖动; 圆形细胞保持全随机
     if (showcase) {
