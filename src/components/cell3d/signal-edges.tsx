@@ -59,6 +59,14 @@ function EdgeLine({ edge, sim, hoveredEdgeId }: EdgeProps) {
   const baseWidth = EXPRESSIVE.has(edge.kind) ? 1.6 : 2;
 
   useFrame((state) => {
+    // v55 QA 插桩（一次性首帧: 材质真源 —— X-ray 覆盖层 depthTest/renderOrder 验证）
+    if (typeof window !== 'undefined') {
+      const w = window as unknown as { __edgeQa?: { depthTest: boolean; renderOrder: number } };
+      if (!w.__edgeQa && lineRef.current) {
+        const m = lineRef.current.material as THREE.Material;
+        w.__edgeQa = { depthTest: m.depthTest, renderOrder: lineRef.current.renderOrder };
+      }
+    }
     const hovered = hoveredEdgeId === edge.id;
     const flux = Math.abs(sim.current.signalFlux[key] ?? 0);
     const focus = sim.current.focus;

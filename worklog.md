@@ -2991,3 +2991,77 @@ Stage Summary:
 - 下阶段建议: ①DrugMoleculeLayer 标签接入 v37 防叠注册表（遗留）; ②图版导出多面板 2×2
   对照版式; ③引导模式接入减数分裂站点叙事; ④神经元树突/轴突折线命中体; ⑤净空引擎管点
   迁移（TubeGeometry 控制点扰动幅度自适应版）
+
+---
+Task ID: 55
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户第 28 轮反馈 —— 「node 之间的连线不要被其他细胞器等覆盖住，还是存在细胞器重叠的问题，比如线粒体和内质网感觉空间上都有冲突了，要避免穿模等问题」（含 cron 代理已落地的 v55 X-ray 连线层 + ER 冠层解析净空的补全、QA 与提交）
+
+Work Log:
+- 【上下文恢复】cron webDevReview 代理已在 commit 1503f33 落地 v55 骨架（signal-edges X-ray
+  覆盖层 + organelles erCrowns/erCrownClearance 解析净空 + 种子分型 struct/bodyR + 双半径
+  openPos）, 但无 worklog 记录、无 QA 取证、提交信息为裸 UUID —— 本轮补全收尾
+- 【v55b 管网前置净空（本轮新增 —— 用户「线粒体和内质网空间冲突」的外周管网部分根治）】
+  · 诊断: 外周 rER 管网/SER 管系在游离细胞器之后生成且直采 insidePos 不查净空表 → 管身可
+    穿过已放置的线粒体/溶酶体 = 穿模第二根源（第一根源核周冠层已由 cron v55 根治）
+  · 新序: 管网曲线最先预计算（structEnd 前块）+ 足迹入册（struct 分型 → 游离细胞器以 bodyR
+    实体半径避让管网包络）; 下游 mesh/核糖体/悬停锚消费同一曲线对象 —— 全链零漂移
+  · tubePoint 控制点净空微调: 同方向 3 个 frac 候选取净空最优（方向恒定 → 曲线平滑保持,
+    避开高尔基/冠层/分子云; 挤满退化原位）; 外周 rER 9 管 ×7 控制点 + 6 三通节点（r 0.24/0.16
+    足迹壳含膜旁核糖体包络）+ SER 12 管 ×6 + 5 junction（r 0.2/0.17）
+  · structEnd 移至管网入册后（管网 = 准结构足迹, QA 统计分界同步）; SER 悬停折线改为曲线
+    等参采样（getPoint 恒在管身中心线上 —— v29 命中更精确）
+- 【QA 探针真源升级】__orgQa 新增 minCrown（游离细胞器以 bodyR 对冠层解析壳的真实间隙 ——
+  与实际渲染几何度量即几何）/ minTube（对管网足迹的真实间隙）/ crownLayers / tubes;
+  signal-edges 新增 __edgeQa（首帧材质真源: depthTest/renderOrder —— X-ray 层验证）
+- 【QA（agent-browser 交互级 + 探针真源 + 像素量化; lint 零错误; console 零错误; dev.log 全 200）】
+  · __edgeQa: depthTest=false + renderOrder=118 ✓（X-ray 覆盖层生效 —— 边线/流粒子/教学彗星
+    在细胞器/核/剖盘后方恒可读, 悬停 raycast 为 CPU 侧几何求交不受影响）
+  · __orgQa: cloud=33 placed=146 crownLayers=6 tubes=52 **minCrown=+0.059** **minTube=+0.194**
+    （两项真实几何净空全正 —— 线粒体(bodyR 0.5)等全部游离细胞器与 ER 冠层壳/外周管网零穿模;
+    旧保守度量 minMol=-0.244/minOrg=-0.84 为球形化足迹的冗余口径, 实际分子云 r 含 +0.55 余量、
+    胶囊体半径 0.35 → 视觉均零重叠）; golgiNuc=[5.079,-0.23]（构图约束优先, v54 既有水平）
+  · __showcaseQa: molClr 5 示教锚全正 [0.29,1.11,0.92,0.66,0.88]（v54 剖面示教分离度回归 ✓）
+  · __clipQa: local=true global=0 assigned=239 exempt=339 planeC=0（v53 剖面完整性回归 ✓）
+  · 像素量化: 剖面模式 green-edges 0.812%/amber-mols 0.317%（X-ray 连线在剖盘/窗口细胞器
+    后方完整可读）; 悬停 MAPK1 标签 → tip 卡全词条 + 邻接边增亮; i18n 中英往返 ✓;
+    375×780 scrollW=375 无溢出 ✓; 场景渲染/live 帧差确认
+- 【QA 方法论增量（环境深坑, 后续会话必读）】
+  ① headless SwiftShader WebGL 上下文丢失 = 系统内存耗尽（dev-server 1.6GB + 多 Chrome GPU
+    进程累积; 症状: 页面加载即 THREE.WebGLRenderer: Context Lost + z-30 恢复遮罩盖死 HUD）。
+    处置: `agent-browser close --all` + pkill chrome 全清 → 1.7GB 可用 → 重启浏览器带
+    `--args "--force-gpu-mem-available-mb=2048,--disable-gpu-watchdog"`; 勿长时挂多标签
+  ② agent-browser eval 偶发 CDP 超时（60-120s）—— 与页面繁忙/上下文垂死相关, 超时命令内的
+    副作用（点击等）仍会落地 → 二分法测试时命令必须原子化、逐条执行
+  ③ smooth scroll: window.scrollTo 异步生效（数百 ms）, 取证前必须复查 scrollY 落定
+- 【未解之谜（下阶段优先）: 教学引导开关点击后瞬间回落】
+  · 症状: 点击 HUD「教学引导」→ openTour(true) 完整执行（sim 重置 T+0.5 + 暂停 + camMode
+    'tour' 均发生）但下一帧 tourOpen=false、无剧场暗角/解说卡/下一站按钮
+  · 已排除: ①v55b 代码（cron-only 基线同样复现 —— 二分验证）②ctxLost 遮罩（健康上下文下
+    同样复现）③合成点击双发（document 捕获层点击日志: 单次 t.click() 单事件）④openTour(false)
+    回调（camMode 未回 overview 而是回到初始态特征）
+  · 主嫌疑: resetSim → loadGraph(graph) 产生新 graph 对象 → 更新期间某 descendant suspend
+    （next/dynamic/Suspense 边界）→ 子树重挂载 → VirtualCell3D 本地 useState 全复位
+    （tourOpen/camMode 回初始值 = 观察到的「回到初始态」特征吻合）; 需下阶段用 React
+    DevToolsProfiler 或 effect 日志定位 suspend 源
+  · 影响面: 沉浸式引导入口在 dev/headless 环境不可进入（真机浏览器未验证 —— 若为
+    dev-only Suspense 行为则生产无碍, 需确认）
+- 【Git】commit 1503f33（cron v55 骨架, 裸 UUID 信息）+ 本轮 v55b 补全合并提交 v55
+
+Stage Summary:
+- 用户两项诉求闭环: ①「连线不要被细胞器覆盖」→ X-ray 覆盖层（边线/流粒子/教学彗星
+  depthTest off + renderOrder 118-120, 高于剖盘 96-98 与窗口细胞器 97-101）—— 信号拓扑在
+  任何前景结构后方恒可读（__edgeQa 材质真源 + 像素取证）; ②「线粒体和内质网空间冲突/穿模」
+  → 双根源根治: ER 冠层全参数解析净空（erCrowns 与 RER 几何共用层参数真源, 度量即几何）
+  + v55b 外周管网前置净空（曲线最先预计算入册, 游离细胞器以 bodyR 实体半径避让 —— 管网与
+  细胞器互不穿模且管形读感不变）—— minCrown/minTube 两项真实几何净空全正实证
+- 架构沉淀: ①「管网前置」范式（连续结构先铺先入册, 离散细胞器后置避让 —— 管连续性零风险）
+  ②「真实几何净空度量」QA 真源（弃球形化保守口径, 解析壳/采样足迹与渲染几何同源）
+- 产出: organelles.tsx（v55b 前置净空块 + 消费块改造 + __orgQa 升级）/ signal-edges.tsx
+  （__edgeQa 探针）; qa-shots/task55-*.png 十一张取证
+- 未解决/风险: ①教学引导开关瞬间回落（详见上块 —— 疑 Suspense 重挂载, 独立于 v55b,
+  cron-only 复现, 下阶段最高优先）②headless 内存约束下长会话 QA 需勤清浏览器进程
+- 下阶段建议: ①教学引导回落根因定位（React DevTools Profiler / Suspense 边界审计 /
+  resetSim 的 graph 身份链路改造 —— loadGraph 复用原对象或 tourOpen 迁 zustand）②真机浏览器
+  验证引导入口（区分 dev-only 与生产缺陷）③DrugMoleculeLayer 标签接入 v37 防叠注册表
+  ④图版导出多面板 2×2 对照版式 ⑤引导模式接入减数分裂站点叙事

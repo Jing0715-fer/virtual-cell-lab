@@ -1281,7 +1281,96 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   })();
   // 高尔基足迹入册（游离细胞器候选评分避开囊堆 + CGN/TGN 管网外延; v55 结构足迹分型）
   seedAvoid(GOLGI_POS, GOLGI_DISK_R * 0.88, { struct: true });
-  /** 结构种子数（分子云 + ER 冠 + 高尔基）—— 之后均为游离细胞器足迹（QA 统计分界） */
+
+  /* ============ v55b 管网前置净空（用户「线粒体和内质网空间上都有冲突」外周管网部分） ============
+   * 旧序: 游离细胞器先放置 → 外周 rER/SER 管网后生成（insidePos 直采不查净空表）→ 管身
+   * 可穿过已放置的线粒体/溶酶体等 = 穿模第二根源（第一根源核周冠层已由 erCrownClearance 根治）。
+   * 新序: 管网曲线最先预计算 + 足迹入册（struct 分型 → 游离细胞器以 bodyR 实体半径避让）;
+   * 下游 mesh/核糖体/悬停锚消费同一曲线对象 —— 全链零漂移。控制点净空微调: 同方向 3 个
+   * frac 候选取净空最优（方向恒定 → 曲线平滑保持, 避开高尔基/冠层/分子云; 挤满退化原位）。 */
+  const periphCurvesPre: THREE.CatmullRomCurve3[] = [];
+  const serCurvesPre: THREE.CatmullRomCurve3[] = [];
+  const periphJunctionsPre: THREE.Vector3[] = [];
+  const serJunctionsPre: THREE.Vector3[] = [];
+  const tubeSamplePts: { p: THREE.Vector3; r: number }[] = [];
+  {
+    const tubePoint = (dir: THREE.Vector3, frac: number, r: number, pad: number): THREE.Vector3 => {
+      const fracs = [frac, Math.max(0.06, frac - 0.2), Math.min(0.94, frac + 0.2)];
+      let best = insidePos(dir, fracs[0], r, pad);
+      let bestS = clearanceAt(best, r + 0.15);
+      for (let ci = 1; ci < 3; ci++) {
+        const c = insidePos(dir, fracs[ci], r, pad);
+        const s = clearanceAt(c, r + 0.15);
+        if (s > bestS + 1e-9) {
+          bestS = s;
+          best = c;
+        }
+      }
+      return new THREE.Vector3(best.x, best.y, best.z);
+    };
+    // 外周 rER 管网曲线（v10 同一 hash 真源 —— 消费块几何零漂移）
+    const tubN = perf ? 5 : 9;
+    for (let i = 0; i < tubN; i++) {
+      const pts: THREE.Vector3[] = [];
+      for (let k = 0; k <= 6; k++) {
+        const t = k / 6;
+        const peDir = new THREE.Vector3(
+          Math.cos((hash01(`pe${i}`, 3) - 0.5) * 2.3 + Math.sin(t * 3.7 + i * 1.3) * 0.22) * Math.cos(hash01(`pe${i}`, 5) * Math.PI * 2 + t * 1.1),
+          Math.sin((hash01(`pe${i}`, 3) - 0.5) * 2.3 + Math.sin(t * 3.7 + i * 1.3) * 0.22),
+          Math.cos((hash01(`pe${i}`, 3) - 0.5) * 2.3 + Math.sin(t * 3.7 + i * 1.3) * 0.22) * Math.sin(hash01(`pe${i}`, 5) * Math.PI * 2 + t * 1.1),
+        ).normalize();
+        pts.push(tubePoint(peDir, 0.55 + hash01(`pe${i}`) * 0.38 + Math.sin(t * 2.6 + i) * 0.1, 0.11, 0.35));
+      }
+      const curve = new THREE.CatmullRomCurve3(pts);
+      periphCurvesPre.push(curve);
+      // 足迹采样: 每 2 控制点一枚（管 0.09 + 膜旁核糖体 ±0.12 包络 → r 0.24 保守壳）
+      for (let k = 0; k <= 6; k += 2) tubeSamplePts.push({ p: curve.getPoint(k / 6), r: 0.24 });
+    }
+    // 外周三通节点（动态管网交汇小室 —— 同 hash 真源）
+    for (let j = 0; j < 6; j++) {
+      const pjDir = new THREE.Vector3(
+        Math.cos((hash01(`pj${j}`, 3) - 0.5) * 2.0) * Math.cos(hash01(`pj${j}`, 5) * Math.PI * 2),
+        Math.sin((hash01(`pj${j}`, 3) - 0.5) * 2.0),
+        Math.cos((hash01(`pj${j}`, 3) - 0.5) * 2.0) * Math.sin(hash01(`pj${j}`, 5) * Math.PI * 2),
+      ).normalize();
+      const jp = insidePos(pjDir, 0.5 + hash01(`pj${j}`) * 0.42, 0.13, 0.4);
+      periphJunctionsPre.push(new THREE.Vector3(jp.x, jp.y, jp.z));
+      tubeSamplePts.push({ p: periphJunctionsPre[j], r: 0.16 });
+    }
+    // SER 解毒管系曲线（spec.glycogen 同门）
+    if (spec.glycogen) {
+      const serN = perf ? 7 : 12;
+      for (let i = 0; i < serN; i++) {
+        const pts: THREE.Vector3[] = [];
+        for (let k = 0; k <= 5; k++) {
+          const t = k / 5;
+          const seDir = new THREE.Vector3(
+            Math.cos((hash01(`se${i}`, 3) - 0.5) * 2.2 + Math.sin(t * 4 + i) * 0.14) * Math.cos(hash01(`se${i}`, 5) * Math.PI * 2 + t * 0.9),
+            Math.sin((hash01(`se${i}`, 3) - 0.5) * 2.2 + Math.sin(t * 4 + i) * 0.14),
+            Math.cos((hash01(`se${i}`, 3) - 0.5) * 2.2 + Math.sin(t * 4 + i) * 0.14) * Math.sin(hash01(`se${i}`, 5) * Math.PI * 2 + t * 0.9),
+          ).normalize();
+          pts.push(tubePoint(seDir, 0.28 + hash01(`se${i}`) * 0.52 + t * 0.14, 0.12, 0.35));
+        }
+        const curve = new THREE.CatmullRomCurve3(pts);
+        serCurvesPre.push(curve);
+        for (let k = 0; k <= 5; k += 2) tubeSamplePts.push({ p: curve.getPoint(k / 5), r: 0.2 });
+      }
+      // SER junction 节点（三通小室 —— 同 hash 真源）
+      for (let j = 0; j < 5; j++) {
+        const sjDir = new THREE.Vector3(
+          Math.cos((hash01(`sj${j}`, 3) - 0.5) * 2.0) * Math.cos(hash01(`sj${j}`, 5) * Math.PI * 2),
+          Math.sin((hash01(`sj${j}`, 3) - 0.5) * 2.0),
+          Math.cos((hash01(`sj${j}`, 3) - 0.5) * 2.0) * Math.sin(hash01(`sj${j}`, 5) * Math.PI * 2),
+        ).normalize();
+        const jp = insidePos(sjDir, 0.3 + hash01(`sj${j}`) * 0.5, 0.14, 0.4);
+        serJunctionsPre.push(new THREE.Vector3(jp.x, jp.y, jp.z));
+        tubeSamplePts.push({ p: serJunctionsPre[j], r: 0.17 });
+      }
+    }
+    // 入册（struct 分型 —— 游离细胞器以 bodyR 实体口径避让管网包络）
+    for (const tp of tubeSamplePts) seedAvoid(tp.p, tp.r, { struct: true });
+  }
+  /** 结构种子数（分子云 + 高尔基 + v55b 管网足迹）—— 之后均为游离细胞器足迹（QA 统计分界） */
   const structEnd = avoidPts.length;
 
   const nucMat = mat({
@@ -2145,34 +2234,16 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   // 外周 ER 管网（v10: 延展到细胞外周的迷宫管网 —— 高保真插画中"ER 遍布胞质"的读感;
   // 动态管状网络 + 三通节点 + 膜旁核糖体 —— 与核旁囊池共同构成连续的內质网系统）
   {
-    const tubN = perf ? 5 : 9;
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
-    const periphCurves: THREE.CatmullRomCurve3[] = [];
-    for (let i = 0; i < tubN; i++) {
-      const pts: THREE.Vector3[] = [];
-      for (let k = 0; k <= 6; k++) {
-        const t = k / 6;
-        const peDir = new THREE.Vector3(
-          Math.cos((hash01(`pe${i}`, 3) - 0.5) * 2.3 + Math.sin(t * 3.7 + i * 1.3) * 0.22) * Math.cos(hash01(`pe${i}`, 5) * Math.PI * 2 + t * 1.1),
-          Math.sin((hash01(`pe${i}`, 3) - 0.5) * 2.3 + Math.sin(t * 3.7 + i * 1.3) * 0.22),
-          Math.cos((hash01(`pe${i}`, 3) - 0.5) * 2.3 + Math.sin(t * 3.7 + i * 1.3) * 0.22) * Math.sin(hash01(`pe${i}`, 5) * Math.PI * 2 + t * 1.1),
-        ).normalize();
-        const p = insidePos(peDir, 0.55 + hash01(`pe${i}`) * 0.38 + Math.sin(t * 2.6 + i) * 0.1, 0.11, 0.35);
-        pts.push(new THREE.Vector3(p.x, p.y, p.z));
-      }
-      const curve = new THREE.CatmullRomCurve3(pts);
-      periphCurves.push(curve);
+    /* v55b: 曲线/三通节点自前置净空块消费（管网与游离细胞器互不穿模 —— 预计算与足迹
+     * 入册见 structEnd 前块; hash 真源不变 → 管形读感一致） */
+    const periphCurves = periphCurvesPre;
+    for (const curve of periphCurves) {
       parts.push({ geo: track(new THREE.TubeGeometry(curve, 30, 0.09, 7)) });
     }
     // 三通节点（动态管网交汇小室）
     const pjGeo = track(new THREE.SphereGeometry(0.1, 8, 6));
-    for (let j = 0; j < 6; j++) {
-      const pjDir = new THREE.Vector3(
-        Math.cos((hash01(`pj${j}`, 3) - 0.5) * 2.0) * Math.cos(hash01(`pj${j}`, 5) * Math.PI * 2),
-        Math.sin((hash01(`pj${j}`, 3) - 0.5) * 2.0),
-        Math.cos((hash01(`pj${j}`, 3) - 0.5) * 2.0) * Math.sin(hash01(`pj${j}`, 5) * Math.PI * 2),
-      ).normalize();
-      const jp = insidePos(pjDir, 0.5 + hash01(`pj${j}`) * 0.42, 0.13, 0.4);
+    for (const jp of periphJunctionsPre) {
       parts.push({ geo: pjGeo, matrix: new THREE.Matrix4().setPosition(jp.x, jp.y, jp.z) });
     }
     const periph = new THREE.Mesh(track(mergeGeoms(parts)), mat({
@@ -2238,34 +2309,19 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   // 滑面内质网（肝细胞解毒管系 —— CYP450 管网）
   if (spec.glycogen) {
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
-    const serN = perf ? 7 : 12;
-    /** v29 逐管控制折线（全段折线命中体真源 —— 替换旧每 3 管 1 点锚） */
-    const serPolys: THREE.Vector3[][] = [];
-    for (let i = 0; i < serN; i++) {
+    /* v55b: 曲线自前置净空块消费（管系避让游离细胞器/冠层/高尔基 —— 见 structEnd 前块）;
+     * v29 全段折线命中体真源改为曲线等参采样（getPoint 恒在管身中心线上 —— 命中更精确） */
+    const serPolys: THREE.Vector3[][] = serCurvesPre.map((curve) => {
       const pts: THREE.Vector3[] = [];
-      for (let k = 0; k <= 5; k++) {
-        const t = k / 5;
-        // v6: 管系在类型化体内游走（贴核 → 近膜区间, 随形状伸缩）
-        const seDir = new THREE.Vector3(
-          Math.cos((hash01(`se${i}`, 3) - 0.5) * 2.2 + Math.sin(t * 4 + i) * 0.14) * Math.cos(hash01(`se${i}`, 5) * Math.PI * 2 + t * 0.9),
-          Math.sin((hash01(`se${i}`, 3) - 0.5) * 2.2 + Math.sin(t * 4 + i) * 0.14),
-          Math.cos((hash01(`se${i}`, 3) - 0.5) * 2.2 + Math.sin(t * 4 + i) * 0.14) * Math.sin(hash01(`se${i}`, 5) * Math.PI * 2 + t * 0.9),
-        ).normalize();
-        const p = insidePos(seDir, 0.28 + hash01(`se${i}`) * 0.52 + t * 0.14, 0.12, 0.35);
-        pts.push(new THREE.Vector3(p.x, p.y, p.z));
-      }
-      serPolys.push(pts);
-      parts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 20, 0.085, 7)) });
+      for (let k = 0; k <= 5; k++) pts.push(curve.getPoint(k / 5));
+      return pts;
+    });
+    for (const curve of serCurvesPre) {
+      parts.push({ geo: track(new THREE.TubeGeometry(curve, 20, 0.085, 7)) });
     }
-    // 管系 junction 节点（三通小室）
+    // 管系 junction 节点（三通小室; v55b 前置净空块消费）
     const jGeo = track(new THREE.SphereGeometry(0.11, 8, 6));
-    for (let j = 0; j < 5; j++) {
-      const sjDir = new THREE.Vector3(
-        Math.cos((hash01(`sj${j}`, 3) - 0.5) * 2.0) * Math.cos(hash01(`sj${j}`, 5) * Math.PI * 2),
-        Math.sin((hash01(`sj${j}`, 3) - 0.5) * 2.0),
-        Math.cos((hash01(`sj${j}`, 3) - 0.5) * 2.0) * Math.sin(hash01(`sj${j}`, 5) * Math.PI * 2),
-      ).normalize();
-      const jp = insidePos(sjDir, 0.3 + hash01(`sj${j}`) * 0.5, 0.14, 0.4);
+    for (const jp of serJunctionsPre) {
       parts.push({ geo: jGeo, matrix: new THREE.Matrix4().setPosition(jp.x, jp.y, jp.z) });
     }
     const ser = new THREE.Mesh(track(mergeGeoms(parts)), mat({
@@ -4821,7 +4877,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     }
   }
 
-  // v54 QA 插桩: 空旷域净空统计（agent-browser 活体验证「细胞器避开 pathway / 互不堆叠」）
+  // v54/v55 QA 插桩: 空旷域净空统计（agent-browser 活体验证「细胞器避开 pathway / 互不堆叠」）
   if (typeof window !== 'undefined') {
     const cloudN = avoid?.length ?? 0;
     let minMol = Infinity; // 游离细胞器 → 分子云最小净空（负 = 交叠）
@@ -4837,11 +4893,28 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         if (d < minOrg) minOrg = d;
       }
     }
+    // v55 真源指标: 游离细胞器以 bodyR 实体半径对冠层解析壳/管网足迹的真实间隙
+    // （负 = 与实际渲染几何穿模 —— 用户「线粒体和内质网空间冲突」的直接度量）
+    let minCrown = Infinity;
+    let minTube = Infinity;
+    for (let i = structEnd; i < avoidPts.length; i++) {
+      const bodyR = avoidBody[i] ?? avoidRads[i];
+      const cc = erCrownClearance(avoidPts[i], bodyR);
+      if (cc < minCrown) minCrown = cc;
+      for (const tp of tubeSamplePts) {
+        const d = avoidPts[i].distanceTo(tp.p) - (tp.r + bodyR);
+        if (d < minTube) minTube = d;
+      }
+    }
     (window as unknown as Record<string, unknown>).__orgQa = {
       cloud: cloudN,
       placed: avoidPts.length - structEnd,
       minMol: Number.isFinite(minMol) ? +minMol.toFixed(3) : null,
       minOrg: Number.isFinite(minOrg) ? +minOrg.toFixed(3) : null,
+      crownLayers: erCrowns.reduce((a, c) => a + c.layers.length, 0),
+      tubes: tubeSamplePts.length,
+      minCrown: Number.isFinite(minCrown) ? +minCrown.toFixed(3) : null,
+      minTube: Number.isFinite(minTube) ? +minTube.toFixed(3) : null,
       golgiNuc: nucAvoid.map((na) => +(GOLGI_POS.distanceTo(na.p) - (na.r + GOLGI_DISK_R * 0.78)).toFixed(3)),
     };
   }
