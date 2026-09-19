@@ -24,6 +24,7 @@ import { Html } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import type { Vec3 } from '@/lib/simulation/layout3d';
 import { glowSpriteTexture } from './textures';
+import { sectionPlaneSource } from './section-view';
 import { useLang } from '@/lib/i18n';
 
 /* ============ 悬停目标契约 ============ */
@@ -245,12 +246,12 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
     let bestScore = Infinity;
     /** v21 胜者真实像素距离（仲裁用 —— score 含惩罚项不可直接反推） */
     let bestPixelDist = Infinity;
-    /* v22 剖面模式锚点裁剪: 全局裁剪面（SectionClipController → gl.clippingPlanes）
+    /* v22 剖面模式锚点裁剪: 剖面真源（SectionClipController 每帧写入 sectionPlaneSource 单例;
+     * v53 材质局部裁剪改造后 gl.clippingPlanes 恒空 —— 单例为唯一真源）
      * 前半被剖掉的细胞器视觉已剪除 —— 锚点同步不感应（悬停所见即所指; 用户反馈
      * 「剖面下悬停不弹信息」的配套: 2D 贴图退役后真 3D 细胞器在剖面窗口可悬停,
-     * 而被剖掉的前半细胞器不再「隐形响应」）。分裂模式/常规模式 clippingPlanes 为空 → 不生效 */
-    const clipPlanes = state.gl.clippingPlanes;
-    const clip0 = clipPlanes && clipPlanes.length > 0 ? clipPlanes[0] : null;
+     * 而被剖掉的前半细胞器不再「隐形响应」）。分裂模式/常规模式单例为 null → 不生效 */
+    const clip0 = sectionPlaneSource.current;
     /** v21 双通道仲裁: 细胞器锤点命中（既有算法）与折线命中（信号边全段）分开评分,
      *  边仅在「明显更近」时胜出 —— 指向细胞器本体时永远显示细胞器（用户反馈「只显示pathway信息」根治） */
     let bestEdge: HoverTarget | null = null;

@@ -7,10 +7,12 @@
  * 表征科学约定:
  *   - 受体/通道: 跨膜 α-螺旋（胶囊体）+ 胞外配体结合域 + 胞内信号域
  *   - 配体: 胞外小球（自由扩散热运动近似为布朗漂移）
- *   - 激酶/G 蛋白等: 球形（活性 = 发光强度，磷酸化 = 琥珀色光环 + P 徽标）
+ *   - 激酶/G 蛋白等: 球形（活性 = 发光强度，磷酸化 = 琥珀色 billboard 光环 + P 基团轨道珠 + P 徽标）
+ * v53 剖面完整性: 分子材质全部携带 noSectionClip 豁免标记 —— 节点在 50% 剖面处恒渲染
+ * 完整球体（不再被切平剖开）; 完全落入剖掉前半区的分子整组隐藏（视觉/标签/悬停一致）
  * 状态更新走 imperative（useFrame 直读 store 快照引用），不触发 React 重渲染
  */
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
@@ -20,6 +22,7 @@ import { NODE_NOTES, fallbackNote } from '@/lib/simulation/molecular-notes';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
 import { useLang } from '@/lib/i18n';
+import { noSectionClipTag } from './section-view';
 
 export const KIND_COLORS: Record<string, { color: string; label: string }> = {
   ligand: { color: '#fbbf24', label: '配体' },
@@ -44,6 +47,9 @@ const COMPARTMENT_ZH: Record<string, string> = {
 
 /** 剖面裁剪检测复用的世界坐标临时向量（避免每帧分配） */
 const _wp = new THREE.Vector3();
+/** v53b 光环 billboard: 分子→相机方向与环默认法向（billboard 目标） */
+const _cd = new THREE.Vector3();
+const FORWARD = new THREE.Vector3(0, 0, 1);
 
 /** 模拟状态快照（由父组件维护并每帧直读） */
 export interface SimSnapshot {
@@ -105,54 +111,95 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
   // 共享材质（跨膜螺旋 + ECD + ICD 同一材质，活性统一驱动）
   const coreMat = useMemo(
     () =>
-      new THREE.MeshStandardMaterial({
-        color: isReceptor ? '#0f2e2b' : '#0b1a17',
-        emissive: new THREE.Color(kindColor),
-        emissiveIntensity: 0.5,
-        transparent: true,
-        opacity: 0.96,
-        roughness: node.kind === 'ligand' ? 0.2 : 0.38,
-      }),
+      noSectionClipTag(
+        new THREE.MeshStandardMaterial({
+          color: isReceptor ? '#0f2e2b' : '#0b1a17',
+          emissive: new THREE.Color(kindColor),
+          emissiveIntensity: 0.5,
+          transparent: true,
+          opacity: 0.96,
+          roughness: node.kind === 'ligand' ? 0.2 : 0.38,
+        }),
+      ),
     [kindColor, isReceptor, node.kind],
   );
   const haloMat = useMemo(
     () =>
-      new THREE.MeshBasicMaterial({
-        color: new THREE.Color(kindColor),
-        transparent: true,
-        opacity: 0,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      }),
+      noSectionClipTag(
+        new THREE.MeshBasicMaterial({
+          color: new THREE.Color(kindColor),
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        }),
+      ),
     [kindColor],
   );
   const phosphoMat = useMemo(
     () =>
-      new THREE.MeshBasicMaterial({
-        color: '#fbbf24',
-        transparent: true,
-        opacity: 0,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      }),
+      noSectionClipTag(
+        new THREE.MeshBasicMaterial({
+          color: '#fbbf24',
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        }),
+      ),
     [],
   );
   const inhibMat = useMemo(
     () =>
-      new THREE.MeshBasicMaterial({
-        color: '#c084fc',
-        transparent: true,
-        opacity: 0,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      }),
+      noSectionClipTag(
+        new THREE.MeshBasicMaterial({
+          color: '#c084fc',
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        }),
+      ),
     [],
   );
   // 拾取代理材质（完全透明, 仅作命中区域 —— 悬停命中与可见分子严格对齐）
   const hitMat = useMemo(
-    () => new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+    () => noSectionClipTag(new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })),
     [],
   );
+  // v53 P 基团轨道珠（磷酸化位点的可视语义 —— 珠沿平置光环公转, 平面内自旋可见）
+  const phBeadsRef = useRef<THREE.InstancedMesh>(null);
+  const inhBeadsRef = useRef<THREE.InstancedMesh>(null);
+  const beadGeom = useMemo(() => new THREE.SphereGeometry(0.078, 10, 8), []);
+  const phBeadMat = useMemo(
+    () =>
+      noSectionClipTag(
+        new THREE.MeshBasicMaterial({ color: '#fcd34d', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }),
+      ),
+    [],
+  );
+  const inhBeadMat = useMemo(
+    () =>
+      noSectionClipTag(
+        new THREE.MeshBasicMaterial({ color: '#d8b4fe', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }),
+      ),
+    [],
+  );
+  // 轨道珠位置焊接（确定性烘焙 —— 珠落在光环自身平面 XY（z=0）, 随环一同 billboard; 父环 scale 带动轨道半径）
+  useLayoutEffect(() => {
+    const bake = (im: THREE.InstancedMesh | null, n: number, rr: number) => {
+      if (!im) return;
+      const m = new THREE.Matrix4();
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + Math.PI / n;
+        m.makeTranslation(rr * Math.cos(a), rr * Math.sin(a), 0);
+        im.setMatrixAt(i, m);
+      }
+      im.instanceMatrix.needsUpdate = true;
+    };
+    bake(phBeadsRef.current, 6, node.r * 1.5 + 0.12);
+    bake(inhBeadsRef.current, 4, node.r * 1.85 + 0.16);
+  }, [node.r]);
   useEffect(
     () => () => {
       coreMat.dispose();
@@ -160,8 +207,11 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
       phosphoMat.dispose();
       inhibMat.dispose();
       hitMat.dispose();
+      beadGeom.dispose();
+      phBeadMat.dispose();
+      inhBeadMat.dispose();
     },
-    [coreMat, haloMat, phosphoMat, inhibMat, hitMat],
+    [coreMat, haloMat, phosphoMat, inhibMat, hitMat, beadGeom, phBeadMat, inhBeadMat],
   );
 
   // 标签点击选中（用户需求: 点击标签与点击球体同样选中分子）。
@@ -236,9 +286,13 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
     // 世界坐标一次计算（剖切检测 + 标签距离淡出共用; 模块级临时向量避免每帧分配）
     const grp = groupRef.current;
     if (grp) grp.getWorldPosition(_wp);
-    // 剖面模式: 被剖掉的前半分子 → DOM 标签同步隐藏（mesh 已被 WebGL 全局裁剪）
+    // v53 剖面完整性: 分子材质豁免 WebGL 裁剪（节点在切面处恒渲染完整球体 —— 用户
+    // 「50% 处显示完整」）; 仅「完全落入剖掉前半区」的分子整组隐藏（半径含受体胶囊全长）
     const clipPlane = sim.current.clipPlane;
-    const clipped = !!(clipPlane && grp && clipPlane.distanceToPoint(_wp) < 0);
+    const effR = isReceptor ? 1.2 : Math.max(node.r, 0.5);
+    const d = clipPlane && grp ? clipPlane.distanceToPoint(_wp) : 1;
+    const clipped = d < -effR;
+    if (grp) grp.visible = !clipped;
     // 标签距离淡出: 近距全显 → 远距降至 0.4（深度暗示 + 降低远景标签密度; 概览机位 ≈31 保持高可读）
     const camDist = grp ? state.camera.position.distanceTo(_wp) : 30;
     const distFade = camDist <= 26 ? 1 : Math.max(0.4, 1 - (camDist - 26) * (0.6 / 34));
@@ -276,25 +330,68 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
       const pulse = 1 + Math.max(a * 0.25, flash * 0.5, isTourTarget ? 0.3 : 0, isVisited ? 0.1 : 0) * Math.sin(t * 3 + phase);
       haloRef.current.scale.setScalar(pulse);
     }
-    // 磷酸化环
+    // 磷酸化光环（v53b: billboard 状态环 —— 法向恒指向相机, 任意机位全圆可读;
+    // 用户「圈应转 90°」的彻底解: 平置环在低仰角机位下「侧对成线」几乎不可见（实测 262×6px 细条）
+    // → 状态指示环正对观察者 —— 激活节点在任何视角下环清晰一致; P 珠沿环面公转承担动感
     if (phosphoRef.current) {
-      phosphoRef.current.visible = ph > 0.08;
+      const on = ph > 0.08;
+      phosphoRef.current.visible = on;
       phosphoRef.current.scale.setScalar(Math.max(0.001, ph));
-      phosphoRef.current.rotation.y = t * 1.4;
-      phosphoRef.current.rotation.x = Math.PI / 3;
-      phosphoMat.opacity = Math.min(0.95, ph * 1.3);
+      if (on) {
+        _cd.copy(state.camera.position).sub(_wp).normalize();
+        phosphoRef.current.quaternion.setFromUnitVectors(FORWARD, _cd);
+      }
+      phosphoMat.opacity = Math.min(0.9, ph * 1.15);
     }
-    // 药物抑制环（紫色，反向旋转）
+    if (phBeadsRef.current) {
+      phBeadsRef.current.visible = ph > 0.08;
+      phBeadsRef.current.rotation.set(0, 0, t * 0.85); // 环面内公转（局部 Z = billboard 法向）
+      phBeadMat.opacity = Math.min(0.95, ph * 1.4);
+    }
+    // 药物抑制光环（紫色, 反向公转珠; 同 billboard 范式）
     const inh = sim.current.inhibition?.[node.id] ?? 0;
     if (inhibRingRef.current) {
-      inhibRingRef.current.visible = inh > 0.05;
+      const on = inh > 0.05;
+      inhibRingRef.current.visible = on;
       inhibRingRef.current.scale.setScalar(Math.max(0.001, 0.6 + inh * 0.6));
-      inhibRingRef.current.rotation.y = -t * 1.1;
-      inhibRingRef.current.rotation.x = -Math.PI / 3;
-      inhibMat.opacity = Math.min(0.9, inh * 1.1);
+      if (on) {
+        _cd.copy(state.camera.position).sub(_wp).normalize();
+        inhibRingRef.current.quaternion.setFromUnitVectors(FORWARD, _cd);
+      }
+      inhibMat.opacity = Math.min(0.85, inh * 1.05);
     }
-    // 选中环缓慢旋转（点击反馈动感; 与标签 is-selected 高亮同步强化「已选中」感知）
-    if (selRingRef.current) selRingRef.current.rotation.z = t * 0.85;
+    if (inhBeadsRef.current) {
+      inhBeadsRef.current.visible = inh > 0.05;
+      inhBeadsRef.current.rotation.set(0, 0, -t * 0.62);
+      inhBeadMat.opacity = Math.min(0.9, inh * 1.2);
+    }
+    // 选中环（v53b billboard 金环 + 呼吸脉动; 与标签 is-selected 同步强化「已选中」感知）
+    if (selRingRef.current) {
+      selRingRef.current.scale.setScalar(1 + 0.055 * Math.sin(t * 2.6));
+      _cd.copy(state.camera.position).sub(_wp).normalize();
+      selRingRef.current.quaternion.setFromUnitVectors(FORWARD, _cd);
+    }
+    // QA 插桩（__cellQaProbe 门控 —— v53b billboard 光环/轨道珠状态真源; bb = 环法向·相机方向 ≈1 即正对）
+    if (typeof window !== 'undefined' && (window as { __cellQaProbe?: boolean }).__cellQaProbe) {
+      const w = ((window as unknown as Record<string, unknown>).__molRingQa ?? {}) as Record<string, unknown>;
+      const im = phBeadsRef.current;
+      let bb: number | null = null;
+      if (phosphoRef.current?.visible) {
+        _cd.copy(state.camera.position).sub(_wp).normalize();
+        const n = FORWARD.clone().applyQuaternion(phosphoRef.current.quaternion);
+        bb = +n.dot(_cd).toFixed(3);
+      }
+      w[node.id] = {
+        ph: +ph.toFixed(3),
+        ring: !!phosphoRef.current?.visible,
+        ringS: +(phosphoRef.current?.scale.x ?? 0).toFixed(2),
+        bb,
+        beads: !!im?.visible,
+        pos: [+_wp.x.toFixed(2), +_wp.y.toFixed(2), +_wp.z.toFixed(2)],
+        bead0: im ? [+im.instanceMatrix.array[12].toFixed(2), +im.instanceMatrix.array[14].toFixed(2)] : null,
+      };
+      (window as unknown as Record<string, unknown>).__molRingQa = w;
+    }
     // 标签（DOM imperative; 剖切掉的分子不显示; 远距离淡出; 窄视口智能降噪）
     const el = labelRef.current;
     if (el) {
@@ -337,6 +434,8 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
       ref={groupRef}
       position={[node.pos.x, node.pos.y, node.pos.z]}
       onPointerOver={(e) => {
+        // v53: 完全落入剖掉前半区的分子不响应悬停（不可见即不交互）
+        if (groupRef.current && !groupRef.current.visible) return;
         e.stopPropagation();
         onHover(node.id);
         document.body.style.cursor = 'pointer';
@@ -346,6 +445,7 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
         document.body.style.cursor = 'auto';
       }}
       onClick={(e) => {
+        if (groupRef.current && !groupRef.current.visible) return;
         e.stopPropagation();
         useLabStore.getState().selectNode(node.id);
       }}
@@ -376,21 +476,23 @@ const Molecule3D = memo(function Molecule3D({ node, sim, selected, showLabel, mu
         <sphereGeometry args={[isReceptor ? 0.95 : node.r * 2.05, 16, 12]} />
       </mesh>
 
-      {/* 磷酸化环（琥珀色, 装饰 —— 不参与拾取） */}
+      {/* 磷酸化光环（琥珀色 billboard 状态环 + P 基团轨道珠 —— 磷酸化位点的可视语义; 装饰 —— 不参与拾取） */}
       <mesh ref={phosphoRef} material={phosphoMat} scale={0.001} renderOrder={91} raycast={() => null}>
         <torusGeometry args={[node.r * 1.5 + 0.12, 0.05, 8, 32]} />
+        <instancedMesh ref={phBeadsRef} args={[beadGeom, phBeadMat, 6]} visible={false} renderOrder={91} raycast={() => null} frustumCulled={false} />
       </mesh>
 
-      {/* 药物抑制环（紫色 = 催化输出钳制, 装饰 —— 不参与拾取） */}
+      {/* 药物抑制光环（紫色 billboard 状态环 + 抑制剂珠; 装饰 —— 不参与拾取） */}
       <mesh ref={inhibRingRef} material={inhibMat} scale={0.001} renderOrder={92} raycast={() => null}>
         <torusGeometry args={[node.r * 1.85 + 0.16, 0.055, 8, 36]} />
+        <instancedMesh ref={inhBeadsRef} args={[beadGeom, inhBeadMat, 4]} visible={false} renderOrder={92} raycast={() => null} frustumCulled={false} />
       </mesh>
 
-      {/* 选中环（装饰 —— 不参与拾取; 缓慢旋转 + 金色与标签 is-selected 同色系） */}
+      {/* 选中环（billboard 金环 + 呼吸脉动; 装饰 —— 不参与拾取; 金色与标签 is-selected 同色系） */}
       {selected && (
-        <mesh ref={selRingRef} rotation={[Math.PI / 2.4, 0, 0]} raycast={() => null}>
+        <mesh ref={selRingRef} raycast={() => null}>
           <torusGeometry args={[isReceptor ? 1.3 : node.r + 0.44, 0.048, 8, 48]} />
-          <meshBasicMaterial color="#fef3c7" transparent opacity={0.95} depthWrite={false} />
+          <meshBasicMaterial color="#fef3c7" transparent opacity={0.95} depthWrite={false} userData={{ noSectionClip: true }} />
         </mesh>
       )}
 

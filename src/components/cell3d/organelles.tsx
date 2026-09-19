@@ -43,6 +43,7 @@ import { displaceGeometry, fbm3, fibSphere, hash01, mergeGeoms, sph } from './pr
 import { glowSpriteTexture, organicNormalMap, speckleNormalMap, stripeNormalMap } from './textures';
 import { createTimeUniform, glowMaterial, organelleMaterial, volumeMaterial, REF, type TimeUniform } from './materials';
 import { autophagyLevel, AUTOPHAGY_VISIBLE_THRESHOLD } from '@/lib/simulation/autophagy';
+import { sectionPlaneSource } from './section-view';
 import { secretionLevel } from '@/lib/simulation/secretion';
 import { useLabStore } from '@/store/lab-store';
 import { useLang } from '@/lib/i18n';
@@ -1383,7 +1384,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
    *   （SECTION_ORIENTS: front=(0,-0.22,-1) 等），50% depth 时平面为过原点的斜面 n·p=0，
    *   静态钉位的线粒体中心不在其上；且深度滑块拖动时平面扫掠（constant = Rn − depth·2Rn），
    *   示教锚完全静止 —— 用户拖到任何深度，细胞器中心都脱离切平面。
-   * v23 方案: 示教个体每帧读 gl.clippingPlanes[0]（SectionClipController 单一真源），把中心「动态吸附」
+   * v23 方案: 示教个体每帧读剖面平面真源（v53 改读 sectionPlaneSource 单例，SectionClipController 每帧写入），把中心「动态吸附」
    *   到当前切平面（home 沿法向投影），配套核避让 / 膜内钳 / 长轴对齐面内 / 悬停锚引用同步。
    *   平滑 lerp 追随 —— 拖深度时示教细胞器「贴着切面滑动」，切到哪层剖到哪层（逐层切片教学语义）。 */
   interface ShowcaseAnchor {
@@ -4099,7 +4100,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       q * q * a.z + 2 * q * k * b.z + k * k * c.z,
     );
   };
-  /* ---- v23 剖面示教锚吸附（单一真源 = gl.clippingPlanes[0]，由 SectionClipController 每帧更新） ----
+  /* ---- v23 剖面示教锚吸附（单一真源 = sectionPlaneSource 单例，由 SectionClipController 每帧更新） ----
    * 数学不变量: 所有钳制均沿「面内」进行 —— 中心恒满足 n·p + c = 0（用户诉求「细胞器中心放在
    * 50% depth 上」的精确保证; 50% 时平面过核, 径向避让必然破坏贴合 → 面内避让是唯一正确解）:
    *   ① home 沿法向投影到平面（无平移量钳 —— 面内钳制体系自然处理极端深度: 平面贴近膜缘时
@@ -4551,16 +4552,15 @@ export const CellBody = ({ spec, tint, dim, showAnatomy, perf, cutaway, locate, 
   );
 
   // 帧驱动: 传入 ULK1 自噬驱动水平（无 ULK1 通路 → 0 → 自噬系统静默）
-  // v23: 同时传全局裁剪平面（剖面模式单一真源 —— 示教锚动态吸附切平面）
-  // v36: 同时传分泌驱动水平（信号活性 → TGN 分泌流速率/亮度联动 —— getState 帧读零重渲染）
+  // v23: 同时传剖面平面（剖面真源 —— v53 材质局部裁剪改造后改读 sectionPlaneSource 单例,
+  // 示教锚动态吸附切平面）; v36: 同时传分泌驱动水平（信号活性 → TGN 分泌流速率/亮度联动 —— getState 帧读零重渲染）
   useFrame((state) => {
-    const planes = state.gl.clippingPlanes;
     const st = useLabStore.getState();
     build.update(
       state.clock.elapsedTime,
       autophagyLevel(st.nodeStates),
       secretionLevel(st.nodeStates),
-      planes && planes.length > 0 ? planes[0] : null,
+      sectionPlaneSource.current,
     );
   });
 

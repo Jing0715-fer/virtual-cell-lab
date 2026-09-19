@@ -2850,3 +2850,71 @@ Stage Summary:
 - 下阶段建议: ①organelles 渲染侧 nucPoint/nucSurf → nucleusInstances 迁移（同
   本次范式）②DrugMoleculeLayer 标签接入防叠注册表（v37 遗留）③图版导出多面板
   2×2 对照版式 ④引导模式接入减数分裂站点叙事 ⑤神经元树突/轴突折线命中体
+
+---
+Task ID: 53
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户第 26 轮反馈 —— 「为何有一些节点有一个圈，有的没有，这个圈感觉应该转90度，节点应该避免在50%处被剖开，要在50%处显示完整。继续打磨各种项目的细节」
+
+Work Log:
+- 【诊断①: 「节点在 50% 处被剖开」—— 全局裁剪无法豁免】
+  · 症状链: SectionClipController 用 gl.clippingPlanes 全局裁剪（对所有材质生效, 无法按材质豁免）
+    → 贴面模式分子中心距切面仅 0.3, 而节点半径 0.36-0.62 → 每颗贴面分子的前帽都被切平
+    → 被切球体呈现「圆形切面 + 空腔内壁」（DoubleSide 化后尤甚）= 用户所见的「圈」之一源
+  · 根治: 全局 → 材质局部裁剪改造（renderer.localClippingEnabled + 逐材质 material.clippingPlanes）
+    · userData.noSectionClip === true 的材质（分子/药物本体、光晕、磷酸化环、P 珠、选中环）
+      永不参与剖面裁剪 → 节点在切面处恒渲染完整球体（「50% 处显示完整」落地）
+    · 其余材质（膜/细胞器/边线）与旧全局裁剪行为严格一致（NUM_CLIPPING_PLANES 同为 1）
+    · 共享同一 planesArr 数组引用 → 已赋材质零重编译扰动; 新材质 150ms 补扫（旧 500ms 双面化
+      补扫同步加密）
+  · 完全落入剖掉前半区的分子: Molecule3D/DrugMolecule3D 帧门整组隐藏（d < -effR; 受体按胶囊
+    全长 1.2 取效半径）—— 视觉/标签/悬停三一致, 悬停事件加 visible 守卫
+  · 三个 gl.clippingPlanes 消费方迁移到 sectionPlaneSource 单例（SectionClipController 每帧
+    写入, 与 sim.clipPlane 同源）: hover-labels 锚点裁剪（v22）/ organelles 示教锚贴面吸附（v23）
+- 【诊断②: 「有一个圈有的没有 + 应转 90°」—— 环朝向的机位相依可见性】
+  · 环语义: 磷酸化环（琥珀）只在激活分子上出现 = 「有的没有」是状态指示（非缺陷）; 但旧环
+    π/3 倾斜 + 翻滚自旋, 引导相机低仰角时几乎侧对成线（实测平置环 262×6px 细条 = 视觉消失）
+    → 不同机位下环忽隐忽现 = 「有的节点有圈有的没有」的第二根源
+  · 根治 v53b: 磷酸化/抑制/选中三环全部 billboard（法向恒指向相机, setFromUnitVectors 每帧）
+    → 任意机位全圆可读, 激活节点环清晰一致; 选中环从翻滚改为呼吸脉动
+  · 新增磷酸化 P 基团轨道珠: 每分子一个 InstancedMesh（6 珠琥珀 / 抑制 4 珠紫色反向）,
+    烘焙于环自身平面随环 billboard, 绕环面法向公转（rotation.z）—— 「磷酸化位点」可视语义
+    + 对称环平面内自旋不可见问题的动感承担者; 珠径 0.078, 亮度随 phospho
+- 【药物层同步豁免】drug-molecules.tsx 原子/键材质 noSectionClip + 帧门前半区隐藏
+  （逼近路径前段与旧裁剪行为等效 —— 越过切面后现身）
+- 【QA 方法论】①截图必须确认 canvas 在视口内（页面滚动后 rect 才有效 —— 本轮曾对 landing
+  页面做像素分析的全无效教训）②HMR 后 canvas 半挂载/滚动重置 —— 可靠路径是整页 reload
+  ③快照相机矩阵可能滞后 —— 投影前先读实时 cam④注释多行必须每行 //（本轮 500 事故根因）
+- 【QA（agent-browser 交互级 + 探针真源 + 像素量化; lint 零错误; console 零错误; dev.log 全 200）】
+  · __clipQa: local=true global=0 assigned=239（膜/细胞器/边线照常裁剪）exempt=338（分子族
+    全量豁免）planeC=0（50% 过心）
+  · 完整性像素等价: 剖面 ON/OFF 两态分子像素 bright 10688/10634（±0.5%）—— 切面不再吃掉
+    任何分子（旧全局裁剪下 ON 会移除前半分子）
+  · __molRingQa: GRB2/EGFR bb=1.000（billboard 精确正对）ph=0.85 ringS=0.85;
+    bead0=[0.53,0]（烘焙半径=环半径 0.615 严格同心）
+  · 悬停管线: TGFBR1 标签 mouseenter → tip 卡全词条 ✓; 引导推进 3/10 站相机飞行 ✓;
+    模拟播放 T+82.5s 36 events ✓（激活分子 + 珠点 + 琥珀辉光云渲染确认）
+  · 回归: Task52 区室保真 __layoutPlaneQa nucInDisc=1.0 discs=2 ✓; i18n 中英往返 ✓;
+    375×780 scrollW=375 无溢出 ✓
+- 【事故处置】tsc 全项目扫描第三次 OOM 杀死 dev server（NODE_OPTIONS 限容亦未护住 ——
+  教训固化: 本项目永不跑全量 tsc, 类型信心走 Turbopack 编译 + eslint + 运行时）;
+  setsid 后台重启恢复 HTTP 200
+
+Stage Summary:
+- 用户三项诉求落地: ①「圈应转 90°」→ 磷酸化/抑制/选中环 billboard 正对观察者（状态环任意
+  机位全圆可读, 根治低仰角侧对成线的忽隐忽现）②「50% 处显示完整」→ 全局裁剪改材质局部裁剪,
+  分子/药物族豁免 —— 节点在切面处恒完整球体（剖面 ON/OFF 分子像素等价 ±0.5% 实证）③细节打磨
+  → P 基团轨道珠（磷酸化位点可视语义 + 环面公转动感）、选中环呼吸化、药物层同步豁免
+- 架构沉淀: ①「userData.noSectionClip 材质级裁剪豁免」范式（全局裁剪无法豁免的 Three.js
+  限制的工程解; 帧门整组隐藏补全语义）②「sectionPlaneSource 单例」剖面真源（gl.clippingPlanes
+  退役后所有消费方的唯一真源）③「状态指示物 billboard」原则（符号性覆盖物朝向观察者, 物理性
+  结构保持世界对齐 —— 与标签 DOM 屏幕空间化同一设计语言）
+- 产出: section-view.tsx（局部裁剪改造 + 单例 + __clipQa）/ molecules.tsx（豁免标记 + 帧门 +
+  billboard 三环 + P 珠 InstancedMesh + __molRingQa）/ drug-molecules.tsx（豁免 + 帧门）/
+  hover-labels.tsx + organelles.tsx（真源迁移）
+- 未解决/风险: ①headless SwiftShader 无 bloom, 环/珠辉光压缩成云状（真机 bloom 下为清晰亮环
+  —— 已用 bb=1 探针 + 珠点像素双重验证几何正确）② DrugMoleculeLayer 标签未入防叠注册表
+  （v37 遗留）③organelles 渲染侧 nucPoint/nucSurf 单核 helper 未迁移多核（v52 遗留）
+- 下阶段建议: ①图版导出多面板 2×2 对照版式 ②引导模式接入减数分裂站点叙事 ③神经元树突/轴突
+  折线命中体 ④DrugMoleculeLayer 标签接入防叠注册表 ⑤剖面模式下分子「完整球 + 阴影投影盘」
+  （切面接触阴影增强贴面读感）

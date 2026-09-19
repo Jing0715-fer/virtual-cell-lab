@@ -1,9 +1,10 @@
 'use client';
 
 /**
- * 细胞剖面展示模块（v3 —— 剖面轮廓与细胞形态精确贴合）
+ * 剖面展示模块（v3 —— 剖面轮廓与细胞形态精确贴合；v53 材质局部裁剪改造）
  * ============ 科学定位 ============
- * 基于 Three.js 全局裁剪平面（clippingPlanes）剖切细胞前半部：
+ * 基于 Three.js 裁剪平面剖切细胞前半部（v53: 全局 gl.clippingPlanes → 材质局部
+ * material.clippingPlanes —— userData.noSectionClip 的分子/药物材质豁免, 节点在切面处恒完整渲染）
  *   1. 剖切深度 0-1 线性扫掠: 切平面从质膜前缘 (constant=+R·extent) 推进到后缘，
  *      途中经过形状轴心 (depth=0.5) —— 与显微切片"逐层切片"语义一致
  *   2. 【v3 核心】剖面填充轮廓 = 切平面与细胞表面的【精确相交轮廓】:
@@ -25,7 +26,7 @@
  *   6. 剖面结构标注锚定真实轮廓: 膜标注钉在轮廓缘带外侧, 胞质标注落在轮廓内,
  *      核标注跟随核轮廓上缘 —— 标注与轮廓零漂移
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
@@ -418,6 +419,20 @@ const NUC_S = 116;
 /* ============ 剖面控制器（v3 精确轮廓版） ============ */
 
 /* eslint-disable react-hooks/immutability -- renderer.clippingPlanes 为 three.js 全局渲染器命令式 API（R3F 标准用法） */
+
+/** v53 剖面平面真源单例: 材质局部裁剪改造后 gl.clippingPlanes 恒为空 —— 原读
+ *  gl.clippingPlanes[0] 的消费方（hover-labels 锚点裁剪 / organelles 示教锚贴面吸附）
+ *  改读本单例; SectionClipController 每帧写入（与 sim.clipPlane 同源同步, 关闭时置 null） */
+export const sectionPlaneSource: { current: THREE.Plane | null } = { current: null };
+
+/** v53 剖面完整性豁免标记: userData.noSectionClip === true 的材质（分子/药物本体、光环、
+ *  磷酸化环、P 珠等）不参与剖面裁剪 —— 用户诉求「节点在 50% 剖面处显示完整球体」;
+ *  完全落入剖掉前半区的分子由 Molecule3D/DrugMolecule3D 帧门整组隐藏（视觉/标签/悬停一致） */
+export function noSectionClipTag<T extends THREE.Material>(m: T): T {
+  m.userData.noSectionClip = true;
+  return m;
+}
+
 export function SectionClipController({
   enabled,
   depth,
@@ -618,65 +633,100 @@ export function SectionClipController({
     }
   }, [enabled, ready, depth, axis, Rn, R, N, shape, nucBumpy, nucleiList, cytoFan, cytoRibbon, nucFans]);
 
-  /* 开/关剖切: 全局裁剪平面挂载 + 结构材质临时双面化（记忆原 side 以还原） */
+  /* ============ v53 材质局部裁剪（全局 → 局部改造） ============
+   * 用户诉求「节点在 50% 剖面处显示完整」: 全局 gl.clippingPlanes 对所有材质生效且无法豁免
+   * —— 改为 renderer.localClippingEnabled + 逐材质 material.clippingPlanes:
+   *   · userData.noSectionClip === true（分子/药物本体、光环、磷酸化环、P 珠）永不裁剪
+   *     → 节点在切面处恒渲染完整球体; 完全落入剖掉前半区的分子由 Molecule3D 帧门整组隐藏
+   *   · 其余材质（膜/细胞器/边线）与旧全局裁剪行为严格一致（NUM_CLIPPING_PLANES 同为 1）
+   *   · 新建材质由 150ms 补扫覆盖（旧 500ms 双面化补扫同步加密） */
+  const planesArr = useMemo(() => [plane], [plane]);
+  const clipStats = useRef({ assigned: 0, exempt: 0 });
+  const applySectionClipping = useCallback(() => {
+    let assigned = 0;
+    let exempt = 0;
+    scene.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.material) return;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const m of mats) {
+        if (!(m instanceof THREE.Material)) continue;
+        if ((m.userData as { noSectionClip?: boolean }).noSectionClip === true) {
+          exempt += 1;
+          if (m.clippingPlanes !== null) m.clippingPlanes = null;
+          continue;
+        }
+        assigned += 1;
+        if (!origSides.current.has(m)) {
+          origSides.current.set(m, m.side);
+          m.side = THREE.DoubleSide;
+          m.needsUpdate = true;
+        }
+        // 共享同一数组引用 → 已赋过的材质零重编译扰动
+        if (m.clippingPlanes !== planesArr) {
+          m.clippingPlanes = planesArr;
+          m.needsUpdate = true;
+        }
+      }
+    });
+    clipStats.current = { assigned, exempt };
+    // QA 插桩（__cellQaProbe 门控 —— 与全项目探针方法论一致）
+    if (typeof window !== 'undefined' && (window as { __cellQaProbe?: boolean }).__cellQaProbe) {
+      (window as unknown as Record<string, unknown>).__clipQa = {
+        local: gl.localClippingEnabled,
+        global: gl.clippingPlanes.length,
+        assigned,
+        exempt,
+        planeC: +plane.constant.toFixed(2),
+      };
+    }
+  }, [scene, planesArr, gl, plane]);
+
+  /* 开/关剖切: 材质局部裁剪挂载 + 结构材质临时双面化（记忆原 side 以还原） */
   useEffect(() => {
     const restore = () => {
       origSides.current.forEach((side, m) => {
         m.side = side;
-        m.needsUpdate = true;
+        if (m.clippingPlanes !== null) {
+          m.clippingPlanes = null;
+          m.needsUpdate = true;
+        }
       });
       origSides.current.clear();
     };
     if (enabled) {
-      gl.clippingPlanes = [plane];
-      scene.traverse((obj) => {
-        const mesh = obj as THREE.Mesh;
-        if (!mesh.material) return;
-        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const m of mats) {
-          if (!(m instanceof THREE.Material)) continue;
-          if (!origSides.current.has(m)) origSides.current.set(m, m.side);
-          m.side = THREE.DoubleSide;
-          m.needsUpdate = true;
-        }
-      });
+      gl.clippingPlanes = [];
+      gl.localClippingEnabled = true;
+      applySectionClipping();
     } else {
       gl.clippingPlanes = [];
+      gl.localClippingEnabled = false;
+      restore();
     }
     return () => {
       gl.clippingPlanes = [];
+      gl.localClippingEnabled = false;
       restore();
     };
-  }, [enabled, gl, scene, plane]);
+  }, [enabled, gl, applySectionClipping]);
 
-  /* 新增 mesh 后补双面化（剖面开启时动态生成的事件脉冲等） */
+  /* 新增 mesh 后补局部裁剪 + 双面化（剖面开启时动态生成的分子/事件脉冲等; v53: 500→150ms
+   *  局部裁剪必须及时覆盖新建材质, 否则新细胞器短窗内无裁剪闪现） */
   useEffect(() => {
     if (!enabled) return;
     let raf = 0;
     let last = 0;
     const tick = () => {
       const now = performance.now();
-      if (now - last > 500) {
+      if (now - last > 150) {
         last = now;
-        scene.traverse((obj) => {
-          const mesh = obj as THREE.Mesh;
-          if (!mesh.material) return;
-          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-          for (const m of mats) {
-            if (!(m instanceof THREE.Material)) continue;
-            if (!origSides.current.has(m)) {
-              origSides.current.set(m, m.side);
-              m.side = THREE.DoubleSide;
-              m.needsUpdate = true;
-            }
-          }
-        });
+        applySectionClipping();
       }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [enabled, scene]);
+  }, [enabled, applySectionClipping]);
 
   /* 帧驱动: 方位/深度与目标同步（即时贴合, 不阻尼）+ 盘组位姿 + clipPlane 广播
    * v3: 轮廓顶点由上面的重算 effect 原地写入（纯函数可重入, 帧内零计算）;
@@ -693,8 +743,9 @@ export function SectionClipController({
         plane.normal,
       );
     }
-    // 广播裁剪平面（分子标签层读取; 关闭时置 null）
+    // 广播裁剪平面（分子标签层读取; 关闭时置 null）; v53: 单例广播（hover 锚点/示教锚消费方）
     sim.current.clipPlane = enabled ? plane : null;
+    sectionPlaneSource.current = enabled ? plane : null;
   });
 
   return (

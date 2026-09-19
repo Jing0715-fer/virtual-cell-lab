@@ -23,12 +23,16 @@ import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import type { Node3D } from '@/lib/simulation/layout3d';
 import type { SimSnapshot } from './molecules';
+import { noSectionClipTag } from './section-view';
 import { INHIBITORS, type InhibitorSpec } from '@/data/inhibitors';
 import { useLabStore } from '@/store/lab-store';
 import { useLang } from '@/lib/i18n';
 
 /** 判定字符串是否含汉字（药物通用名 zh → EN 展示需切换为 code 首词） */
 const HAS_HAN = /[\u4e00-\u9fff]/;
+
+/** v53 剖面完整性检测复用的世界坐标临时向量（避免每帧分配） */
+const _dw = new THREE.Vector3();
 
 /** 药物构象动机（由药物类别文本启发式推断） */
 type Motif = 'planar' | 'macrocycle' | 'helical';
@@ -142,29 +146,34 @@ const DrugMolecule3D = memo(function DrugMolecule3D({ drug, target, sim, showLab
   // 当前可见度（useFrame 写入）—— 淡出中的药物不再截获点击/悬停
   const visRef = useRef(0);
 
-  // 原子材质缓存（按元素类型共享；transparent 常开避免运行时重编译）
+  // 原子材质缓存（按元素类型共享；transparent 常开避免运行时重编译; v53 noSectionClip 豁免 ——
+  // 药物球棍模型在切面处恒完整渲染）
   const mats = useMemo(() => {
     const mk = (k: AtomKind) =>
-      new THREE.MeshStandardMaterial({
-        color: ATOM_COLORS[k],
-        emissive: ATOM_COLORS[k],
-        emissiveIntensity: 0.35,
-        roughness: 0.32,
-        transparent: true,
-        opacity: 1,
-      });
+      noSectionClipTag(
+        new THREE.MeshStandardMaterial({
+          color: ATOM_COLORS[k],
+          emissive: ATOM_COLORS[k],
+          emissiveIntensity: 0.35,
+          roughness: 0.32,
+          transparent: true,
+          opacity: 1,
+        }),
+      );
     return { c: mk('c'), n: mk('n'), o: mk('o'), s: mk('s'), x: mk('x') };
   }, []);
   const bondMat = useMemo(
     () =>
-      new THREE.MeshStandardMaterial({
-        color: '#8b7bb8',
-        emissive: '#6d5bb0',
-        emissiveIntensity: 0.22,
-        roughness: 0.55,
-        transparent: true,
-        opacity: 0.85,
-      }),
+      noSectionClipTag(
+        new THREE.MeshStandardMaterial({
+          color: '#8b7bb8',
+          emissive: '#6d5bb0',
+          emissiveIntensity: 0.22,
+          roughness: 0.55,
+          transparent: true,
+          opacity: 0.85,
+        }),
+      ),
     [],
   );
   useEffect(
@@ -250,6 +259,15 @@ const DrugMolecule3D = memo(function DrugMolecule3D({ drug, target, sim, showLab
     const g = groupRef.current;
     if (!g) return;
     const level = sim.current.inhibition?.[target.id] ?? 0;
+    // v53 剖面完整性: 材质豁免裁剪恒完整; 完全落入剖掉前半区 → 整组隐藏
+    // （逼近路径前段位于剖掉区, 与旧 WebGL 裁剪行为等效 —— 越过切面后现身）
+    const cp = sim.current.clipPlane;
+    if (cp) {
+      g.getWorldPosition(_dw);
+      g.visible = cp.distanceToPoint(_dw) > -0.55;
+    } else {
+      g.visible = true;
+    }
     // 投药后起算逼近动画；洗脱（level 归零）后整体淡出
     const age = (performance.now() - bornAt.current) / APPROACH_MS;
     const ease = age >= 1 ? 1 : 1 - Math.pow(1 - Math.max(0, age), 3);
