@@ -83,7 +83,9 @@ const MAX_HISTORY = 260;
 
 export const useLabStore = create<LabStore>((set, get) => ({
   cellId: 'hepatocyte',
-  pathwayId: 'hsa04010',
+  // v56a 初始不加载通路（用户需求）: 进入实验台先呈现纯 3D 细胞结构浏览态（细胞器/双核/
+  // 细胞骨架完整渲染, 与通路数据零耦合）; 用户从 PathwayLibrary 主动选定后才装配信号演示
+  pathwayId: null,
   view: 'cell3d',
   mitosisOpen: false,
   divisionMode: 'mitosis',

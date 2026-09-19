@@ -192,9 +192,11 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   const membrane = new THREE.Mesh(memGeo, memMat);
   membrane.renderOrder = 50;
   group.add(membrane);
-  /* ---------- v19 子细胞膜（分离完成相位: 单膜哑铃 crossfade → 两个独立子细胞拉开） ----------
-   * 单球拓扑无法真正断开成两体 —— 用「双子球淡入 + 单膜淡出」交接: 初期双子球恰好覆叠哑铃两叶
-   * （无缝交接）, 随后两球各自收圆并拉开距离 = 完全分开的两个独立细胞（体积守恒 r≈8.5/∛2≈6.5） */
+  /* ---------- v56b 子细胞膜（内切断离帧: 与单膜两叶几何同构瞬时交换 → 两独立子细胞拉开） ----------
+   * 回转面单 mesh 拓扑无法真正断开成两体 —— 但缢缩完成时刻两叶恰相切（zc=ρ）, 双子球以
+   * 完全相同的球心/半径替换 = 几何同构的瞬时交换（无渐变窗, 像素级无缝, 膜全程可见恒不透明;
+   * 取代 v19 crossfade —— 用户「膜消失又出现」根治）。唯一帧间差异 = 针状桥消失（= 内切本身）。
+   * 随后两球拉开距离并收圆 = 完全分开的两个独立细胞（体积守恒 r≈8.5/∛2≈6.5） */
   const memDauParams = {
     color: '#4e5a55',
     transmission: 0,
@@ -230,19 +232,30 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   }
 
   /** 形态学: 半长 L 与纬向轮廓 r(u)（u: 0=−Z 极, 1=+Z 极）
-   *  v19 scission: ESCRT-Ⅲ 内切 —— 窄 σ 深度叠加, 中间体桥半径 → 0.02（针状缩窄）; elong 续增两叶拉开 */
+   *  v56b 连续缢缩（用户反馈「分裂最后膜消失又出现」根治）: 胞质分裂全程单膜回转面连续变形 ——
+   *    球（间期）→ 轻微花生腰（后期拉长, zc 小幅外移）→ 双球并集哑铃（缢缩 = 两叶球心
+   *    连续外移、重叠区递减, 颈半径 = √(ρ²−zc²) 解析收敛）→ 针状中间体桥（bridge 地板
+   *    随 scission 收细）→ 内切断离瞬间与双子膜交换（两叶恰相切时刻几何同构, 像素级无缝）。
+   *    膜自始至终可见、不透明度恒定 —— 无任何淡入淡出交接窗。
+   *  双球并集解剖学: 两叶球心 ±zc、叶半径 ρ; zc<ρ 时赤道颈 = √(ρ²−zc²)（收缩环所在）,
+   *    zc→ρ 时颈闭合（两叶相切）; L = zc+ρ 恒使回转面在极点闭合。 */
   const membraneProfile = (t: number): { L: number; r: (u: number) => number } => {
-    const elong = ramp(t, 2.9, 4.4) * 0.14 + ramp(t, 4.4, 6) * 0.18 + ramp(t, 5.9, 6.9) * 0.52;
-    const L = R_CELL * (1 + elong);
-    const furrowK = ramp(t, 4.55, 5.95);
-    const scission = ramp(t, 5.85, 6.45);
-    const shrink = 1 - 0.1 * furrowK; // 体积近似守恒
+    const elongK = ramp(t, 2.9, 4.4); // 后期拉长（anaphase B 极外移 → 细胞轻拉长, 腰部微收）
+    const constrict = ramp(t, 4.55, 6.05); // 缢裂窗（RhoA-actomyosin 收缩环持续内收）
+    const scission = ramp(t, 5.9, 6.45); // ESCRT-Ⅲ 内切窗（中间体桥 → 针状）
+    const zc = R_CELL * (0.16 * elongK + 0.58 * constrict); // 叶心: 0 → 0.16R（拉长）→ 0.74R（相切）
+    const rho = R_CELL * (1 - 0.26 * constrict); // 叶半径: R → 0.74R（体积重分布入两叶）
+    const bridge = 0.3 * (1 - scission) + 0.02 * scission; // 中间体桥半径 → 针状
+    const L = zc + rho + 0.02; // 回转面极点闭合所需半长
     const rFn = (u: number) => {
-      const base = R_CELL * shrink * Math.pow(Math.max(1e-4, Math.sin(Math.PI * u)), 0.92);
-      const dip = furrowK * R_CELL * 0.8 * Math.exp(-((u - 0.5) ** 2) / (2 * 0.13 ** 2))
-        + scission * R_CELL * 1.1 * Math.exp(-((u - 0.5) ** 2) / (2 * 0.06 ** 2));
-      const bridge = 0.3 * (1 - scission) + 0.02 * scission; // 中间体桥半径 → 针状
-      return Math.max(bridge, base - dip);
+      const s = 2 * u - 1; // 归一纬度（-1 极 … 0 赤道 … +1 极）
+      const z = s * L;
+      // 双球并集轮廓（两叶各贡献一段球面弧, 取外者）
+      const near = z >= 0 ? z - zc : z + zc; // 距近侧叶心的有符号偏移
+      const far = z >= 0 ? z + zc : z - zc; // 距远侧叶心
+      const rNear = Math.sqrt(Math.max(0, rho * rho - near * near));
+      const rFar = Math.sqrt(Math.max(0, rho * rho - far * far));
+      return Math.max(bridge, rNear, rFar);
     };
     return { L, r: rFn };
   };
@@ -1082,22 +1095,26 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     /* 质膜形态学（v16: 同时返回当前回转面参数 —— 星体微管逐帧钳制消费） */
     const { L: memL, r: rProfile } = updateMembrane(t);
 
-    /* v19 分离完成（abscission）: 单膜哑铃淡出 + 双子细胞球膜淡入 → 两独立子细胞拉开
-     * 交接窗口内双子球恰好覆叠哑铃两叶（无缝 crossfade）; 之后 zD 5.55→7.35 / rD 5.15→6.45（体积守恒收圆）
+    /* v56b 内切断离（abscission）瞬时无缝交换 —— 取代 v19 crossfade（用户反馈「膜消失又出现」根治）:
+     * T_CUT=6.45 时刻单膜两叶恰相切（zc=ρ=0.74R, 颈已闭合并成针状桥）, 双子膜以完全相同
+     * 的球心/半径瞬时替换（同帧无渐变窗, 几何同构像素无缝）; 唯一可见差异 = 针状桥消失
+     * —— 这正是 ESCRT-Ⅲ 内切的视觉语义。此后 zD 6.29→7.35 / rD 6.29→6.45（拉开 + 收圆）
      * 内容物（子核/高尔基/RER 冠/细胞器）同步随 ramp 后移至各自子细胞中心 */
-    const dauFade = ramp(t, 6.2, 6.65);
-    const memFade = 1 - ramp(t, 6.3, 6.75);
-    const zD = THREE.MathUtils.lerp(5.55, 7.35, ramp(t, 6.15, 7));
-    const rD = THREE.MathUtils.lerp(5.15, 6.45, ramp(t, 6.15, 6.9));
-    memMatRef.opacity = (perf ? 0.5 : 0.42) * memFade;
-    membrane.visible = memFade > 0.02;
-    memDauA.visible = dauFade > 0.02;
-    memDauB.visible = dauFade > 0.02;
+    const T_CUT = 6.45; // ESCRT-Ⅲ 完成内切的瞬间（= 单膜两叶相切后针桥收细完成）
+    const dauFade = t >= T_CUT ? 1 : 0; // 瞬时交换（QA 探针兼容通道: 0/1 阶跃）
+    const memFade = t >= T_CUT ? 0 : 1;
+    const ZC_FINAL = R_CELL * 0.74; // 缢缩完成叶心（与 membraneProfile constrict=1 严格同源）
+    const zD = THREE.MathUtils.lerp(ZC_FINAL, 7.35, ramp(t, T_CUT, 7.2));
+    const rD = THREE.MathUtils.lerp(ZC_FINAL, 6.45, ramp(t, T_CUT, 7.0));
+    memMatRef.opacity = (perf ? 0.5 : 0.42) * memFade; // 恒全不透明直至断离帧
+    membrane.visible = memFade > 0.5;
+    memDauA.visible = dauFade > 0.5;
+    memDauB.visible = dauFade > 0.5;
     memDauA.position.set(0, 0, -zD);
     memDauB.position.set(0, 0, zD);
     memDauA.scale.setScalar(Math.max(0.001, rD));
     memDauB.scale.setScalar(Math.max(0.001, rD));
-    memDauMatARef.opacity = (perf ? 0.5 : 0.42) * dauFade;
+    memDauMatARef.opacity = (perf ? 0.5 : 0.42) * dauFade; // 断离帧即全不透明（无淡入）
     memDauMatBRef.opacity = (perf ? 0.5 : 0.42) * dauFade;
 
     /* 凝聚/去凝聚与不透明度 */
@@ -1549,7 +1566,9 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
 
     /* v25 QA 插桩: 纺锤-中间体连续性 + 中间体胞外检测（数值真源 —— 断档/出膜的逐帧判定）:
      *   · gap: t∈[2.0,6.1] 内四族纺锤结构（星体/动粒/中带/中间体）同时近零 → 视觉断档帧
-     *   · mbOut: 中间体可见且双子膜已淡入时, 杆端（半长×scale.y）伸出子细胞球面 → 胞外帧 */
+     *   · mbOut（v56b 语义修正）: 中间体杆端伸出双子球外侧包络（z > zD+rD）→ 真胞外悬空帧
+     *     （旧公式「杆端 > zD−rD」基于 crossfade 时序的间隙检查 —— 新连续缢缩下断离帧两球
+     *     恰相切、杆全长藏于两叶并集内; 断离后杆位于两球间隙 = 中间体跨胞质桥的科学正确形态） */
     if (typeof window !== 'undefined' && (window as { __spindleChainQaProbe?: boolean }).__spindleChainQaProbe) {
       const mbOp = (midbodyMat as THREE.MeshPhysicalMaterial).opacity;
       const chain = {
@@ -1559,7 +1578,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
         mbHalf: 0.55 * (1 - 0.55 * ramp(t, 5.85, 6.45)),
         dauGap: zD - rD,
         dauFade,
-        mbOut: (mbOp > 0.02 && dauFade > 0.02 && 0.55 * (1 - 0.55 * ramp(t, 5.85, 6.45)) > zD - rD) ? 1 : 0,
+        mbOut: (mbOp > 0.02 && dauFade > 0.5 && 0.55 * (1 - 0.55 * ramp(t, 5.85, 6.45)) > zD + rD) ? 1 : 0,
       };
       (window as unknown as { __spindleChainQa?: unknown }).__spindleChainQa = chain;
     }
@@ -1717,24 +1736,21 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     erDauB.mesh.scale.setScalar(Math.max(0.001, erDauS));
 
     /* 收缩环 + 中间体 */
-    const furrowK = ramp(t, 4.55, 5.95);
-    ringMatRef.opacity = clamp01(ramp(t, 4.35, 4.9) * (1 - ramp(t, 5.75, 6.05))) * 0.9;
-    const eqR = Math.max(0.32, rProfile(0.5));
+    const furrowK = ramp(t, 4.55, 6.05); // v56b: 与膜轮廓缢裂窗同源（环随颈半径全程收缩）
+    ringMatRef.opacity = clamp01(ramp(t, 4.35, 4.9) * (1 - ramp(t, 6.0, 6.2))) * 0.9;
+    const eqR = Math.max(0.32, rProfile(0.5)); // = 双球并集颈半径（收缩环恰骑在膜面缢缩最细处）
     furrowRing.scale.set(eqR, eqR, 0.75 + furrowK * 0.4);
     // 环的收缩脉动（actomyosin 拉动读感）
     const squeeze = 1 - Math.sin(uTime.value * 2.2) * 0.02 * (furrowK > 0 && furrowK < 1 ? 1 : 0);
     furrowRing.scale.x *= squeeze;
     furrowRing.scale.y *= squeeze;
     // 中间体（深缢裂后的致密胞质桥）
-    // v19: ESCRT-Ⅲ 内切时随 scission 收细淡出（桥断离后残余迅速降解）
-    /* v25 平滑交接 + 收纳根治（用户反馈「突然又出现 + 有一部分在细胞外」）:
-     *   ① 淡入 [5.5,5.95]→[5.3,5.85]: 与中央纺锤体致密化淡出 [4.95,5.8] 同窗重叠 ——
-     *      致密纤维束与致密杆在同一位置交叉渐变, 不再 2.5s 快拍冒出
-     *   ② 淡出 [6.0,6.4]→[5.9,6.15]: 在双子细胞膜 crossfade（dauFade 6.2 起）之前完全
-     *      消失 —— 旧版 6.2-6.4 窗口内半长恒 0.55 的杆端伸出两子细胞球面（gap zD−rD<0.55）
-     *      悬在胞外空隙; 现在连同长度随 scission 压缩（0.55→0.25）一并缩回桥内 */
+    // v56b: ESCRT-Ⅲ 内切时刻（T_CUT=6.45）桥杆随针状桥一同断离 —— 淡出窗移至 [6.45,6.8]
+    //   （桥断离后残余随子细胞分离迅速降解; v25「杆伸出子细胞球面」的收纳约束保留:
+    //   长度随 scission 压缩 0.55→0.25, 半径跟随胞质桥 —— 断离帧两子球恰相切, 杆全长藏于
+    //   两叶球面相交区域内部, 无胞外悬空）
     const scissionK = ramp(t, 5.85, 6.45);
-    midbodyMatRef.opacity = ramp(t, 5.3, 5.85) * 0.95 * (1 - ramp(t, 5.9, 6.15));
+    midbodyMatRef.opacity = ramp(t, 5.3, 5.85) * 0.95 * (1 - ramp(t, 6.45, 6.8));
     // 中间体: 仅深缢裂后可见; 半径跟随胞质桥并随内收缩细; 长度（局部 Y → 世界 Z）随 scission 压缩
     const mbR = Math.max(0.3, Math.min(1.05, eqR)) * (1 - scissionK * 0.55);
     midbody.scale.set(mbR / 0.3, 1 - 0.55 * scissionK, mbR / 0.3);

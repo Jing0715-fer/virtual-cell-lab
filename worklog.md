@@ -3065,3 +3065,103 @@ Stage Summary:
   resetSim 的 graph 身份链路改造 —— loadGraph 复用原对象或 tourOpen 迁 zustand）②真机浏览器
   验证引导入口（区分 dev-only 与生产缺陷）③DrugMoleculeLayer 标签接入 v37 防叠注册表
   ④图版导出多面板 2×2 对照版式 ⑤引导模式接入减数分裂站点叙事
+
+---
+Task ID: 56
+Agent: 主协调 Agent (Z.ai Code)
+Task: 沙盒回滚恢复（v55 拉取）+ 用户三项反馈根治 —— ①初始不加载通路（恢复丢失改动） ②未加载通路时肝细胞变单核（回归根治） ③分裂末期膜消失又出现（连续缢缩重构） + 细胞骨架穿核复核
+
+Work Log:
+- 【环境恢复】沙盒确认回滚至 v36（本地 2fa2277 = 远程 662aab5 同内容异 SHA 重复提交, diff 0 行）;
+  git reset --hard origin/main → f727aca (v55); dev server 存活; 前会话「初始不加载通路/无中心高亮圈」
+  改动未提交随回滚丢失 —— 本轮重新实施并根治其引入的回归
+- 【② 肝细胞单核回归根治（三层绑架链全断）】
+  · 根因链: lab-store pathwayId:'hsa04010' 初始硬载 → VirtualCell3D `if (!graph)` 早退 →
+    SceneContents `if (!layout) return null` 早退 → 无通路时整场景灭; 旧「回退」路径用
+    FALLBACK_SPEC（零细胞器退化壳 + sphere 单核 + viewDist 31）= 「肝细胞变单核」的真正来源
+  · 断链①: store pathwayId: null（初始纯结构浏览态, 用户主动选通路才装配信号演示）
+  · 断链②: VirtualCell3D 移除早退 —— HUD 4 处 graph 引用守护（通路名 → 「结构浏览」/
+    分子数 → '—' / tourIntro null 守卫）
+  · 断链③: SceneContents 移除早退 —— CellBody spec 改用 CELL_BODY_SPECS[morph]（细胞类型
+    真源, 与 layout3D 同表: 双核/细胞器/骨架/形态学全部保留）; 分子/边/药物/mRNA/事件脉冲
+    五层各自 layout 判空自隐; layoutSpec/snapPlane/SectionClipController/sim.viewDist 全部
+    同步换用类型真源; FALLBACK_SPEC 退役删除
+  · workspace: 早退返回块退役（3D 视图无通路照常渲染, 2D/图谱视图各自空态回退）+ 画布底部
+    「3D 结构浏览中 · 左栏选择信号通路装配分子演示」引导胶囊（pointer-events-none）+ 顶栏
+    未选通路提示文案; useQuery enabled:!!pathwayId 天然禁用
+- 【③ 分裂末期膜消失又出现根治（双球并集连续缢缩范式, 有丝+减数同构落地）】
+  · 旧病灶: v19 crossfade 交接 —— 单膜哑铃（瘦长两叶 r≈4.5 + 长极尖）在 [6.2,6.75] 淡出、
+    双子球（r 5.15+ 于 ±5.55+）同时淡入 —— 两形状/位置差异巨大, 半透明溶解重凝 = 用户看到的
+    「膜消失又出现」
+  · 新形态学 membraneProfile（mitosis.tsx v56b）: 全程单膜回转面连续变形 —— 球（间期）→
+    轻花生腰（anaphase B 拉长: zc 0→0.16R）→ 双球并集哑铃（缢缩 constrict [4.55,6.05]:
+    叶心 zc→0.74R 外移、叶半径 ρ R→0.74R 收圆, 颈半径 = √(ρ²−zc²) 解析连续收敛）→
+    针状中间体桥（bridge 地板 0.3→0.02 随 scission [5.9,6.45]）; L = zc+ρ+0.02 恒极点闭合
+  · 瞬时几何同构交换（取代 crossfade）: T_CUT=6.45（内切完成瞬间, 两叶恰相切 zc=ρ=0.74R=6.29）
+    单膜隐藏 + 双子膜同帧全不透明出现于完全相同球心/半径 —— 几何同构像素无缝; 唯一帧间差异 =
+    针状桥消失 = ESCRT-Ⅲ 内切的视觉语义本身; 此后 zD 6.29→7.35 / rD 6.29→6.45 拉开收圆;
+    dauFade/memFade 从 ramp 渐变窗改为 0/1 纯阶跃
+  · 配套时序: 收缩环生命延至 [4.35,6.2]（eqR = 颈半径 → 环恒骑膜面缢缩最细处）; 中间体杆
+    淡出窗 [5.9,6.15]→[6.45,6.8]（桥随内切同刻断离, 残余降解）; __spindleChainQa 探针 mbOut
+    语义修正（旧「>zD−rD」间隙检查基于 crossfade 时序 → 新「>zD+rD」真胞外悬空检查）
+  · 减数分裂（meiosis.tsx）同范式双落地: MI 单膜并集轮廓（zc 0→0.28R→0.72R 相切, T_CUT1=5.75
+    与双子膜瞬时交换, zD1/rD1 自 ZC1_FINAL 起步）+ MII 归一 y 轴并集轮廓（c2 0→0.24→0.72,
+    bridge2 0.05→0.004 归一 ≈ 世界 0.3→0.02 与有丝一致, T_CUT2=9.6 与四配子球瞬时交换,
+    yG0 = 0.72·rD1 ≈ 4.25 与 rG 4.3 几何同构）
+  · scripts/verify-mitosis-containment.ts 口径同步（新轮廓公式镜像）: 全相位单体世界位+臂展球
+    恒膜内（xy 余量 1.98 / z 余量 1.30 全正, 较旧更宽裕）
+- 【附带修复】organelles.tsx hash01 三参调用 TS2554 ×8（v54/v55 cron 遗留）: 第三参被忽略 →
+  「随机轴」退化为固定对角线; 修复为 v55 运行时等价折算 hash01(key, i)（保持调优布局零漂移,
+  类型清洁）; 首版真随机轴修复实测扰动 with-pathway 布局（minCrown +0.059→−0.416）后回退为
+  等价方案
+- 【无通路态冠层净空（v56b 自适应扩搜）】无分子云时游离细胞器提示位一族可整体落入 ER 冠层锥
+  （minCrown −0.446）; openPos 增设两轮放宽再搜（倾角 ×1.85/×2.7 + frac 外推 +0.17/+0.34
+  近膜空旷带 + 全新方位轴族）, 仅首轮全负时触发 —— 修复后 minCrown +0.059（与 v55
+  with-pathway 水平完全一致）, 「挤满退化最小亏」语义保持
+- 【QA（agent-browser 活体探针真源 + VLM 视觉 + 像素; lint 零错误; tsc src 零错误; 控制台
+  当前会话零新错误; dev.log 全 200）】
+  · 无通路初始态: canvas 挂载 ✓ __orgQa nucCount=2（双核!）minCrown +0.059 minTube +0.104
+    placed=146 ✓ 引导胶囊显示 ✓; 「结构浏览」HUD 占位 ✓
+  · 加载 MAPK 后（黄金路径）: cloud=33 nucCount=2 minCrown +0.059 minTube +0.104 —— 与
+    v55 QA 水平逐位一致（零回归实证）
+  · 有丝分裂内切交接（__spindleChainQa 逐帧轮询）: t 6.41→6.58 dauFade 纯 0→1 阶跃（旧
+    crossfade 为 0.45 单位渐变窗）; mbOp 0.95→0.71 于内切后才开始衰减; mbOut=0; dauGap
+    0→0.06 平滑分离
+  · VLM 视觉对比 t=6.34（哑铃+针桥）vs t=6.85（双子分离）: 「位置与大小的连续性高度一致,
+    无跳变、无膜消失后重现」—— 双重验证闭环
+  · 减数分裂双交接（__meiQa 轮询）: MI t=5.52→5.94 memOp 0.5→0 / dauOp 0→0.5 同帧阶跃;
+    MII t=9.67 dauOp=0 / quadOp=0.5 阶跃 ✓
+  · 细胞骨架避核（__mtNucQa, 构建期探针）: placed 18/18 minClear +0.0534 全正（v30 修复
+    在无通路默认态完好）
+  · SwiftShader Context Lost 环境坑再遇（v55 已记录）: agent-browser close --all + pkill
+    chrome + --force-gpu-mem-available-mb=2048 重启恢复
+  · 环境新坑记录: ①bash 管道输出会把源码中的 `[[m`/`[m` 序列误当 ANSI 转义剥离 → grep/sed
+    显示「损坏」假象（meiosis.tsx L897 误报语法错误, Read 工具/tsc 证实文件完好 —— 内容
+    取证一律以 Read/tsc 为准）②agent-browser 无 viewport/resize 命令（移动端宽度模拟
+    不可用, 响应式靠结构不变量保证）③构建期探针（__cytoQaProbe）必须在场景构建前设置,
+    页面 open 后立即 eval 方可竞争过 R3F 首帧
+
+Stage Summary:
+- 三项用户反馈全部根治并双重验证: ①「未加载通路时肝细胞变成单核」→ 三层早退链（store/
+  VirtualCell3D/SceneContents）全断 + CELL_BODY_SPECS 类型真源替换退化 FALLBACK_SPEC ——
+  3D 结构与通路数据完全解耦, 双核与通路加载状态永久无关; ②「分裂最后膜消失又出现」→
+  双球并集连续缢缩 + 断离帧几何同构瞬时交换（有丝+减数三处交接全改）—— 膜全程可见恒不
+  透明, 缢缩过程 = 教科书收缩环叙事本身; ③细胞骨架穿核 → v30 修复复核全正（本轮无扰动）
+- 前会话丢失的「初始不加载通路」重新落地且比原版更彻底（原版引入了单核回归, 本版从架构上
+  解耦 + 画布引导胶囊 + 顶栏文案 + HUD 占位, 并通过黄金路径回归测试）
+- 架构沉淀: ①「类型真源 spec」范式（CELL_BODY_SPECS 与 layout3D 同表 —— 场景结构永远
+  从细胞类型推导, 通路数据只滋养信号演示层）②「双球并集回转面」形态学范式（颈半径解析
+  连续 = 缢缩科学语义; 相切时刻 = 天然无缝交换点）③「等价折算」修复范式（类型修复不改
+  运行时数值, 调优布局零漂移）
+- 产出: lab-store.ts（pathwayId null）/ workspace.tsx（早退退役+引导胶囊+文案）/
+  virtual-cell-3d.tsx（早退链断裂+HUD 守卫+FALLBACK_SPEC 退役）/ mitosis.tsx（v56b 并集
+  轮廓+瞬时交换+环/中间体时序）/ meiosis.tsx（MI/MII 双并集+双交换）/ organelles.tsx
+  （hash01 等价折算+自适应扩搜）/ verify-mitosis-containment.ts（口径同步）;
+  qa-shots/task56-*.png 十二张取证
+- 未解决/风险: ①v55 遗留「教学引导开关点击后瞬间回落」（疑 Suspense 重挂载, 下阶段最高
+  优先, 本轮 SceneContents 早退移除后需复测是否随之自愈）②SwiftShader 长会话内存约束
+  （QA 勤清浏览器进程）③minOrg −0.316 为球形化保守口径（v55 同语义 −0.84, 视觉零重叠）
+- 下阶段建议: ①教学引导回落根因定位（React DevTools Profiler / tourOpen 迁 zustand /
+  SceneContents 早退移除后复测）②DrugMoleculeLayer 标签接入 v37 防叠注册表③图版导出
+  多面板 2×2 对照版式④引导模式接入减数分裂站点叙事⑤无通路态 hero/细胞选择卡与实验台
+  联动叙事打磨（「先认识结构, 再装配信号」教学动线）

@@ -25,7 +25,7 @@ import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
 import { EDGE_EVENT_KIND, PHASES } from '@/lib/simulation/engine';
 import type { SimEvent } from '@/lib/simulation/engine';
-import { layout3D, projectLayoutToPlane, EDGE_COLORS, type CellBodySpec, type Vec3 } from '@/lib/simulation/layout3d';
+import { layout3D, projectLayoutToPlane, EDGE_COLORS, CELL_BODY_SPECS, type CellBodySpec, type Vec3 } from '@/lib/simulation/layout3d';
 import { buildGuidedTour, tourIntro } from '@/lib/simulation/guided-tour';
 import { CellBody, type AvoidPoint } from './organelles';
 import { MITOSIS_PHASES, MitosisStage } from './mitosis';
@@ -86,20 +86,8 @@ function edgeHoverTarget(edge: { id: string; points: Vec3[]; kind: string; sourc
  *  左键旋转 · 中键拖拽平移（用户需求, 原默认缩放） · 右键平移 */
 const MOUSE_MAP = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
 
-/** 剖面控制器回退 spec（graph 尚未装配时） */
-const FALLBACK_SPEC: CellBodySpec = {
-  membraneR: 10,
-  nucleusR: 4.1,
-  shape: 'sphere',
-  viewDist: 31,
-  mitoCount: 0,
-  erSheets: 0,
-  vesicleCount: 0,
-  microtubules: 0,
-  nucleolus: { count: 1, r: 0.8 },
-  lysosomeCount: 0,
-  peroxisomeCount: 0,
-};
+/* v56a: FALLBACK_SPEC（零细胞器退化壳）退役 —— 未装配通路时以细胞类型真源
+ * CELL_BODY_SPECS[morph] 渲染完整细胞结构（旧回退 = 「肝细胞变单核」回归根源） */
 
 /** 低端设备/软件渲染检测（SwiftShader/CPU 渲染/低核数 → 自动流畅模式，降帧缓冲内存与 CPU 负担）
  *  模块级一次性缓存: 在 Canvas 创建前完成探测，保证首帧即使用正确的渲染参数 */
@@ -360,7 +348,11 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, cutaway, sim, sna
     [layout, nodeLabelMap],
   );
 
-  if (!layout) return null;
+  /* v56a 初始不加载通路: 场景结构层与通路数据解耦 —— 无 layout（未选通路）时以
+   * 细胞类型真源 spec（CELL_BODY_SPECS[morph], 与 layout3D 同表）照常渲染完整细胞结构
+   * （细胞器/双核/细胞骨架/形态学全部保留）; 仅分子/边/流等信号演示层空置。
+   * （旧版 FALLBACK_SPEC = 零细胞器退化壳 —— 「未加载通路时肝细胞变单核」回归根源） */
+  const spec = layout?.spec ?? CELL_BODY_SPECS[morph];
 
   return (
     <group>
@@ -379,15 +371,15 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, cutaway, sim, sna
         />
       </mesh>
       {/* 剖面贴附模式: 核内部标注让位（核盘自带剖面标注）—— 消除核区标签互叠 */}
-      <CellBody spec={layout.spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} cutaway={cutaway} locate={locate} onHoverTargets={onHoverTargets} extraHover={edgeHover} onHoverEdge={onHoverEdge} avoid={avoidCloud} planeMols={planeMols} />
-      <EdgeLayer edges={layout.edges} sim={sim} hoveredEdgeId={hoverEdgeId} />
-      <MoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />
+      <CellBody spec={spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} cutaway={cutaway} locate={locate} onHoverTargets={onHoverTargets} extraHover={edgeHover} onHoverEdge={onHoverEdge} avoid={avoidCloud} planeMols={planeMols} />
+      {layout && <EdgeLayer edges={layout.edges} sim={sim} hoveredEdgeId={hoverEdgeId} />}
+      {layout && <MoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />}
       {/* 激酶抑制剂 3D 药物分子（球棍模型，结合靶点） */}
-      <DrugMoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />
+      {layout && <DrugMoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />}
       {/* mRNA 转录出核流（表达事件驱动） */}
-      <MrnaFlow nodes={layout.nodes} spec={layout.spec} />
+      {layout && <MrnaFlow nodes={layout.nodes} spec={layout.spec} />}
       {/* 信号事件脉冲（分子事件驱动: 沿边彗星 + 抵达冲击波 + 分子闪光） */}
-      <EventPulses nodes={layout.nodes} sim={sim} />
+      {layout && <EventPulses nodes={layout.nodes} sim={sim} />}
     </group>
   );
 }
@@ -722,7 +714,7 @@ export function VirtualCell3D() {
   }, [tourOpen, tour.length, openTour]);
 
   // 模拟快照: zustand 订阅写入可变引用（避免逐 tick React 重渲染）
-  const sim = useRef<SimSnapshot>({ nodeStates: {}, signalFlux: {}, injected: {}, inhibition: {}, focus: false, tourNode: null, tourNeighbors: null, tourVisited: null, tourLitEdges: null, tourPulse: null, pulseAt: {}, edgePulse: {}, clipPlane: null, viewDist: FALLBACK_SPEC.viewDist });
+  const sim = useRef<SimSnapshot>({ nodeStates: {}, signalFlux: {}, injected: {}, inhibition: {}, focus: false, tourNode: null, tourNeighbors: null, tourVisited: null, tourLitEdges: null, tourPulse: null, pulseAt: {}, edgePulse: {}, clipPlane: null, viewDist: CELL_BODY_SPECS[morph].viewDist });
   // v33 引导↔模拟联动发射守卫（复合键 tourKey:idx —— 通路上层 graph/effLayout 变化重跑 effect 不重复发射）
   const tourSyncRef = useRef('');
   // v33 信号阶段指示（引导推进 → computePhase 逐级点亮: 静息→配体结合→受体激活→级联→转录）
@@ -747,10 +739,10 @@ export function VirtualCell3D() {
   // 相机视野参数: 类型化形状的全景距离（形状已烘焙进几何, 无需非等比 group 缩放）+ 核机位参数（v6）
   const layoutSpec = useMemo(
     () => ({
-      viewDist: layout?.spec.viewDist ?? FALLBACK_SPEC.viewDist,
-      membraneR: layout?.spec.membraneR ?? FALLBACK_SPEC.membraneR,
-      nucleusR: layout?.spec.nucleusR ?? FALLBACK_SPEC.nucleusR,
-      shape: layout?.spec.shape ?? FALLBACK_SPEC.shape,
+      viewDist: layout?.spec.viewDist ?? CELL_BODY_SPECS[morph].viewDist,
+      membraneR: layout?.spec.membraneR ?? CELL_BODY_SPECS[morph].membraneR,
+      nucleusR: layout?.spec.nucleusR ?? CELL_BODY_SPECS[morph].nucleusR,
+      shape: layout?.spec.shape ?? CELL_BODY_SPECS[morph].shape,
     }),
     [layout],
   );
@@ -763,7 +755,7 @@ export function VirtualCell3D() {
     if (!clipView || !sectionSnap) return null;
     const o = SECTION_ORIENTS[clipAxis];
     const spec = layout?.spec;
-    const Rn = (spec?.membraneR ?? FALLBACK_SPEC.membraneR) * (SHAPE_EXTENT[spec?.shape ?? 'sphere'] ?? SHAPE_EXTENT.sphere)[AXIS_N[clipAxis]];
+    const Rn = (spec?.membraneR ?? CELL_BODY_SPECS[morph].membraneR) * (SHAPE_EXTENT[spec?.shape ?? 'sphere'] ?? SHAPE_EXTENT.sphere)[AXIS_N[clipAxis]];
     return {
       normal: { x: o.normal.x, y: o.normal.y, z: o.normal.z },
       constant: Rn - clipDepth * 2 * Rn - 0.3,
@@ -926,13 +918,9 @@ export function VirtualCell3D() {
     };
   }, [fullscreen]);
 
-  if (!graph) {
-    return (
-      <div className="flex h-full items-center justify-center text-slate-500 text-sm">
-        {t('loading.cell')}
-      </div>
-    );
-  }
+  /* v56a 初始不加载通路: 3D 场景与通路数据完全解耦 —— 无 graph 时照常渲染完整细胞结构
+   * （细胞器/双核/细胞骨架/分裂演示）, 仅信号分子层空置; HUD 通路名称/分子数显示占位。
+   * （旧版在此早退 = 细胞结构被通路数据绑架 —— 「未加载通路时肝细胞变单核」回归根源） */
 
   return (
     <div
@@ -1059,7 +1047,7 @@ export function VirtualCell3D() {
             enabled={clipView && !mitosis}
             depth={clipDepth}
             axis={clipAxis}
-            spec={layout?.spec ?? FALLBACK_SPEC}
+            spec={layout?.spec ?? CELL_BODY_SPECS[morph]}
             showAnatomy={showAnatomy}
             sim={sim}
             labels={{
@@ -1128,7 +1116,7 @@ export function VirtualCell3D() {
               <div className="truncate text-[12px] font-semibold text-emerald-200">
                 {(lang === 'zh' ? cell?.name : cell?.nameEn ?? cell?.name) ?? t('loading.cell')}
                 <span className="mx-1.5 text-slate-600">·</span>
-                <span className="font-normal text-slate-300">{lang === 'zh' ? graph.meta.nameZh : graph.meta.name}</span>
+                <span className="font-normal text-slate-300">{graph ? (lang === 'zh' ? graph.meta.nameZh : graph.meta.name) : (lang === 'zh' ? '结构浏览' : 'Structure')}</span>
               </div>
               <div className="hidden truncate text-[9px] text-slate-500 sm:block">{t('hud.fsHint')}</div>
             </div>
@@ -1155,7 +1143,7 @@ export function VirtualCell3D() {
             <div className="text-[11px] font-medium text-emerald-300">
               {(lang === 'zh' ? cell?.name : cell?.nameEn ?? cell?.name) ?? t('loading.cell')}
             </div>
-            <div className="text-[9px] text-slate-500">{(lang === 'zh' ? graph.meta.nameZh : graph.meta.name)} · {t('hud.3dview')}</div>
+            <div className="text-[9px] text-slate-500">{(graph ? (lang === 'zh' ? graph.meta.nameZh : graph.meta.name) : (lang === 'zh' ? '结构浏览' : 'Structure'))} · {t('hud.3dview')}</div>
           </div>
         </div>
         <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-white/10 bg-slate-950/70 px-2.5 py-1 backdrop-blur-md font-mono text-[9px] text-slate-400">
@@ -1164,7 +1152,7 @@ export function VirtualCell3D() {
           <span className="text-slate-600">|</span>
           <span>{t('hud.phase')} {phase}/4</span>
           <span className="text-slate-600">|</span>
-          <span>{graph.stats.coreCount} {t('hud.molecules')}</span>
+          <span>{graph ? graph.stats.coreCount : '—'} {t('hud.molecules')}</span>
         </div>
         <div className="pointer-events-auto flex items-center gap-1.5 rounded-lg border border-white/10 bg-slate-950/70 px-2.5 py-1 backdrop-blur-md text-[9px] text-slate-500">
           <Ruler className="h-3 w-3 text-slate-400" />
@@ -1613,7 +1601,7 @@ export function VirtualCell3D() {
               {tourIdx === 0 && (
                 <p className="mx-4 mt-2.5 rounded-lg border border-teal-500/20 bg-teal-950/15 px-3 py-2 text-[10.5px] leading-relaxed text-teal-200/90">
                   <span className="mr-1 font-mono text-[9px] text-teal-400">{lang === 'zh' ? '导览' : 'Guide'}</span>
-                  {tourIntro(graph, tour.length)}
+                  {graph ? tourIntro(graph, tour.length) : null}
                 </p>
               )}
 
@@ -1640,7 +1628,7 @@ export function VirtualCell3D() {
                         {lang === 'zh' ? '完整级联已点亮' : 'Cascade fully lit'}
                       </span>
                       <span className="ml-auto font-mono text-[9px] tabular-nums text-emerald-400/70">
-                        {tour.length} {lang === 'zh' ? '站' : 'stops'} · {graph.meta.id}
+                        {tour.length} {lang === 'zh' ? '站' : 'stops'} · {graph?.meta.id ?? ''}
                       </span>
                     </div>
                     {/* mini 站点时间线: 每站一点全亮 + 分子标签 + 流向连线 */}

@@ -1,8 +1,8 @@
 'use client';
 
 /**
- * 减数分裂（Meiosis）3D 演示 v36 —— 复用有丝分裂演示的成熟范式（相位时钟 + 形态学
- * 回转面 + 三网纺锤体系 + 双保险钳制 + crossfade 交接）, 讲述减数分裂的独有叙事:
+ * 减数分裂（Meiosis）3D 演示 v36 → v56b —— 复用有丝分裂演示的成熟范式（相位时钟 + 形态学
+ * 回转面 + 三网纺锤体系 + 双保险钳制 + 几何同构瞬时交接）, 讲述减数分裂的独有叙事:
  *
  *   两次连续分裂 → 四个单倍体配子:
  *     MI（减数分裂 I）: 同源染色体配对（联会）→ 交叉（chiasmata）→ 四分体列队
@@ -200,19 +200,26 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
     const v = new THREE.Vector3(memPos.getX(i), memPos.getY(i), memPos.getZ(i)).normalize();
     memDir[i * 3] = v.x; memDir[i * 3 + 1] = v.y; memDir[i * 3 + 2] = v.z;
   }
-  /** MI 单膜回转面（z 轴; 缢裂时窗压缩至 [2.7, 5.75]） */
+  /** MI 单膜回转面（z 轴; 缢裂时窗压缩至 [2.7, 5.75]）
+   *  v56b 双球并集连续缢缩（与 mitosis.tsx v56b 同范式 —— 用户「膜消失又出现」根治）:
+   *  球 → 轻花生腰（后期 I 拉长）→ 双球并集哑铃（颈 = √(ρ²−zc²) 解析收敛）→ 针状桥;
+   *  T_CUT1=5.75 两叶恰相切时与双子膜几何同构瞬时交换（无渐变窗, 像素级无缝） */
   const membraneProfile = (t: number): { L: number; r: (u: number) => number } => {
-    const elong = ramp(t, 2.7, 4.0) * 0.12 + ramp(t, 4.0, 5.0) * 0.16;
-    const L = R_CELL * (1 + elong);
-    const furrowK = ramp(t, 4.85, 5.45);
-    const scission = ramp(t, 5.3, 5.75);
-    const shrink = 1 - 0.1 * furrowK;
+    const elongK = ramp(t, 2.7, 5.0); // 后期 I 拉长（两极外移 → 叶心小幅外移 0 → 0.28R）
+    const constrict = ramp(t, 4.85, 5.45); // 缢裂 I 窗（收缩环内收）
+    const scission = ramp(t, 5.3, 5.75); // ESCRT-Ⅲ 内切窗 I（桥 → 针状）
+    const zc = R_CELL * (0.28 * elongK + 0.44 * constrict); // 叶心: 0 → 0.28R（拉长）→ 0.72R（相切）
+    const rho = R_CELL * (1 - 0.28 * constrict); // 叶半径: R → 0.72R（体积重分布入两叶）
+    const bridge = 0.3 * (1 - scission) + 0.02 * scission; // 中间体桥半径 → 针状
+    const L = zc + rho + 0.02; // 回转面极点闭合所需半长
     const rFn = (u: number) => {
-      const base = R_CELL * shrink * Math.pow(Math.max(1e-4, Math.sin(Math.PI * u)), 0.92);
-      const dip = furrowK * R_CELL * 0.8 * Math.exp(-((u - 0.5) ** 2) / (2 * 0.13 ** 2))
-        + scission * R_CELL * 1.1 * Math.exp(-((u - 0.5) ** 2) / (2 * 0.06 ** 2));
-      const bridge = 0.3 * (1 - scission) + 0.02 * scission;
-      return Math.max(bridge, base - dip);
+      const s = 2 * u - 1; // 归一纬度（-1 极 … 0 赤道 … +1 极）
+      const z = s * L;
+      const near = z >= 0 ? z - zc : z + zc; // 距近侧叶心偏移
+      const far = z >= 0 ? z + zc : z - zc; // 距远侧叶心偏移
+      const rNear = Math.sqrt(Math.max(0, rho * rho - near * near));
+      const rFar = Math.sqrt(Math.max(0, rho * rho - far * far));
+      return Math.max(bridge, rNear, rFar);
     };
     return { L, r: rFn };
   };
@@ -230,9 +237,9 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
     return { L, r };
   };
 
-  /* ---------- 膜层 2: MI 双子膜（先球 crossfade → MII 沿 y 轴各自哑铃化） ----------
+  /* ---------- 膜层 2: MI 双子膜（内切 I 瞬时交接 → 球期 → MII 沿 y 轴各自哑铃化） ----------
    * 每球保存原始顶点方向, MII 缢裂窗口 [8.2, 9.3] 内逐帧重写 y-L / xz-r(v) 回转面;
-   * 之前恒为球（scale 控半径 —— crossfade 时与哑铃两叶覆叠无缝） */
+   * 之前恒为球（scale 控半径 —— 交接帧与单膜两叶相切几何同构, 像素级无缝） */
   const memDauGeo = track(new THREE.SphereGeometry(1, perf ? 36 : 56, perf ? 24 : 36));
   const mkDauMembrane = () => {
     const m = mat({ ...memParams, opacity: 0 });
@@ -250,24 +257,30 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
     const v = new THREE.Vector3(dauPos.getX(i), dauPos.getY(i), dauPos.getZ(i)).normalize();
     dauDir[i * 3] = v.x; dauDir[i * 3 + 1] = v.y; dauDir[i * 3 + 2] = v.z;
   }
-  /** MII 双子膜 y 轴回转面（单子细胞: 球 → 拉长 → 哑铃 → 针缩） */
+  /** MII 双子膜 y 轴回转面（单子细胞: 球 → 拉长 → 双球并集哑铃 → 针缩）
+   *  v56b 归一双球并集（世界尺寸 = × rD1）: 叶心 0 → 0.24（后期 II 拉长）→ 0.72（相切,
+   *  与四配子球初始位几何同构）; T_CUT2=9.6 内切完成瞬时交换为四配子球（无渐变窗） */
   const dauProfile = (t: number): { L2: number; r2: (v: number) => number } => {
-    const elong2 = ramp(t, 8.2, 8.7) * 0.1 + ramp(t, 8.7, 9.3) * 0.14;
-    const L2 = 1 + elong2; // 相对半径的倍数（球 rD1 归一）
-    const furrow2 = ramp(t, 8.7, 9.35);
-    const scission2 = ramp(t, 9.15, 9.6);
-    const shrink2 = 1 - 0.1 * furrow2;
+    const elong2K = ramp(t, 8.2, 9.3); // 后期 II 拉长
+    const constrict2 = ramp(t, 8.7, 9.35); // 缢裂 II 窗（收缩环内收）
+    const scission2 = ramp(t, 9.15, 9.6); // ESCRT-Ⅲ 内切窗 II（桥 → 针状）
+    const c2 = 0.24 * elong2K + 0.48 * constrict2; // 叶心（归一）: 0 → 0.24 → 0.72（相切）
+    const rho2 = 1 - 0.28 * constrict2; // 叶半径（归一）: 1 → 0.72
+    const bridge2 = 0.05 * (1 - scission2) + 0.004 * scission2; // 桥半径（归一; 世界 ≈ 0.3 → 0.02）
+    const L2 = c2 + rho2 + 0.004; // 归一半长（世界 = × rD1）
     const r2Fn = (v: number) => {
-      const base = shrink2 * Math.pow(Math.max(1e-4, Math.sin(Math.PI * v)), 0.92);
-      const dip = furrow2 * 0.8 * Math.exp(-((v - 0.5) ** 2) / (2 * 0.13 ** 2))
-        + scission2 * 1.1 * Math.exp(-((v - 0.5) ** 2) / (2 * 0.06 ** 2));
-      const bridge = 0.3 * (1 - scission2) + 0.02 * scission2;
-      return Math.max(bridge, base - dip);
+      const s = 2 * v - 1;
+      const z = s * L2;
+      const near = z >= 0 ? z - c2 : z + c2;
+      const far = z >= 0 ? z + c2 : z - c2;
+      const rNear = Math.sqrt(Math.max(0, rho2 * rho2 - near * near));
+      const rFar = Math.sqrt(Math.max(0, rho2 * rho2 - far * far));
+      return Math.max(bridge2, rNear, rFar);
     };
     return { L2, r2: r2Fn };
   };
 
-  /* ---------- 膜层 3: 四配子球（MII crossfade 后的独立配子） ---------- */
+  /* ---------- 膜层 3: 四配子球（MII 内切断离帧几何同构交换后的独立配子） ---------- */
   const memQuadGeo = track(new THREE.SphereGeometry(1, perf ? 32 : 48, perf ? 20 : 30));
   const memQuadMat = mat({ ...memParams, opacity: 0 });
   const memQuads: THREE.Mesh[] = [];
@@ -882,20 +895,25 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
 
     /* 膜层 1: MI 单膜 */
     const { L: memL, r: rProfile } = updateMembrane(t);
-    /* 膜层 1→2 交接: 胞裂 I 完成（scission [5.3,5.75]）单膜淡出, 双子球淡入 */
-    const dau1Fade = ramp(t, 5.15, 5.6);
-    const mem1Fade = 1 - ramp(t, 5.3, 5.7);
-    const zD1 = THREE.MathUtils.lerp(5.4, 6.5, ramp(t, 5.15, 6.6));
-    const rD1 = THREE.MathUtils.lerp(5.0, 5.9, ramp(t, 5.15, 6.2));
-    memMatRef.opacity = (perf ? 0.5 : 0.42) * mem1Fade;
-    membrane.visible = mem1Fade > 0.02;
+    /* v56b 膜层 1→2 交接: 胞裂 I 内切完成瞬间（T_CUT1=5.75）瞬时无缝交换 —— 两叶恰相切
+     * （zc=ρ=0.72R）几何同构, 唯一可见差异 = 针状桥消失（= ESCRT-Ⅲ 内切语义）。
+     * 取代旧 crossfade（用户「膜消失又出现」根治）: 膜全程可见、恒不透明 */
+    const T_CUT1 = 5.75; // 内切 I 完成瞬间（= scission 窗终点）
+    const dau1Fade = t >= T_CUT1 ? 1 : 0; // QA 探针兼容通道: 0/1 阶跃
+    const mem1Fade = t >= T_CUT1 ? 0 : 1;
+    const ZC1_FINAL = R_CELL * 0.72; // 缢缩 I 完成叶心（与 membraneProfile constrict=1 同源）
+    const zD1 = THREE.MathUtils.lerp(ZC1_FINAL, 6.5, ramp(t, T_CUT1, 6.6));
+    const rD1 = THREE.MathUtils.lerp(ZC1_FINAL, 5.9, ramp(t, T_CUT1, 6.2));
+    memMatRef.opacity = (perf ? 0.5 : 0.42) * mem1Fade; // 恒全不透明直至断离帧
+    membrane.visible = mem1Fade > 0.5;
     /* 膜层 2: 双子膜 —— 球期（scale 控径）→ MII y-morph 期（顶点重写） */
     const miiMorph = ramp(t, 8.2, 8.7);
-    const dau2Fade = ramp(t, 9.2, 9.65);
-    const mem2Fade = 1 - ramp(t, 9.35, 9.75);
+    const T_CUT2 = 9.6; // 内切 II 完成瞬间（= scission2 窗终点）
+    const dau2Fade = t >= T_CUT2 ? 1 : 0;
+    const mem2Fade = t >= T_CUT2 ? 0 : 1;
     const { L2, r2 } = dauProfile(t);
     for (const [mesh, mref, zc] of [[memDauA, memDauMatARef, -zD1], [memDauB, memDauMatBRef, zD1]] as [THREE.Mesh, THREE.MeshPhysicalMaterial, number][]) {
-      mesh.visible = dau1Fade > 0.02 && mem2Fade > 0.02;
+      mesh.visible = dau1Fade > 0.5 && mem2Fade > 0.5;
       mref.opacity = (perf ? 0.5 : 0.42) * dau1Fade * mem2Fade;
       mesh.position.set(0, 0, zc);
       if (miiMorph > 0.001) {
@@ -914,14 +932,17 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
         mesh.scale.setScalar(Math.max(0.001, rD1));
       }
     }
-    /* 膜层 3: 四配子球 */
-    const yG = THREE.MathUtils.lerp(3.55, 5.2, ramp(t, 9.3, 10.9));
-    const zD2 = 6.5;
-    const rG = 4.3;
-    memQuadMatRef.opacity = (perf ? 0.5 : 0.42) * dau2Fade;
+    /* v56b 膜层 3: 四配子球 —— MII 内切完成瞬间（T_CUT2）瞬时无缝交换: y 起点 = MII 哑铃
+     * 叶位（0.72·rD1 ≈ 4.25, 与 dauProfile constrict2=1 严格同源）, 半径同叶半径 —— 几何
+     * 同构像素无缝; 此后 yG 拉开至 5.2、rG 微收圆 4.3 */
+    const yG0 = 0.72 * 5.9; // MII 哑铃叶心/叶半径（rD1 在 T_CUT2 已定格 5.9）
+    const yG = THREE.MathUtils.lerp(yG0, 5.2, ramp(t, T_CUT2, 10.9));
+    const zD2 = 6.5; // 与 zD1 终值一致（配子 z 位恒随次级细胞）
+    const rG = THREE.MathUtils.lerp(yG0, 4.3, ramp(t, T_CUT2, 10.5));
+    memQuadMatRef.opacity = (perf ? 0.5 : 0.42) * dau2Fade; // 断离帧即全不透明（无淡入）
     for (let i = 0; i < 4; i++) {
       const m = memQuads[i];
-      m.visible = dau2Fade > 0.02;
+      m.visible = dau2Fade > 0.5;
       m.position.set(0, i < 2 ? -yG : yG, i % 2 === 0 ? -zD2 : zD2);
       m.scale.setScalar(Math.max(0.001, rG));
     }

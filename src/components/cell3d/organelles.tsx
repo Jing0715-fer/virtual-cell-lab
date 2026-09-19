@@ -1195,9 +1195,11 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     for (let i = 1; i <= 5; i++) {
       const ang = hash01(key, i * 13) * Math.PI * 2;
       const t2 = tilt * (0.35 + hash01(key, i * 7) * 0.9);
-      const ax = new THREE.Vector3(hash01(key, i, 3) - 0.5, hash01(key, i, 5) - 0.5, hash01(key, i, 9) - 0.5).normalize();
+      /* v56c: 三参调用修复为等价折算 —— 旧运行时实际取 hash01(key, i)（第三参被忽略）,
+       * v55 布局正是以此调优; 保持逐行为等价零漂移（类型修复不改放置几何） */
+      const ax = new THREE.Vector3(hash01(key, i) - 0.5, hash01(key, i) - 0.5, hash01(key, i) - 0.5).normalize();
       const d2 = hint.clone().applyAxisAngle(ax, t2).normalize();
-      const f2 = Math.min(0.94, Math.max(0.06, frac + (hash01(key, i, 11) - 0.5) * 0.55));
+      const f2 = Math.min(0.94, Math.max(0.06, frac + (hash01(key, i) - 0.5) * 0.55));
       cands.push(insidePos(d2, f2, r, pad, memR));
     }
     let best = cands[0];
@@ -1207,6 +1209,31 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       if (s > bestScore + 1e-9) {
         bestScore = s;
         best = c;
+      }
+    }
+    /* v56b 自适应扩搜（无通路纯结构态冠层净空根治）: 首轮 6 候选全负（提示位一族整体落入
+     * ER 冠层锥/拥挤区 —— 无分子云推移时提示位即终位）→ 逐轮放宽再搜: 更大倾角（跨出冠层
+     * 锥角）+ frac 外推（近膜空旷带 —— 冠层仅核周 ~0.5R, 高 frac 天然净空）+ 全新方位轴族。
+     * 最多两轮; 仍全负维持最小亏（「挤满退化」语义不变 —— 永不穿膜/入核硬约束由 insidePos 保证） */
+    if (bestScore < 0) {
+      for (let ring = 1; ring <= 2 && bestScore < 0; ring++) {
+        const tiltW = tilt * (1 + ring * 0.85);
+        const fracW = Math.min(0.93, frac + 0.17 * ring);
+        for (let i = 0; i < 6; i++) {
+          const az = (i / 6) * Math.PI * 2 + hash01(key, 700 + i * 13 + ring * 97) * 0.9;
+          const axW = new THREE.Vector3(
+            Math.sin(az),
+            Math.cos(az) * 0.72,
+            Math.cos(az) * 0.6,
+          ).normalize();
+          const dW = hint.clone().applyAxisAngle(axW, tiltW).normalize();
+          const cW = insidePos(dW, fracW, r, pad, memR);
+          const sW = clearanceAt(cW, r, bodyR, grp);
+          if (sW > bestScore + 1e-9) {
+            bestScore = sW;
+            best = cW;
+          }
+        }
       }
     }
     if (register) seedAvoid(best, r, { body: bodyR, group: grp });
@@ -1257,9 +1284,10 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const cands: THREE.Vector3[] = [golgiEnvelopeClamp(nucPoint(GOLGI_DIR, GOLGI_RADIAL))];
     for (let i = 1; i <= 5; i++) {
       const tilt = 0.45 * (0.4 + hash01('golgi54', i * 7) * 0.9);
-      const ax = new THREE.Vector3(hash01('golgi54', i, 3) - 0.5, hash01('golgi54', i, 5) - 0.5, hash01('golgi54', i, 9) - 0.5).normalize();
+      /* v56c: 同上 —— 等价折算保持 v55 调优布局零漂移 */
+      const ax = new THREE.Vector3(hash01('golgi54', i) - 0.5, hash01('golgi54', i) - 0.5, hash01('golgi54', i) - 0.5).normalize();
       const d2 = GOLGI_DIR.clone().applyAxisAngle(ax, tilt).normalize();
-      const rad2 = GOLGI_RADIAL * (0.92 + hash01('golgi54', i, 11) * 0.3);
+      const rad2 = GOLGI_RADIAL * (0.92 + hash01('golgi54', i) * 0.3);
       cands.push(golgiEnvelopeClamp(nucPoint(d2, rad2)));
     }
     // 评分: 核实例净空（双核真实包膜）为主 + 分子云净空为辅（1.6×权重差 —— 大结构优先避核）

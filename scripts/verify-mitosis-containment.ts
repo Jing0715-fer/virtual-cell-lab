@@ -20,16 +20,22 @@ const CHR_N = 10;
 
 const poleZ = (t: number) => POLE_Z0 * (1 + ramp(t, 3, 4.6) * 0.1 + ramp(t, 4.6, 6) * 0.16);
 const membrane = (t: number) => {
-  const elong = ramp(t, 2.9, 4.4) * 0.14 + ramp(t, 4.4, 6) * 0.18;
-  const L = R_CELL * (1 + elong);
-  const furrowK = ramp(t, 4.55, 5.95);
-  const shrink = 1 - 0.1 * furrowK;
+  // v56b 双球并集连续缢缩（与 mitosis.tsx membraneProfile 同源公式 —— 校验口径同步）
+  const elongK = ramp(t, 2.9, 4.4);
+  const constrict = ramp(t, 4.55, 6.05);
+  const scission = ramp(t, 5.9, 6.45);
+  const zc = R_CELL * (0.16 * elongK + 0.58 * constrict);
+  const rho = R_CELL * (1 - 0.26 * constrict);
+  const bridge = 0.3 * (1 - scission) + 0.02 * scission;
+  const L = zc + rho + 0.02;
   const rFn = (u: number) => {
-    const base = R_CELL * shrink * Math.pow(Math.max(1e-4, Math.sin(Math.PI * u)), 0.92);
-    const dip = furrowK * R_CELL * 0.8 * Math.exp(-((u - 0.5) ** 2) / (2 * 0.13 ** 2));
-    let rr = base - dip;
-    if (furrowK > 0.5) rr = Math.max(0.3, rr);
-    return rr;
+    const s = 2 * u - 1;
+    const z = s * L;
+    const near = z >= 0 ? z - zc : z + zc;
+    const far = z >= 0 ? z + zc : z - zc;
+    const rNear = Math.sqrt(Math.max(0, rho * rho - near * near));
+    const rFar = Math.sqrt(Math.max(0, rho * rho - far * far));
+    return Math.max(bridge, rNear, rFar);
   };
   return { L, r: rFn };
 };

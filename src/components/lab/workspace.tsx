@@ -117,16 +117,9 @@ export function LabWorkspace() {
   const showLoading = isLoading && !graph;
   const showError = !!error && !graph;
 
-  if (!pathwayId) {
-    return (
-      <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-white/5 bg-slate-950/40 text-slate-500">
-        <div className="text-center">
-          <FlaskConical className="mx-auto mb-3 h-8 w-8 text-slate-700" />
-          <p className="text-sm">{t('lab.empty.title')}</p>
-        </div>
-      </div>
-    );
-  }
+  // v56a 初始不加载通路（用户需求）: pathwayId 初始为 null —— 3D 细胞场景照常渲染
+  // （细胞器/双核/骨架与通路数据完全解耦）, 仅信号分子层空置; 2D/图谱视图各自带空态回退;
+  // 待用户从左栏 PathwayLibrary 主动选定通路后才拉取图谱并装配信号演示
 
   return (
     <div className="grid gap-3 lg:grid-cols-[290px_minmax(0,1fr)_360px]">
@@ -192,7 +185,7 @@ export function LabWorkspace() {
           <div className="ml-auto flex items-center gap-2">
             <button
               onClick={() => {
-                if (graph) useCompareStore.getState().open(pathwayId, graph);
+                if (graph && pathwayId) useCompareStore.getState().open(pathwayId, graph);
               }}
               disabled={!graph}
               className="flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-[11px] text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-40"
@@ -206,7 +199,11 @@ export function LabWorkspace() {
                 ? lang === 'zh'
                   ? `${graph.stats.coreCount} 核心节点 · ${graph.stats.geneCount} 全图分子`
                   : `${graph.stats.coreCount} core nodes · ${graph.stats.geneCount} map molecules`
-                : t('ws.loading')}
+                : pathwayId
+                  ? t('ws.loading')
+                  : lang === 'zh'
+                    ? '未选通路 · 从左侧选择一条信号通路'
+                    : 'No pathway · pick one from the library'}
             </span>
             <span className={cn(
               'rounded-full border px-2 py-0.5 text-[9px]',
@@ -248,6 +245,19 @@ export function LabWorkspace() {
                     <X className="h-3 w-3" />
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+          {/* v56a 无通路 3D 浏览态引导（初始不加载通路）: 细胞结构完整可览, 提示从左栏装配信号演示 */}
+          {!pathwayId && !graph && view === 'cell3d' && (
+            <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 -translate-x-1/2">
+              <div className="flex items-center gap-2 rounded-full border border-emerald-500/25 bg-slate-950/80 px-3.5 py-1.5 shadow-lg backdrop-blur-sm">
+                <FlaskConical className="h-3.5 w-3.5 shrink-0 text-emerald-400/80" />
+                <span className="whitespace-nowrap text-[10.5px] text-slate-400">
+                  {lang === 'zh'
+                    ? '3D 结构浏览中 · 左栏选择信号通路装配分子演示'
+                    : 'Browsing 3D structure · pick a pathway to assemble the demo'}
+                </span>
               </div>
             </div>
           )}
