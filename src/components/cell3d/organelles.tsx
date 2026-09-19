@@ -3280,12 +3280,47 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
 
   /* ================= 细胞骨架 ================= */
   {
-    // 中心体（双联体中心粒）—— v30: 沿偏移方向贴核膜外表面（核面半径+0.4 求解）
-    //   （旧固定偏移矢量 |(1.9,-1.1,1.6)|≈2.75 与核半径同量级 → 中心体嵌进核体半深 ——
-    //    真实 MTOC 位于核被膜外表面旁; 分叶/FBM 起伏核型下自适应）
+    /* v57 核实例真源助手（用户「细胞骨架还是感觉穿过细胞核」根治 —— 双核肝细胞的三重漏检:
+     *   ①中心体定位在幻影核面 nucC（实际深嵌核 B 内 2.3 < 2.79）②微管避核局部函数只查幻影核
+     *   ③中间丝起点 nucPoint 落幻影核面（±x 方向深嵌真实核内）; 全部换核实例多核真源） */
+    const nucInstC = (idx: number): THREE.Vector3 =>
+      new THREE.Vector3(nucleiInst[idx].center.x, nucleiInst[idx].center.y, nucleiInst[idx].center.z);
+    /** 第 idx 核实例面半径（与核被膜几何同源: nucleusRadius + FBM(种子 tag A→7/B→23)） */
+    const nucInstSurf = (idx: number, dir: THREE.Vector3, ofs = 0): number => {
+      const ni = nucleiInst[idx];
+      const d = dir.clone().normalize();
+      return (
+        nucleusRadius(d, SHAPE, N * ni.scale) +
+        (fbm3(d.x * NUC_FREQ, d.y * NUC_FREQ, d.z * NUC_FREQ, 3, ni.tag === 'A' ? 7 : 23) - 0.5) * 2 * nucAmp +
+        ofs
+      );
+    };
+    /** 点 p 对全部核实例的最小净空（负 = 入侵） */
+    const nucInstClear = (p: THREE.Vector3, ofs = 0): number => {
+      let clear = Infinity;
+      for (let ni = 0; ni < nucleiInst.length; ni++) {
+        const ck = nucInstC(ni);
+        const rel = p.clone().sub(ck);
+        const rl = rel.length() || 1e-4;
+        clear = Math.min(clear, rl - nucInstSurf(ni, rel.multiplyScalar(1 / rl), ofs));
+      }
+      return clear;
+    };
+    // 中心体（双联体中心粒）—— v57: 候选位 = 每个核实例表面（沿自核心 cDir 方向 +0.5 净空）,
+    //   全实例净空评分取最优（旧 nucC 幻影核面 = 双核肝细胞时中心体嵌进核 B 内部!）
     const cOff = SHAPE === 'columnar' ? new THREE.Vector3(0.9, 2.3, 1.2) : new THREE.Vector3(1.9, -1.1, 1.6);
     const cDir = cOff.clone().normalize();
-    const c = nucC.clone().addScaledVector(cDir, nucSurf(cDir, 0.4));
+    let c: THREE.Vector3;
+    {
+      let best: THREE.Vector3 | null = null;
+      let bestClear = -Infinity;
+      for (let ni = 0; ni < nucleiInst.length; ni++) {
+        const cand = nucInstC(ni).clone().addScaledVector(cDir, nucInstSurf(ni, cDir, 0.5));
+        const clear = nucInstClear(cand);
+        if (clear > bestClear) { bestClear = clear; best = cand; }
+      }
+      c = best ?? nucC.clone().addScaledVector(cDir, nucSurf(cDir, 0.4));
+    }
     // 中心粒（v10: 9 组三联微管桶 + 中央辐 —— 电镜横截面剪影，高保真插画读感）
     const centGeo = (() => {
       const centParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
@@ -3327,21 +3362,24 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     let mtMid = new THREE.Vector3();
     const mtTotal = Math.round(spec.microtubules * (perf ? 1.2 : 2.2)) + (perf ? 4 : 6);
     const nucAvoidProbe = new THREE.Vector3();
+    const nucRelTmp = new THREE.Vector3();
     let mtMinClear = Infinity; // v30 QA: 已接受微管对核体的最小净距（采样点）
-    const nucAvoid = (curve: THREE.QuadraticBezierCurve3): boolean => {
+    /** v57 多核避核（旧局部函数与外层核实例数组同名互影 + 只查幻影主核 —— 双核肝细胞核 B
+     *   完全漏检 = 微管穿核真根因; 现逐采样点 × 全核实例检查, 半径与核被膜几何同源） */
+    const nucAvoidMulti = (curve: THREE.QuadraticBezierCurve3): boolean => {
       let minM = Infinity;
       for (let k = 1; k <= 6; k++) {
         curve.getPoint(k / 7, nucAvoidProbe);
-        const rl = Math.hypot(nucAvoidProbe.x - nucC.x, nucAvoidProbe.y - nucC.y, nucAvoidProbe.z - nucC.z);
-        if (rl < 1e-4) return false;
-        nucAvoidProbe.set(
-          (nucAvoidProbe.x - nucC.x) / rl,
-          (nucAvoidProbe.y - nucC.y) / rl,
-          (nucAvoidProbe.z - nucC.z) / rl,
-        );
-        const rr = nucSurf(nucAvoidProbe, 0.38); // 管半径 0.042 + 视觉净空
-        if (rl < rr) return false;
-        minM = Math.min(minM, rl - rr);
+        for (let ni = 0; ni < nucleiInst.length; ni++) {
+          const ck = nucInstC(ni);
+          nucRelTmp.set(nucAvoidProbe.x - ck.x, nucAvoidProbe.y - ck.y, nucAvoidProbe.z - ck.z);
+          const rl = nucRelTmp.length();
+          if (rl < 1e-4) return false;
+          nucRelTmp.multiplyScalar(1 / rl);
+          const rr = nucInstSurf(ni, nucRelTmp, 0.38); // 管半径 0.042 + 视觉净空
+          if (rl < rr) return false;
+          minM = Math.min(minM, rl - rr);
+        }
       }
       mtMinClear = Math.min(mtMinClear, minM);
       return true;
@@ -3358,17 +3396,26 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       const end = new THREE.Vector3(mtDir.x * mtR, mtDir.y * mtR, mtDir.z * mtR);
       const ctrl = c.clone().lerp(end, 0.6);
       ctrl.y += (hash01(sd, 9) - 0.5) * 1.6;
-      // 掠核偏转: 控制点距核面 < 1.15 时自核心径向外推（微管绕核弯的有机读感）
+      // v57 掠核偏转: 控制点对「最近核实例」自核心外推（旧仅对幻影主核 —— 核 B 旁微管直穿）
       {
-        const rel = ctrl.clone().sub(nucC);
+        let nearIdx = 0;
+        let nearD2 = Infinity;
+        for (let ni = 0; ni < nucleiInst.length; ni++) {
+          const ck = nucInstC(ni);
+          const d2 = (ctrl.x - ck.x) ** 2 + (ctrl.y - ck.y) ** 2 + (ctrl.z - ck.z) ** 2;
+          if (d2 < nearD2) { nearD2 = d2; nearIdx = ni; }
+        }
+        const ck = nucInstC(nearIdx);
+        const rel = ctrl.clone().sub(ck);
         const rl = rel.length();
         if (rl > 1e-4) {
-          const need = nucSurf(rel.clone().multiplyScalar(1 / rl), 0) + 1.15;
-          if (rl < need) ctrl.addScaledVector(rel.multiplyScalar(1 / rl), need - rl + 0.1);
+          const relU = rel.clone().multiplyScalar(1 / rl);
+          const need = nucInstSurf(nearIdx, relU, 0) + 1.15;
+          if (rl < need) ctrl.addScaledVector(relU, need - rl + 0.1);
         }
       }
       const curve = new THREE.QuadraticBezierCurve3(c, ctrl, end);
-      if (!nucAvoid(curve)) continue; // 深反穿向 → 重掷
+      if (!nucAvoidMulti(curve)) continue; // 深反穿向 → 重掷
       mtPlaced++;
       // v19: 微管静态标注取首根微管中段真实管位（旧 c·2.5 悬空）
       if (mtPlaced === 1) curve.getPoint(0.42, mtMid);
@@ -3392,15 +3439,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       });
       parts.push({ geo: track(new THREE.TubeGeometry(curve, 26, 0.042, 8)) });
     }
-    // v30 QA 插桩: 微管避核验证（构建期一次性真源 —— 已接受管数/请求管数/最小净距;
-    //   __cytoQaProbe 门控, 零常态成本）
-    if (typeof window !== 'undefined' && (window as { __cytoQaProbe?: boolean }).__cytoQaProbe) {
-      (window as unknown as { __mtNucQa?: unknown }).__mtNucQa = {
-        placed: mtPlaced,
-        requested: mtTotal,
-        minClear: mtMinClear === Infinity ? null : mtMinClear,
-      };
-    }
+    let ifMinClear = Infinity; // v57 QA: 中间丝对全部核实例最小净空（IF 段写入, 探针在 IF 段后求值）
     const mts = new THREE.Mesh(track(mergeGeoms(parts)), mat({
       // v26 参照图: 微管 sage 绿族（旧石板蓝灰在暗背景下不可见）
       color: REF.microtubule,
@@ -3420,13 +3459,18 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     // 中间丝（核周波形蛋白笼 —— 核被膜到质膜的力学支架, 与微管正交的第三套骨架）
     // v6: 严格自成形核面拉到类型化膜面（旧球形插值在窄轴穿膜、长轴悬空）
     // v26: 亮度提升（0.38 → 0.46, 石板族亮化）—— 参照图灰白细丝可辨读
+    // v57: 每核实例各自成笼（双核肝细胞 = 两个核周波形蛋白笼 —— 旧幻影核面起点在 ±x 方向
+    //   深嵌真实核内 = 穿核根因③）; 丝身越过兄弟核时逐点径向推出 → 绕行读感（笼间互锁）
     {
       const ifN = perf ? 8 : 14;
       const ifParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
       let ifMid = new THREE.Vector3();
+      const ifRel = new THREE.Vector3();
       for (let i = 0; i < ifN; i++) {
         const lat = (hash01(`if${i}`) - 0.5) * 2.2;
         const lon = hash01(`if${i}`, 3) * Math.PI * 2;
+        const instIdx = i % nucleiInst.length; // v57 丝→核实例轮转指派（单核退化为原行为）
+        const ck = nucInstC(instIdx);
         const pts: THREE.Vector3[] = [];
         for (let k = 0; k <= 6; k++) {
           const t = k / 6;
@@ -3435,12 +3479,26 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
             Math.sin(lat + Math.sin(t * 5 + i * 1.7) * 0.18),
             Math.cos(lat + Math.sin(t * 5 + i * 1.7) * 0.18) * Math.sin(lon + t * 0.6 + Math.sin(t * 3.4 + i) * 0.13),
           ).normalize();
-          const from = nucPoint(d, 0.12);
+          // v57 起点在该核实例表面（沿其自核心的 d 方向）; 终点 = 同向膜面
+          const from = ck.clone().addScaledVector(d, Math.max(0.1, nucInstSurf(instIdx, d, 0.12)));
           const to = d.clone().multiplyScalar(Math.max(1.2, cellSurf(d, R, SHAPE, -0.45)));
           const p = from.lerp(to, t);
+          // v57 兄弟核绕行: 丝身采样点入侵任一「其他核实例」→ 自该核核心推出到面外 +0.1
+          for (let nj = 0; nj < nucleiInst.length; nj++) {
+            if (nj === instIdx) continue;
+            const cj = nucInstC(nj);
+            ifRel.set(p.x - cj.x, p.y - cj.y, p.z - cj.z);
+            const rl = ifRel.length();
+            if (rl < 1e-4) continue;
+            ifRel.multiplyScalar(1 / rl);
+            const rr = nucInstSurf(nj, ifRel, 0.1);
+            if (rl < rr) p.copy(cj).addScaledVector(ifRel, rr);
+          }
           pts.push(p);
           if (k === 3 && i === 0) ifMid.copy(p); // 首丝中段承载静态标注
         }
+        // v57 QA: 该丝全部采样点对全部核实例净空
+        for (const p of pts) ifMinClear = Math.min(ifMinClear, nucInstClear(p, 0.02));
         ifParts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 22, 0.02, 5)) });
         // v28 每丝全段折线命中体（旧 v27 每 4 丝取 1 点 —— 核周→膜面支架任意位置可指认）
         hover.push({
@@ -3468,6 +3526,18 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       // v19 锚点归位: 中间丝首丝中段本体位（旧 1.15× 外飘）
       labels.push({ pos: { x: ifMid.x, y: ifMid.y, z: ifMid.z }, zh: '中间丝（波形蛋白）', latin: 'Intermediate filaments' });
       // v28 悬停已迁移至丝级折线命中体（见上循环 —— 任意丝段可指认）
+    }
+    // v30 QA 插桩: 微管避核验证（构建期一次性真源 —— 已接受管数/请求管数/最小净距;
+    //   v57 升级: 多核实例真值 + 中心体净空 + 中间丝净空; IF 段后求值; __cytoQaProbe 门控）
+    if (typeof window !== 'undefined' && (window as { __cytoQaProbe?: boolean }).__cytoQaProbe) {
+      (window as unknown as { __mtNucQa?: unknown }).__mtNucQa = {
+        placed: mtPlaced,
+        requested: mtTotal,
+        minClear: mtMinClear === Infinity ? null : mtMinClear,
+        centClear: +nucInstClear(c).toFixed(3), // v57: 中心体对全部核实例净空（旧幻影核面 = 负值穿核）
+        ifClear: ifMinClear === Infinity ? null : ifMinClear, // v57: 中间丝对全部核实例净空
+        nucN: nucleiInst.length,
+      };
     }
 
     // v19 锚点归位: 首根微管中段真实管位（旧 c·2.5-0.5 悬空在胞质空域）

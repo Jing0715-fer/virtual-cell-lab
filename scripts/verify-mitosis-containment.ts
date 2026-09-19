@@ -69,7 +69,7 @@ for (let t = 0; t <= 6.0001; t += 0.02) {
   const chrOpacity = clamp01(ramp(t, 0.5, 1.25) * (1 - ramp(t, 4.4, 5.6) * 0.7));
   for (const chr of chrs) {
     if (chrOpacity < 0.05) continue; // 不可见窗口不计
-    const scl = (1.62 + hash01(`cs${chr.ci}`) * 0.42) * (0.55 + condense * 0.45) * (1 + decondense * 0.12);
+    const scl = (1.16 + hash01(`cs${chr.ci}`) * 0.3) * (0.55 + condense * 0.45) * (1 + decondense * 0.12);
     const sclEff = Math.max(0.001, scl * clamp01(ramp(t, 0.05, 0.6)));
     const armR = chr.armLocal * sclEff + 0.16;
     const k = clamp01(congress + chr.delay * 0.12);
@@ -82,7 +82,7 @@ for (let t = 0; t <= 6.0001; t += 0.02) {
     const gz = vAz * flatZ;
     const sepA = clamp01(segregate - chr.delay * 0.3);
     const reach = PZ * 0.92;
-    const stagW = (0.105 + sepA * 0.1) * sclEff;
+    const stagW = (0.16 + sepA * 0.1) * sclEff; // v57 姐妹分离角加宽同步
     const zCapW = Math.max(0.6, memL * 0.9 - armR);
     const cZW = Math.min(0.08 + sepA * reach, zCapW);
     const xyLim = Math.max(0.55, rProfile(((gz + cZW) / memL + 1) / 2) * 0.96 - armR - stagW);
@@ -117,7 +117,7 @@ for (let t = 3.1; t <= 5.2; t += 0.02) {
   const chrOpacity = 1;
   for (const chr of chrs) {
     if (chrOpacity < 0.05) continue;
-    const scl = (1.62 + hash01(`cs${chr.ci}`) * 0.42) * (0.55 + condense * 0.45) * (1 + decondense * 0.12);
+    const scl = (1.16 + hash01(`cs${chr.ci}`) * 0.3) * (0.55 + condense * 0.45) * (1 + decondense * 0.12); // v57b 同步
     const armR = chr.armLocal * scl + 0.16;
     const k = 1;
     const vAx = chr.plate.x, vAy = chr.plate.y, vAz = chr.plate.z;

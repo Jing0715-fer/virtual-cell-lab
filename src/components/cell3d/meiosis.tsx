@@ -304,7 +304,8 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
   });
   const chromatinNet = (() => {
     const parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
-    for (let i = 0; i < (perf ? 8 : 14); i++) {
+    // v57b 纤维细化加密（0.075→0.062, 14→17 根）—— 弥散松散染色质读感（与凝聚染色体对比拉开）
+    for (let i = 0; i < (perf ? 8 : 17); i++) {
       const pts: THREE.Vector3[] = [];
       const baseLat = (hash01(`cl${i}`) - 0.5) * 2.0;
       const baseLon = hash01(`cl${i}`, 3) * Math.PI * 2;
@@ -319,25 +320,25 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
           Math.cos(lat) * Math.sin(lon) * rr,
         ));
       }
-      parts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 22, 0.075, 6)) });
+      parts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 22, 0.062, 6)) });
     }
     return new THREE.Mesh(track(mergeGeoms(parts)), chromatinMat);
   })();
   chromatinNet.renderOrder = 44;
   group.add(chromatinNet);
-  // S 期姐妹纤维（复制读感）
+  // S 期姐妹纤维（复制读感; v57 暖玫瑰薰衣草 + 加大偏移 —— 与母本网双色可辨; VLM 实测后亮度再拉一档）
   const chromatinMat2 = mat({
-    color: '#bca8d0',
-    emissive: '#8a76a8',
-    emissiveIntensity: 0.62,
-    roughness: 0.5,
+    color: '#ecc8d8',
+    emissive: '#c890a8',
+    emissiveIntensity: 1.25,
+    roughness: 0.48,
     opacity: 0,
-    sheen: 0.4,
-    sheenColor: REF.sheen,
+    sheen: 0.55,
+    sheenColor: '#f0d8e2',
   });
   const chromatinNet2 = new THREE.Mesh(chromatinNet.geometry, chromatinMat2);
-  chromatinNet2.scale.setScalar(1.048);
-  chromatinNet2.rotation.y = 0.22;
+  chromatinNet2.scale.setScalar(1.09);
+  chromatinNet2.rotation.y = 0.34;
   chromatinNet2.renderOrder = 44;
   chromatinNet2.visible = false;
   group.add(chromatinNet2);
@@ -395,14 +396,25 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
     ]));
   };
   // 父本/母本双色: 同族薰衣草但可辨（父本暖调 / 母本冷调 —— 独立分配直接可读）
+  // v57 姐妹单体再分深浅两档（用户「姐妹染色质和普通染色质区别要明显」: 同源双色 × 姐妹深浅
+  //   → 四色矩阵, 交叉律/独立分配/姐妹关系三种结构同时直接可读; v57b 尺寸缩减 30%）
   const chrMatPat = mat({
-    color: '#9a82b6', emissive: '#7a628e', emissiveIntensity: 1.3,
-    roughness: 0.38, opacity: 0, clearcoat: 0.45, sheen: 0.55, sheenColor: REF.sheen,
+    color: '#937fb0', emissive: '#705899', roughness: 0.38, opacity: 0, clearcoat: 0.45, sheen: 0.55, sheenColor: REF.sheen,
+    normalMap: orgNormal, normalScale: 0.35, emissiveIntensity: 1.3,
+  });
+  const chrMatPatB = mat({
+    color: '#bda9d9', emissive: '#8e76ac', emissiveIntensity: 1.45,
+    roughness: 0.36, opacity: 0, clearcoat: 0.5, sheen: 0.6, sheenColor: REF.sheen,
     normalMap: orgNormal, normalScale: 0.35,
   });
   const chrMatMat = mat({
-    color: '#8078a8', emissive: '#5c5682', emissiveIntensity: 1.3,
+    color: '#7a72a2', emissive: '#575180', emissiveIntensity: 1.3,
     roughness: 0.38, opacity: 0, clearcoat: 0.45, sheen: 0.55, sheenColor: REF.sheen,
+    normalMap: orgNormal, normalScale: 0.35,
+  });
+  const chrMatMatB = mat({
+    color: '#a098ca', emissive: '#6f68a4', emissiveIntensity: 1.45,
+    roughness: 0.36, opacity: 0, clearcoat: 0.5, sheen: 0.6, sheenColor: REF.sheen,
     normalMap: orgNormal, normalScale: 0.35,
   });
   const centroMat = mat({ color: REF.npc, emissive: '#7a8294', emissiveIntensity: 0.6, roughness: 0.4, opacity: 0 });
@@ -418,20 +430,22 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
         0.3 + hash01(`p${ci}`) * 0.22 + 0.14,
         0.6 + hash01(`q${ci}`) * 0.5 + 0.14,
       ) + 0.15;
-      const chrM = homolog === 0 ? chrMatPat : chrMatMat;
-      const makeChromatid = () => {
+      const chrMA = homolog === 0 ? chrMatPat : chrMatMat; // 姐妹 A（深档）
+      const chrMB = homolog === 0 ? chrMatPatB : chrMatMatB; // 姐妹 B（亮档 —— 单体可直接分读）
+      const makeChromatid = (bodyMat: THREE.Material) => {
         const cg = new THREE.Group();
-        const body = new THREE.Mesh(chrGeoShared, chrM);
+        const body = new THREE.Mesh(chrGeoShared, bodyMat);
         body.renderOrder = 46;
         cg.add(body);
         return cg;
       };
-      const cA = makeChromatid();
-      const cB = makeChromatid();
-      cA.position.x = -0.105;
-      cB.position.x = 0.105;
-      cA.rotation.z = 0.14;
-      cB.rotation.z = -0.14;
+      const cA = makeChromatid(chrMA);
+      const cB = makeChromatid(chrMB);
+      // v57 姐妹分离角加宽（±0.16 / ±0.24rad V 形 —— 两单体可分读）
+      cA.position.x = -0.16;
+      cB.position.x = 0.16;
+      cA.rotation.z = 0.24;
+      cB.rotation.z = -0.24;
       const centro = new THREE.Mesh(track(new THREE.SphereGeometry(0.15, 10, 8)), centroMat);
       centro.renderOrder = 47;
       const kinGeo = track(new THREE.CylinderGeometry(0.11, 0.11, 0.05, 10));
@@ -444,7 +458,7 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
       cB.add(kinA);
       cA.add(kinB);
       g.add(cA, cB, centro);
-      const scl = 1.62 + hash01(`cs${ci}`) * 0.42;
+      const scl = 1.16 + hash01(`cs${ci}`) * 0.3; // v57b 缩减 ~30%（旧 1.62-2.04）
       void scl;
       g.scale.setScalar(0.001);
       group.add(g);
@@ -857,6 +871,8 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
   const memQuadMatRef = memQuadMat as THREE.MeshPhysicalMaterial;
   const chrMatPatRef = chrMatPat as THREE.MeshPhysicalMaterial;
   const chrMatMatRef = chrMatMat as THREE.MeshPhysicalMaterial;
+  const chrMatPatBRef = chrMatPatB as THREE.MeshPhysicalMaterial;
+  const chrMatMatBRef = chrMatMatB as THREE.MeshPhysicalMaterial;
   const centroMatRef = centroMat as THREE.MeshPhysicalMaterial;
   const kinMatRef = kinMat as THREE.MeshPhysicalMaterial;
   const mtMatRef = mtMat as THREE.MeshPhysicalMaterial;
@@ -877,6 +893,8 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
   const nucleolusMatRef = nucleolus.material as THREE.MeshPhysicalMaterial;
 
   const poleZ = (t: number) => POLE_Z0 * (1 + ramp(t, 2.9, 4.0) * 0.1 + ramp(t, 4.0, 5.0) * 0.16);
+  // v57 间期中心体贴核位（update 分离路径 + targets 悬停锚共用真源）
+  const mtoItp = new THREE.Vector3(0.9, 0.9, 3.15).normalize().multiplyScalar(NUC_R + 0.52);
   const mm = new THREE.Matrix4();
   const qq = new THREE.Quaternion();
   const eu = new THREE.Euler();
@@ -962,6 +980,8 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
     const chrOpacity = clamp01(ramp(t, 0.1, 0.75) * (1 - decon2 * 0.75));
     chrMatPatRef.opacity = chrOpacity;
     chrMatMatRef.opacity = chrOpacity;
+    chrMatPatBRef.opacity = chrOpacity; // v57 姐妹 B 档同步寿命
+    chrMatMatBRef.opacity = chrOpacity;
     // 着丝粒球: MI 后期不切（Rec8 保护!）—— MII 后期 [7.55, 7.9] 才被 separase 切割淡出
     centroMatRef.opacity = chrOpacity * (1 - ramp(t, 7.55, 7.9));
     kinMatRef.opacity = clamp01(ramp(t, 0.8, 1.3) * (1 - ramp(t, 5.0, 5.6) * 0.4) * (1 - ramp(t, 8.9, 9.4)));
@@ -971,7 +991,7 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
 
     chromatids.forEach((chr, ci) => {
       const g = chr.group;
-      const scl = (1.62 + hash01(`cs${ci}`) * 0.42) * (0.55 + condense * 0.45) * (1 + decon1 * 0.06 + decon2 * 0.1);
+      const scl = (1.16 + hash01(`cs${ci}`) * 0.3) * (0.55 + condense * 0.45) * (1 + decon1 * 0.06 + decon2 * 0.1);
       const armR = chr.armLocal * scl + 0.16;
       // MI 段位置: home → 联会位 → 赤道板 → 同源分离 → 极区聚拢
       const k = clamp01(congress1 + chr.delay * 0.12);
@@ -1002,8 +1022,8 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
       const cZW = Math.min(0.08 + sepB * reach2, zCap2);
       chr.cA.position.z = -cZW / Math.max(0.35, scl) * Math.max(0.35, 1); // 局部（旋转后 → 世界 y）
       chr.cB.position.z = cZW / Math.max(0.35, scl);
-      chr.cA.position.x = -0.105;
-      chr.cB.position.x = 0.105;
+      chr.cA.position.x = -0.16;
+      chr.cB.position.x = 0.16;
       g.position.copy(pos);
       // 旋转: 前期随机方位 → 中期极轴对齐（MI z 轴）→ MII 翻转（局部 z → 世界 y）
       const orient = ramp(t, 1.35, 2.15);
@@ -1056,7 +1076,7 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
     nucleolusMatRef.opacity = 0.92 * (1 - ramp(t, 0.4, 0.9));
     chromatinNet.visible = chromatinMatRef.opacity > 0.02;
     nucleolus.visible = nucleolusMatRef.opacity > 0.02;
-    chromatinMat2Ref.opacity = 0.72 * repl * (1 - condense);
+    chromatinMat2Ref.opacity = 0.95 * repl * (1 - condense); // v57: VLM 实测后 0.85→0.95
     chromatinNet2.visible = chromatinMat2Ref.opacity > 0.02;
     chromatinMatRef.emissiveIntensity = 0.42 + replWindow * (0.35 + Math.sin(uTime.value * 5) * 0.18);
     forkMat.opacity = clamp01(replWindow * 1.6) * Math.min(1, (1 - condense) * 3);
@@ -1072,12 +1092,45 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
       forks.instanceMatrix.needsUpdate = true;
     }
 
-    /* 中心体: MI 对（贴核 → 两极）→ MII 四枚（每子细胞 ±y） */
+    /* 中心体: MI 对（贴核被膜外 → 两极）→ MII 四枚（每子细胞 ±y）
+     * v57 间期位贴核被膜外表面（旧 (±0.5,1.1,1.35/1.75) |p|≈1.8 深嵌核内 —— 不透明中心体悬在
+     *   核质中 = 「骨架穿核」根因同源③）; 分离路径径向外推钳（核被膜崩解前恒贴核面外弧滑行） */
     const sepT = ramp(t, 0.35, 1.9);
-    const cAz = THREE.MathUtils.lerp(1.35, -PZ, sepT);
-    const cBz = THREE.MathUtils.lerp(1.75, PZ, sepT);
-    centA.position.set(0.5, THREE.MathUtils.lerp(1.1, 0, sepT), cAz);
-    centB.position.set(-0.5, THREE.MathUtils.lerp(1.15, 0.05, sepT), cBz);
+    centA.position.set(
+      THREE.MathUtils.lerp(mtoItp.x + 0.27, 0.5, sepT),
+      THREE.MathUtils.lerp(mtoItp.y - 0.12, 0, sepT),
+      THREE.MathUtils.lerp(mtoItp.z + 0.03, -PZ, sepT),
+    );
+    centB.position.set(
+      THREE.MathUtils.lerp(mtoItp.x - 0.27, -0.5, sepT),
+      THREE.MathUtils.lerp(mtoItp.y + 0.1, 0.05, sepT),
+      THREE.MathUtils.lerp(mtoItp.z - 0.03, PZ, sepT),
+    );
+    {
+      const neAliveK = clamp01(1 - ramp(t, 1.15, 1.85));
+      if (neAliveK > 0.01) {
+        const keepR = NUC_R + 0.55;
+        for (const cc of [centA, centB]) {
+          const rl = cc.position.length();
+          if (rl < keepR && rl > 1e-4) cc.position.multiplyScalar(THREE.MathUtils.lerp(1, keepR / rl, neAliveK));
+        }
+      }
+      // v57c MI 双子核吞没防护（末期 I 双子核重组期间极区中心体被核面顶出核外）
+      if (t > 4.1 && t < 5.55) {
+        const dNRc = 2.25 * (0.3 + ramp(t, 4.15, 5.0) * 0.7);
+        const dZc = zD1;
+        const keepR2 = dNRc + 0.5;
+        for (const cc of [centA, centB]) {
+          const s = cc === centA ? -1 : 1;
+          pv.set(cc.position.x, cc.position.y, cc.position.z - s * dZc);
+          const rl = pv.length();
+          if (rl < keepR2 && rl > 1e-4) {
+            pv.multiplyScalar(keepR2 / rl);
+            cc.position.set(pv.x, pv.y, pv.z + s * dZc);
+          }
+        }
+      }
+    }
     pcmA.position.copy(centA.position);
     pcmB.position.copy(centB.position);
     centA.rotation.y += dt * 0.8;
@@ -1099,6 +1152,23 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
       const poleY = i < 2 ? -PZ2S : PZ2S;
       const xOff = i < 2 ? 0.35 : -0.35;
       c.position.set(xOff, poleY, cellZ);
+      // v57c 配子核吞没防护: 四配子核 [8.55,9.4] 重组时极区中心体被核面顶出核外
+      //   （旧位 y=±2.9 距配子核心 |Δy|≈0.6 < 生长半径 1.55 —— 中心体嵌配子核内 = 穿核）
+      {
+        const neReform2c = ramp(t, 8.55, 9.4);
+        if (neReform2c > 0.02) {
+          const yGc = THREE.MathUtils.lerp(0.72 * 5.9, 5.2, ramp(t, 9.6, 10.9));
+          const gNucY = (i < 2 ? -1 : 1) * yGc * 0.82;
+          const gNucZ = i % 2 === 0 ? -6.5 : 6.5; // zD2 同源
+          const gNucR = 1.55 * (0.3 + neReform2c * 0.7) + 0.4;
+          pv.set(c.position.x, c.position.y - gNucY, c.position.z - gNucZ);
+          const rl2 = pv.length() || 1;
+          if (rl2 < gNucR) {
+            pv.multiplyScalar(gNucR / rl2);
+            c.position.set(pv.x, pv.y + gNucY, pv.z + gNucZ);
+          }
+        }
+      }
       p.position.copy(c.position);
       c.rotation.y += dt * 0.8 * (i % 2 === 0 ? 1 : -1);
     }
@@ -1562,7 +1632,8 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
       push('核仁', 'Nucleolus', 0.6, 0.7, -0.5, 1.6);
       push('粗面内质网（核糖体冠）', 'Rough ER', -2.35, 1.5, -2.9, 2.2);
       push('高尔基体（扁平囊堆）', 'Golgi apparatus', 2.72, -0.83, 2.63, 2.0);
-      push('中心体（已复制, 贴核）', 'Centrosome', 0.5, 1.1, 1.5, 1.8);
+      // v57 锚随新贴核位（旧 (0.5,1.1,1.5) 在核内 |p|≈1.9）
+      push('中心体（已复制, 贴核）', 'Centrosome', mtoItp.x, mtoItp.y, mtoItp.z, 1.8);
     }
     if (phase === 1) {
       // 联会中的同源对（两三对代表锚 —— 环带分布处）
