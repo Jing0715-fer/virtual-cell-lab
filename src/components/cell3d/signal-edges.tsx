@@ -8,6 +8,8 @@
  * 粒子走单 InstancedMesh（每边 2 粒），矩阵逐帧 imperative 更新
  * v21: 悬停边整线高亮（用户需求「高亮应该是整个线, 而不是只是线的中心」）——
  *   hoveredEdgeId 命中的边全段提亮 + 线宽加倍 + 呼吸脉冲; 其余边照常。
+ * v37: 悬停分子 → 邻接边联动（sim.hoverNode 帧通道）—— 邻接边整线增亮 + 线宽 1.75×,
+ *   非邻接边压暗至 35%（「这个分子的上下游是谁」一眼可读）; 教学引导优先级更高。
  */
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
@@ -69,6 +71,9 @@ function EdgeLine({ edge, sim, hoveredEdgeId }: EdgeProps) {
       }
     }
     const mat = lineRef.current?.material as THREE.Material | undefined;
+    // v37 悬停分子邻接边（非教学引导时生效 —— 引导模式已有链路隔离优先级）
+    const hn = tourNode ? null : (sim.current.hoverNode ?? null);
+    const isNodeEdge = !!hn && (edge.source === hn || edge.target === hn);
     if (mat) {
       if (hovered) {
         // v21 整线高亮: 恒亮 0.98 + 呼吸脉冲（据悬停时刻相位波动 ±0.12）——「整条线」一眼可辨
@@ -83,13 +88,16 @@ function EdgeLine({ edge, sim, hoveredEdgeId }: EdgeProps) {
         mat.opacity = isTourEdge ? 0.92 : isChainEdge ? 0.46 : 0.03;
       } else {
         const base = focus ? 0.05 : 0.16;
-        mat.opacity = Math.min(1, (flux > 0.02 ? Math.min(0.92, base + flux * 1.15) : base) + pulseBoost * 0.55);
+        let op = Math.min(1, (flux > 0.02 ? Math.min(0.92, base + flux * 1.15) : base) + pulseBoost * 0.55);
+        // v37 悬停分子上下文隔离: 邻接边増亮至 ≥0.9, 其余压暗 —— 阅读级联拓扑
+        if (hn) op = isNodeEdge ? Math.max(op, 0.9) : op * 0.35;
+        mat.opacity = op;
       }
     }
-    // v21 悬停线宽加倍（Line2 像素线宽 —— 无需重建几何, 逐帧赋值即可）
+    // v21 悬停线宽加倍（Line2 像素线宽 —— 无需重建几何, 逐帧赋值即可）; v37 邻接边 1.75×
     const l2 = lineRef.current;
     if (l2) {
-      const w = hovered ? baseWidth * 2.1 : baseWidth;
+      const w = hovered ? baseWidth * 2.1 : isNodeEdge ? baseWidth * 1.75 : baseWidth;
       if (l2.material.linewidth !== w) l2.material.linewidth = w;
     }
   });

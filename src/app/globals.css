@@ -809,3 +809,23 @@
 @media (prefers-reduced-motion: reduce) {
   .hero-parallax { animation: none !important; }
 }
+
+/* ============ Task 51 · 3D 分子标签屏幕空间防叠 ============ */
+/* v37: 标签矩形经 DOM 层节流松弛推开（--nudx/--nudy 由 MoleculeLayer useFrame 写入,
+   CSS 自定义属性 CSSOM 原样保留 —— 水合安全范式）; transform 定义入类、动态值走变量,
+   transition 平滑机位移动时的重排; 上限 54px 保持「指向归属」可读 */
+.mol3d-label {
+  transform: translate(var(--nudx, 0px), var(--nudy, 0px));
+  transition:
+    border-color 0.25s ease,
+    box-shadow 0.25s ease,
+    background 0.25s ease,
+    transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+/* 防叠残余半避让（松弛上限内仍交叠的低优先级标签 —— opacity 由帧循环 ×0.42） */
+.mol3d-label.is-declut {
+  border-color: rgba(148, 163, 184, 0.16);
+}
+@media (prefers-reduced-motion: reduce) {
+  .mol3d-label { transition: border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease; }
+}

@@ -257,6 +257,20 @@ export function layout3D(
     const rec = targets.find((t) => recAngles.has(t));
     if (rec) ligandAnchor.set(l.id, rec);
   }
+  // v37 共锚配体扇开槽位（同一受体的多条配体（如 EGF/TGFA→EGFR）旧版同角度锚定 → 屏向完全重叠）
+  const ligandGroupCount = new Map<string, number>();
+  for (const l of nodes.filter((x) => x.tier === 0)) {
+    const rec = ligandAnchor.get(l.id) ?? '';
+    ligandGroupCount.set(rec, (ligandGroupCount.get(rec) ?? 0) + 1);
+  }
+  const ligandSlot = new Map<string, number>();
+  const ligandCursor = new Map<string, number>();
+  for (const l of [...nodes.filter((x) => x.tier === 0)].sort((a, b) => a.label.localeCompare(b.label))) {
+    const rec = ligandAnchor.get(l.id) ?? '';
+    const k = ligandCursor.get(rec) ?? 0;
+    ligandCursor.set(rec, k + 1);
+    ligandSlot.set(l.id, k);
+  }
 
   // ---- 簇内胞质分子布局 ----
   // 收集每簇每层成员，围绕受体经度展开（形成径向信号束）
@@ -270,9 +284,12 @@ export function layout3D(
   const cytoOffset = new Map<string, { dLon: number; dLat: number }>();
   for (const [c, members] of clusterMembers) {
     members.sort((a, b) => a.tier - b.tier || a.label.localeCompare(b.label));
+    // v37: 纬度行程自适应压缩（成员多时不再溢出 ±0.82 钳位成堆）+ 同层经度错列
+    //   （旧版线性 0.235 步长在成员 ≥8 时越出钳位带 → 束尾堆叠, 松弛收敛难）
+    const latStep = Math.min(0.235, 1.68 / Math.max(1, members.length - 1));
     members.forEach((m, idx) => {
-      const dLon = (hash01(m.id, 7) - 0.5) * 0.85;
-      const dLat = (idx - (members.length - 1) / 2) * 0.235 + (hash01(m.id, 13) - 0.5) * 0.1;
+      const dLon = (hash01(m.id, 7) - 0.5) * 0.85 + ((idx % 3) - 1) * 0.3;
+      const dLat = (idx - (members.length - 1) / 2) * latStep + (hash01(m.id, 13) - 0.5) * 0.1;
       cytoOffset.set(m.id, { dLon, dLat });
     });
   }
@@ -303,7 +320,16 @@ export function layout3D(
   for (const node of nodes) {
     if (node.tier === 0) {
       const rec = ligandAnchor.get(node.id);
-      const ang = rec ? recAngles.get(rec)! : { lon: Math.PI * 0.5, lat: 0.1 };
+      const ang = rec
+        ? { ...recAngles.get(rec)! }
+        : { lon: Math.PI * 0.5, lat: 0.1 };
+      // v37: 共锚配体角向扇开（经度等距 + 纬度上下交错 → 胞外配体标签互不压叠）
+      const m = ligandGroupCount.get(rec ?? '') ?? 1;
+      if (m > 1) {
+        const k = ligandSlot.get(node.id) ?? 0;
+        ang.lon += (k - (m - 1) / 2) * 0.36;
+        ang.lat += (k % 2 === 0 ? 1 : -1) * 0.09 * Math.ceil(k / 2);
+      }
       positions.set(node.id, sph((R * 1.235 + hash01(node.id, 3) * 0.5) * shapeF(ang.lat, ang.lon), ang.lat, ang.lon));
     } else if (node.tier === 1) {
       const ang = recAngles.get(node.id) ?? { lon: Math.PI * 0.5, lat: 0 };
@@ -326,6 +352,88 @@ export function layout3D(
     }
   }
 
+  /* ============ v37 防叠松弛引擎（用户反馈「3D pathway 重叠堆叠」根治） ============
+   * 初始径向布局在簇内同层分子密集时产生屏向堆叠（标签互压、分子叠影）。
+   * 在区室硬约束下迭代求解节点最小间距:
+   *   · 固定锚: 配体/受体（定义信号束起点, 不参与位移, 但作为斥力源）
+   *   · 胞质分子(tier 2-4): 壳层带内滑动（半径钳 ±0.62, 射线避核 nucExit+0.55）
+   *   · 核内分子(tier 5-6): 核被膜内钳制（N·nucF×0.93）
+   * 斥力-回位弹簧平衡 + 固定迭代次数 → 纯确定性（无随机源, 重复计算零漂移）。
+   * 复杂度 O(n²)×96, 58 节点 ≈ 16 万对次, 布局期一次性毫秒级。 */
+  const shellFOf = (tier: number): number => (tier === 2 ? 0.845 : tier === 3 ? 0.715 : 0.59);
+  const NODE_GAP = 1.6; // 标签净空基数（+ 两分子可视半径 → 概览机位下标签互不压叠）
+  {
+    interface Ent {
+      p: Vec3; // 工作坐标（可动者为独立副本, 不污染 positions 原值）
+      r: number;
+      mv: { id: string; tier: number; home: Vec3; p: Vec3 } | null;
+    }
+    const ents: Ent[] = nodes.map((node) => {
+      const pos = positions.get(node.id)!;
+      const r = NODE_R[node.kind] ?? 0.36;
+      const mv =
+        node.tier >= 2
+          ? { id: node.id, tier: node.tier, home: pos, p: { x: pos.x, y: pos.y, z: pos.z } }
+          : null;
+      return { p: mv ? mv.p : pos, r, mv };
+    });
+    /** 区室约束投影: 只改半径/方向保留 → 斥力产生的角向位移存活（约束面上滑动解） */
+    const constrain = (m: { tier: number; p: Vec3 }) => {
+      const p = m.p;
+      if (m.tier >= 2 && m.tier <= 4) {
+        const len = Math.hypot(p.x, p.y, p.z) || 1e-6;
+        const lat = Math.max(-0.95, Math.min(0.95, Math.asin(Math.max(-1, Math.min(1, p.y / len)))));
+        const lon = Math.atan2(p.z, p.x);
+        const shellTarget = R * shellFOf(m.tier) * shapeF(lat, lon);
+        const rMin = Math.max(shellTarget - 0.62, nucExit(lat, lon) + 0.55);
+        const rMax = shellTarget + 0.62;
+        const rr = Math.max(rMin, Math.min(rMax, len));
+        p.x = Math.cos(lat) * Math.cos(lon) * rr;
+        p.y = Math.sin(lat) * rr;
+        p.z = Math.cos(lat) * Math.sin(lon) * rr;
+      } else {
+        const rx = p.x - nucC.x, ry = p.y - nucC.y, rz = p.z - nucC.z;
+        const len = Math.hypot(rx, ry, rz) || 1e-6;
+        const lat = Math.asin(Math.max(-1, Math.min(1, ry / len)));
+        const lon = Math.atan2(rz, rx);
+        const maxR = N * nucF(lat, lon) * 0.93;
+        if (len > maxR) {
+          const s = maxR / len;
+          p.x = nucC.x + rx * s;
+          p.y = nucC.y + ry * s;
+          p.z = nucC.z + rz * s;
+        }
+      }
+    };
+    const ITER = 140, SPRING = 0.09, PUSH = 0.3;
+    for (let it = 0; it < ITER; it++) {
+      // 成对斥力（过近推开; 固定端不动, 可动端承担全位移）
+      for (let i = 0; i < ents.length; i++) {
+        for (let j = i + 1; j < ents.length; j++) {
+          const A = ents[i], B = ents[j];
+          const dx = B.p.x - A.p.x, dy = B.p.y - A.p.y, dz = B.p.z - A.p.z;
+          const d2 = dx * dx + dy * dy + dz * dz;
+          const minD = NODE_GAP + A.r + B.r;
+          if (d2 >= minD * minD || d2 < 1e-8) continue;
+          const d = Math.sqrt(d2);
+          const step = (minD - d) * PUSH;
+          const ux = dx / d, uy = dy / d, uz = dz / d;
+          if (A.mv) { A.p.x -= ux * step; A.p.y -= uy * step; A.p.z -= uz * step; }
+          if (B.mv) { B.p.x += ux * step; B.p.y += uy * step; B.p.z += uz * step; }
+        }
+      }
+      // 回位弹簧（保区室/保束形） + 约束投影
+      for (const e of ents) {
+        if (!e.mv) continue;
+        e.p.x += (e.mv.home.x - e.p.x) * SPRING;
+        e.p.y += (e.mv.home.y - e.p.y) * SPRING;
+        e.p.z += (e.mv.home.z - e.p.z) * SPRING;
+        constrain(e.mv);
+      }
+    }
+    for (const e of ents) if (e.mv) positions.set(e.mv.id, e.mv.p);
+  }
+
   const nodes3: Node3D[] = nodes.map((node) => {
     const pos = positions.get(node.id) ?? { x: 0, y: 0, z: 0 };
     const r = NODE_R[node.kind] ?? 0.36;
@@ -334,7 +442,32 @@ export function layout3D(
     return { ...node, pos, r, pad, normal, cluster: clusterOf.get(node.id) ?? fallbackCluster };
   });
 
-  // ---- 边曲线（二次贝塞尔 + 确定性弯曲，避免平行边重叠）----
+  const edges3 = buildEdges3D(nodes3, edges);
+
+  // v37 QA 探针: 最小分子对间距（无窗口环境/SSR 安全; agent-browser 数值验证分散度）
+  if (typeof window !== 'undefined') {
+    let minPair = Infinity, minA = '', minB = '';
+    for (let i = 0; i < nodes3.length; i++) {
+      for (let j = i + 1; j < nodes3.length; j++) {
+        const a = nodes3[i].pos, b = nodes3[j].pos;
+        const d = Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+        if (d < minPair) { minPair = d; minA = nodes3[i].label; minB = nodes3[j].label; }
+      }
+    }
+    (window as unknown as Record<string, unknown>).__layout3dQa = {
+      n: nodes3.length,
+      minPair: minPair === Infinity ? null : +minPair.toFixed(3),
+      pair: [minA, minB],
+      edges: edges3.length,
+    };
+  }
+
+  return { nodes: nodes3, edges: edges3, spec };
+}
+
+/** 边曲线构建（二次贝塞尔 + 确定性弯曲; 布局/投影共用 —— 端点随节点最终位置重算,
+ *  弯曲幅度上限 v37 收紧 2.2→1.7 降低密集级联中的视觉乱穿） */
+function buildEdges3D(nodes3: Node3D[], edges: CoreEdge[]): Edge3D[] {
   const posMap = new Map(nodes3.map((p) => [p.id, p]));
   const edges3: Edge3D[] = [];
   for (const e of edges) {
@@ -352,7 +485,7 @@ export function layout3D(
     // 弯曲方向：取与边方向近似垂直的确定性向量
     let perp = { x: -dir.z, y: 0.35, z: dir.x };
     perp = norm(perp);
-    const bend = (hash01(e.id, 31) - 0.5) * Math.min(2.2, dist * 0.42);
+    const bend = (hash01(e.id, 31) - 0.5) * Math.min(1.7, dist * 0.42);
     const ctrl = {
       x: (p0.x + p1.x) / 2 + perp.x * bend,
       y: (p0.y + p1.y) / 2 + perp.y * bend,
@@ -371,8 +504,7 @@ export function layout3D(
     }
     edges3.push({ ...e, points, length: dist });
   }
-
-  return { nodes: nodes3, edges: edges3, spec };
+  return edges3;
 }
 
 /* ============ 剖面贴附投影（信号级联 → 剖切面上演示） ============ */
@@ -381,7 +513,16 @@ export function layout3D(
  *  每个点 p → p - (p·n̂ + c)·n̂（n̂ 为归一化法向, c 为平面常数）。
  *  投影后全部分子恰好落于切面 → 剖面模式下信号转导演示在切面上完整可见
  *  （无分子被前半剖切裁掉）。受体膜法向同步投影 → 跨膜段沿切面展平，
- *  呈现"冠状切片上画通路"的教科书式视图。 */
+ *  呈现"冠状切片上画通路"的教科书式视图。
+ *
+ * v37 面内防叠松弛: 正交投影会把深度方向的分离拍扁（沿法向不同深的分子
+ * 投影后完全重叠 —— 堆叠的数学根源）。投影后在切面坐标系内做 2D 松弛:
+ *   · 剖面轮盘边界（质膜∩切面）按 24 方向二分求解 → 受体钳制轮盘边缘
+ *     （跨膜蛋白贴切片膜缘）, 配体钳制轮盘外侧（胞外）
+ *   · 核盘（核被膜∩切面）同法采样 → 胞质分子避核 + 核内分子钳制核盘内
+ *   · 自适应最小间距按轮盘可用面积/分子数求解（浅切深轮盘小 → 密度自适应）
+ * 边曲线随松弛后节点位置整体重算（端点严格对齐）。平面近切线/离面时
+ * 轮盘退化 → 回退纯投影（保持旧行为）。全部确定性。 */
 export function projectLayoutToPlane(
   layout: { nodes: Node3D[]; edges: Edge3D[]; spec: CellBodySpec },
   plane: { normal: Vec3; constant: number },
@@ -390,27 +531,243 @@ export function projectLayoutToPlane(
   const nx = plane.normal.x / l;
   const ny = plane.normal.y / l;
   const nz = plane.normal.z / l;
+  const cc = plane.constant;
   const project = (p: Vec3): Vec3 => {
-    const d = p.x * nx + p.y * ny + p.z * nz + plane.constant;
+    const d = p.x * nx + p.y * ny + p.z * nz + cc;
     return { x: p.x - d * nx, y: p.y - d * ny, z: p.z - d * nz };
   };
-  const nodes = layout.nodes.map((nd) => ({
-    ...nd,
-    pos: project(nd.pos),
-    normal: nd.normal ? project(nd.normal) : nd.normal,
-  }));
-  const edges = layout.edges.map((e) => {
-    const points = e.points.map(project);
-    let length = 0;
-    for (let i = 1; i < points.length; i++) {
-      length += Math.hypot(
-        points[i].x - points[i - 1].x,
-        points[i].y - points[i - 1].y,
-        points[i].z - points[i - 1].z,
-      );
+
+  const R = layout.spec.membraneR;
+  const N = layout.spec.nucleusR;
+  const shape = layout.spec.shape;
+  const nucC = nucleusCenter(shape, R);
+
+  // ---- 面内正交基 (u, v) 与轮盘中心 d0（切面上离细胞中心最近的点）----
+  let ux = -nz, uy = 0, uz = nx; // n̂ × (0,1,0)
+  if (Math.hypot(ux, uy, uz) < 1e-4) { ux = 0; uy = nz; uz = -ny; } // 法向≈y 时换基
+  {
+    const lu = Math.hypot(ux, uy, uz) || 1;
+    ux /= lu; uy /= lu; uz /= lu;
+  }
+  const vx = ny * uz - nz * uy;
+  const vy = nz * ux - nx * uz;
+  const vz = nx * uy - ny * ux;
+  const d0 = { x: -cc * nx, y: -cc * ny, z: -cc * nz };
+
+  // ---- 剖面轮盘边界采样（质膜 ∩ 切面; 二分求交）----
+  const DIRS = 24;
+  const rhoMem = new Array<number>(DIRS).fill(0);
+  let degenerate = false;
+  {
+    const f = (rho: number, ex: number, ey: number, ez: number): number => {
+      const px = d0.x + rho * ex, py = d0.y + rho * ey, pz = d0.z + rho * ez;
+      const pl = Math.hypot(px, py, pz) || 1e-6;
+      return pl - R * shapeFactor({ x: px / pl, y: py / pl, z: pz / pl }, shape);
+    };
+    for (let k = 0; k < DIRS && !degenerate; k++) {
+      const th = (k / DIRS) * Math.PI * 2;
+      const ex = ux * Math.cos(th) + vx * Math.sin(th);
+      const ey = uy * Math.cos(th) + vy * Math.sin(th);
+      const ez = uz * Math.cos(th) + vz * Math.sin(th);
+      if (f(0, ex, ey, ez) >= 0) { degenerate = true; break; } // 切面不切细胞（近切线/离面）
+      let lo = 0, hi = R * 2.2;
+      for (let it = 0; it < 20; it++) {
+        const mid = (lo + hi) / 2;
+        if (f(mid, ex, ey, ez) < 0) lo = mid; else hi = mid;
+      }
+      rhoMem[k] = Math.max(0.4, hi);
     }
-    return { ...e, points, length };
+  }
+
+  // ---- 核盘（核被膜 ∩ 切面; 以核中心在切面上的投影为盘心）----
+  const nucPlaneDist = nucC.x * nx + nucC.y * ny + nucC.z * nz + cc;
+  const nC2 = { x: nucC.x - nucPlaneDist * nx, y: nucC.y - nucPlaneDist * ny, z: nucC.z - nucPlaneDist * nz };
+  const nC2a = (nC2.x - d0.x) * ux + (nC2.y - d0.y) * uy + (nC2.z - d0.z) * uz;
+  const nC2b = (nC2.x - d0.x) * vx + (nC2.y - d0.y) * vy + (nC2.z - d0.z) * vz;
+  const rhoNuc = new Array<number>(DIRS).fill(0);
+  let nucDiscValid = !degenerate;
+  {
+    const g = (rho: number, ex: number, ey: number, ez: number): number => {
+      const px = nC2.x + rho * ex, py = nC2.y + rho * ey, pz = nC2.z + rho * ez;
+      const rx = px - nucC.x, ry = py - nucC.y, rz = pz - nucC.z;
+      const rl = Math.hypot(rx, ry, rz) || 1e-6;
+      return rl - N * nucleusFactor({ x: rx / rl, y: ry / rl, z: rz / rl }, shape);
+    };
+    for (let k = 0; k < DIRS && nucDiscValid; k++) {
+      const th = (k / DIRS) * Math.PI * 2;
+      const ex = ux * Math.cos(th) + vx * Math.sin(th);
+      const ey = uy * Math.cos(th) + vy * Math.sin(th);
+      const ez = uz * Math.cos(th) + vz * Math.sin(th);
+      if (g(0, ex, ey, ez) >= 0) { nucDiscValid = false; break; } // 切面未及核
+      let lo = 0, hi = N * 2.2;
+      for (let it = 0; it < 20; it++) {
+        const mid = (lo + hi) / 2;
+        if (g(mid, ex, ey, ez) < 0) lo = mid; else hi = mid;
+      }
+      rhoNuc[k] = Math.max(0.3, hi);
+    }
+  }
+
+  if (degenerate) {
+    // 轮盘退化（浅切深近切线）: 保持纯投影旧行为
+    const nodes = layout.nodes.map((nd) => ({
+      ...nd,
+      pos: project(nd.pos),
+      normal: nd.normal ? project(nd.normal) : nd.normal,
+    }));
+    const edges = layout.edges.map((e) => {
+      const points = e.points.map(project);
+      let length = 0;
+      for (let i = 1; i < points.length; i++) {
+        length += Math.hypot(
+          points[i].x - points[i - 1].x,
+          points[i].y - points[i - 1].y,
+          points[i].z - points[i - 1].z,
+        );
+      }
+      return { ...e, points, length };
+    });
+    if (typeof window !== 'undefined') {
+      (window as unknown as Record<string, unknown>).__layoutPlaneQa = { degenerate: true, n: nodes.length };
+    }
+    return { nodes, edges, spec: layout.spec };
+  }
+
+  // ---- 2D 坐标（相对轮盘中心 d0; 投影后初始位）----
+  const pos2 = new Map<string, { a: number; b: number }>();
+  for (const nd of layout.nodes) {
+    const p = project(nd.pos);
+    pos2.set(nd.id, {
+      a: (p.x - d0.x) * ux + (p.y - d0.y) * uy + (p.z - d0.z) * uz,
+      b: (p.x - d0.x) * vx + (p.y - d0.y) * vy + (p.z - d0.z) * vz,
+    });
+  }
+
+  /** 方向 → 轮盘/核盘边界半径（最近采样线性插值） */
+  const rhoAt = (rho: number[], theta: number): number => {
+    const t = ((theta % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    const fi = (t / (Math.PI * 2)) * DIRS;
+    const i0 = Math.floor(fi) % DIRS;
+    const i1 = (i0 + 1) % DIRS;
+    return rho[i0] + (rho[i1] - rho[i0]) * (fi - Math.floor(fi));
+  };
+
+  // ---- 自适应最小间距（轮盘可用面积 / 分子数 → 密度感知, 标签净空上限钳制）----
+  const avgMem = rhoMem.reduce((s, r) => s + r, 0) / DIRS;
+  const avgNuc = nucDiscValid ? rhoNuc.reduce((s, r) => s + r, 0) / DIRS : 0;
+  const areaMem = Math.PI * avgMem * avgMem;
+  const areaNuc = nucDiscValid ? Math.PI * avgNuc * avgNuc : 0;
+  const cytoCount = layout.nodes.filter((n) => n.tier >= 2 && n.tier <= 4).length
+    + (nucDiscValid ? 0 : layout.nodes.filter((n) => n.tier >= 5).length);
+  const minDBase = Math.max(0.92, Math.min(2.1, Math.sqrt(Math.max(2.4, (areaMem - areaNuc) * 0.68) / Math.max(1, cytoCount))));
+
+  // ---- 2D 松弛（受体/配体强弹簧轻移; 胞质/核内自由 + 硬约束）----
+  interface Ent2 {
+    id: string; tier: number; r: number;
+    a: number; b: number; ha: number; hb: number;
+    spring: number;
+  }
+  const ents: Ent2[] = layout.nodes.map((nd) => {
+    const q = pos2.get(nd.id)!;
+    return {
+      id: nd.id,
+      tier: nd.tier,
+      r: nd.r,
+      a: q.a, b: q.b, ha: q.a, hb: q.b,
+      spring: nd.tier === 0 ? 0.34 : nd.tier === 1 ? 0.3 : 0.1,
+    };
   });
+  const constrain2 = (e: Ent2) => {
+    const rr = Math.hypot(e.a, e.b) || 1e-6;
+    const th = Math.atan2(e.b, e.a);
+    const rm = rhoAt(rhoMem, th);
+    if (e.tier === 0) {
+      // 配体: 轮盘外侧（胞外贴缘）
+      if (rr < rm + 0.34) { const s = (rm + 0.34) / rr; e.a *= s; e.b *= s; }
+      else if (rr > rm + 1.6) { const s = (rm + 1.6) / rr; e.a *= s; e.b *= s; }
+    } else if (e.tier === 1) {
+      // 受体: 不越轮盘缘（跨膜蛋白贴切片膜缘）
+      if (rr > rm - 0.16) { const s = (rm - 0.16) / rr; e.a *= s; e.b *= s; }
+    } else if (e.tier >= 5) {
+      if (nucDiscValid) {
+        const da = e.a - nC2a, db = e.b - nC2b;
+        const dn = Math.hypot(da, db) || 1e-6;
+        const rn = rhoAt(rhoNuc, Math.atan2(db, da)) * 0.88;
+        if (dn > rn) { const s = rn / dn; e.a = nC2a + da * s; e.b = nC2b + db * s; }
+      } else if (rr > rm - 0.42) { const s = (rm - 0.42) / rr; e.a *= s; e.b *= s; }
+    } else {
+      // 胞质: 轮盘内 + 核盘外（方向感知边界 —— 束路穿核者沿核缘滑出）
+      if (rr > rm - 0.42) { const s = (rm - 0.42) / rr; e.a *= s; e.b *= s; }
+      if (nucDiscValid) {
+        const da = e.a - nC2a, db = e.b - nC2b;
+        const dn = Math.hypot(da, db);
+        const boundary = rhoAt(rhoNuc, Math.atan2(db, da)) + 0.5;
+        if (dn < boundary) {
+          if (dn < 1e-4) { e.a = nC2a + boundary; e.b = nC2b; }
+          else { const s = boundary / dn; e.a = nC2a + da * s; e.b = nC2b + db * s; }
+        }
+      }
+    }
+  };
+  const ITER2 = 150, PUSH2 = 0.28;
+  for (let it = 0; it < ITER2; it++) {
+    for (let i = 0; i < ents.length; i++) {
+      for (let j = i + 1; j < ents.length; j++) {
+        const A = ents[i], B = ents[j];
+        const dx = B.a - A.a, dy = B.b - A.b;
+        const d2 = dx * dx + dy * dy;
+        const minD = minDBase + (A.r + B.r) * 0.4;
+        if (d2 >= minD * minD || d2 < 1e-8) continue;
+        const d = Math.sqrt(d2);
+        const step = (minD - d) * PUSH2;
+        const s = step / d;
+        A.a -= dx * s; A.b -= dy * s;
+        B.a += dx * s; B.b += dy * s;
+      }
+    }
+    for (const e of ents) {
+      e.a += (e.ha - e.a) * e.spring;
+      e.b += (e.hb - e.b) * e.spring;
+      constrain2(e);
+    }
+  }
+
+  // ---- 回建 3D 坐标（切面上） + 受体面内径向法向 ----
+  const final2 = new Map<string, { a: number; b: number }>();
+  for (const e of ents) final2.set(e.id, { a: e.a, b: e.b });
+  const nodes = layout.nodes.map((nd) => {
+    const q = final2.get(nd.id)!;
+    const pos: Vec3 = {
+      x: d0.x + q.a * ux + q.b * vx,
+      y: d0.y + q.a * uy + q.b * vy,
+      z: d0.z + q.a * uz + q.b * vz,
+    };
+    let normal = nd.normal;
+    if (nd.tier === 1) {
+      const rl = Math.hypot(q.a, q.b) || 1;
+      normal = { x: (q.a / rl) * ux + (q.b / rl) * vx, y: (q.a / rl) * uy + (q.b / rl) * vy, z: (q.a / rl) * uz + (q.b / rl) * vz };
+    }
+    return { ...nd, pos, normal };
+  });
+  const edges = buildEdges3D(nodes, layout.edges);
+
+  if (typeof window !== 'undefined') {
+    let minPair = Infinity;
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i].pos, b = nodes[j].pos;
+        const d = Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+        if (d < minPair) minPair = d;
+      }
+    }
+    (window as unknown as Record<string, unknown>).__layoutPlaneQa = {
+      n: nodes.length,
+      minPair: minPair === Infinity ? null : +minPair.toFixed(3),
+      minDBase: +minDBase.toFixed(3),
+      nucDiscValid,
+      avgMem: +avgMem.toFixed(2),
+    };
+  }
   return { nodes, edges, spec: layout.spec };
 }
 

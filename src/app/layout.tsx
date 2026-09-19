@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
+import "./globals.css"; // v37 css-chain rebuild marker
 import { Toaster } from "@/components/ui/toaster";
 import { LangProvider, type Lang } from "@/lib/i18n";
 
