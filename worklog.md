@@ -2772,3 +2772,81 @@ Stage Summary:
 - 下阶段建议: ①DrugMoleculeLayer 标签接入防叠注册表 ②防叠收敛提速（瞬时快照去
   transition 依赖: 读 computed transform 矩阵反解基位）③图版导出多面板 2×2 对照版式
   ④引导模式接入减数分裂站点叙事 ⑤神经元树突/轴突折线命中体
+
+---
+Task ID: 52
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户第 25 轮需求 —— 「虽然现在不堆叠了, 但是节点的区域分布出现问题了, 细胞核和细胞质的分布没有严格遵循」（v37 防叠根治的区室保真回归修复）
+
+Work Log:
+- 【根因定位（渲染几何 vs 布局几何的区室真源分裂）】
+  · 渲染侧（organelles.tsx / section-view.tsx / mrna-flow.tsx）全部以 nucleusInstances
+    多核几何绘制（肝细胞双核: ±0.36R 两实例, 各 scale 0.82, 剖面两独立核盘）
+  · 布局侧 layout3d.ts 却以 nucleusCenter 单一幻影核（原点附近半径 N·nucF）布点
+    与约束 → 默认肝细胞视图中 TF/靶基因被钳制在双核之间的胞质间隙（幻影核区域）
+    —— 即用户所见「细胞核和细胞质的分布没有严格遵循」
+  · 第二根源: projectLayoutToPlane 的核盘也是幻影单盘 —— 剖面视图核内分子钳入
+    与渲染两盘不重合的中央幻影盘; 胞质分子仅避让幻影盘 → 可穿入真实核盘区;
+    切面未及核时（nucDiscValid=false）核分子全部倾倒入轮盘胞质区
+- 【修复①: layout3D() 多核区室真源（世界坐标层）】
+  · nucInsts = nucleusInstances(spec.shape, R)（与渲染零漂移; 单核类型首项
+    center=nucleusCenter/scale=1 → 行为与旧版严格一致, 零回归）
+  · 核实例分配: 每个核内分子（tier 5-6）按「信号束方向·实例中心方向点积最大」
+    就近入核（肝细胞 +x 受体束的级联入 +x 核）+ 载荷均衡 |A|−|B|≤1（边际最小者
+    优先迁移, 确定性）; Node3D 新增 nucTag 字段携带实例标签
+  · nucWorld(lat,lon,frac,inst): 自【所属实例】中心取 N·scale·nucF·frac —— 初始
+    位直接落入真实核内
+  · 3D 松弛约束 tier 5-6: 钳制到【所属实例】被膜内（N·inst.scale·nucF×0.93 围绕
+    inst.center）—— 替换旧幻影核钳制; tier 2-4 胞质避核本就用 nucleusRayExit
+    多核并集, 保持不变
+- 【修复②: projectLayoutToPlane() 每实例独立核盘（剖面层）】
+  · NucDisc[] 每实例: 盘心 = 实例中心在切面垂足（面内 2D 坐标）+ 24 方向二分求交
+    边界（N·inst.scale·nucleusFactor）+ 有效性 + 保留侧判定（sd = n·center+cc ≥ 0）
+  · tier≥5 钳入【所属实例盘】（0.88×rhoAt 围绕该盘心）—— 双核两盘各就各位
+  · tier 2-4 胞质避让【所有】有效盘（旧版仅幻影单盘 → 双核间隙胞质分子可穿真实盘）
+  · 离面保留 keep3d: 所属盘无效且实例整体在剖切保留侧 → 节点保持 3D 核内真位
+    不投影（核在剖面窗口后方完整可见, 信号边自切面潜入核 —— 「离面入核」科学
+    叙事; 弹簧 1 固定 + 免约束 + 斥力源影位参与面内防叠）; 裁剪侧才退化钳入轮盘
+  · minDBase 密度公式: 核盘面积 = 各有效盘之和; 离面保留节点不占轮盘密度
+  · 幂等性: virtual-cell-3d 的 layout→effLayout 双次投影下 keep3d 判定与位置
+    稳定（第二次投影输入即第一次输出）
+- 【QA 探针扩展（数值真源）】
+  · __layout3dQa 增: insts/nucTot/nucIn（tier≥5 位于所属真实实例被膜内比例）
+  · __layoutPlaneQa 增: discs/insts/nucTot/nucInDisc（落入所属盘比例）/keep3d
+- 【QA（agent-browser 交互级 + 探针真源 + sharp 像素量化; lint 零错误; console 无
+  新错误无水合告警; dev.log 全 200）】
+  · 默认视图（正剖 50% 贴面 ON, 肝细胞 hsa04010）: insts=2 discs=2, nucIn=13/13,
+    nucInDisc=1.0, keep3d=0; minPair 2.039（v37 为 1.969 —— 双核分载后核内间距
+    反而更宽裕）
+  · 像素量化（sharp 环形采样 B-R 判据: 核盘薰衣草紫 +14 / 胞质暖棕 -8）: 13 个
+    TF/gene 锚点全部落于强紫核盘区（mean 16.1, 13/13 purple）
+  · 贴面 OFF（纯 3D 视图）: __layout3dQa nucIn=13/13; 像素复核 13 锚点全紫（15.4）
+  · 浅切深 13%（切面未及双核, 均在保留侧）: discs=0, keep3d=13 —— 全部核分子
+    保持 3D 真位; 像素复核紫区（13.8）; minPair 0.728 为配体-受体对接对（贴膜
+    半径间隙, 生物学正确, 非堆叠）
+  · 深度回 50%: 探针恢复 discs=2 nucInDisc=1.0（确定性布局, reload 后数值一致）
+  · 回归: 引导模式开→Next×2 → 03 站「接头募集 · SH2 停靠」内容/相机飞行随新
+    布局自适应 ✓; i18n 中英往返（磷酸酶↔Phosphatase）✓; 375×780 scrollW=375
+    无横向溢出 + 探针一致 ✓
+- 【方法论沉淀】
+  · 「区室真源唯一性」: 渲染与布局必须共享同一几何真源（nucleusInstances）——
+    任何一侧私自简化（幻影单核）都会以「科学准确性回归」的形式浮现
+  · 「离面保留」范式: 投影类可视化中, 被投对象跨区室时保留 3D 真位优于强行拍扁
+    （拍扁 = 区室谎言; 保留 = 深度线索 + 剖面窗口透视叙事）
+
+Stage Summary:
+- 用户「核/质分布未严格遵循」根治: 布局引擎全链路接入 nucleusInstances 多核几何
+  （3D 布点/3D 松弛约束/剖面每实例核盘/胞质全盘避让/离面保留 keep3d）—— 渲染与
+  布局的区室真源重新唯一, 双核肝细胞 TF/靶基因各就各核
+- 新增科学叙事: 浅切深下「离面入核」（切面未及核时信号边自切面潜入剖面窗口后方
+  的真实核内, 而非把 TF 拍扁在胞质切片上）
+- 产出: layout3d.ts（+209/−63; Node3D.nucTag + nucAssign 分配 + 每实例核盘 +
+  keep3d + 探针）; qa-shots/task52-*.png 六张取证
+- 未解决/风险: ①organelles.tsx 的 nucPoint/nucSurf 单核 helper（高尔基定位
+  GOLGI_RADIAL 2.5 / ER 核冠内段 2917-3067 等）未迁移多核实例 —— 肝细胞双核下
+  这些结构以幻影核为锚, 可能与真实核盘轻微交叠（渲染侧既有问题, 无用户反馈,
+  建议下阶段迁移）②SwiftShader 低帧率下标签防叠收敛慢（真机无）③keep3d 边界
+  过渡（切深拖过核缘瞬间）有一帧位跳（transient 可接受）
+- 下阶段建议: ①organelles 渲染侧 nucPoint/nucSurf → nucleusInstances 迁移（同
+  本次范式）②DrugMoleculeLayer 标签接入防叠注册表（v37 遗留）③图版导出多面板
+  2×2 对照版式 ④引导模式接入减数分裂站点叙事 ⑤神经元树突/轴突折线命中体

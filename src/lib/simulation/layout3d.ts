@@ -7,7 +7,7 @@
  */
 import type { CoreNode, CoreEdge } from '@/types/kegg';
 import type { MorphologyKey as CellMorphKey } from '@/data/cell-types';
-import { nucleusCenter, nucleusFactor, nucleusRayExit, shapeFactor, type ShapeKind } from './cell-shape';
+import { nucleusFactor, nucleusInstances, nucleusRayExit, shapeFactor, type ShapeKind } from './cell-shape';
 
 export interface Vec3 {
   x: number;
@@ -157,6 +157,8 @@ export interface Node3D extends CoreNode {
   /** 膜法向（受体/通道） */
   normal?: Vec3;
   cluster: string;
+  /** v38 核实例标签（tier≥5 分配到的核; 肝细胞双核 A/B —— 剖面投影按实例钳盘） */
+  nucTag?: string;
 }
 
 export interface Edge3D extends CoreEdge {
@@ -193,7 +195,11 @@ export function layout3D(
       spec.shape,
     );
   // v6 核形状体系: 核中心偏移 + 成形核面半径 + 射线避核（与 organelles.tsx 同源）
-  const nucC = nucleusCenter(spec.shape, R);
+  // v38 区室真源对齐: 布局直接采用渲染同源的多核实例（nucleusInstances —— 肝细胞双核）。
+  //   旧版仅以 nucleusCenter 单一幻影核布局/约束, 与 organelles/section-view 实际渲染的
+  //   双核几何不一致 → TF/靶基因悬浮于双核之间的胞质（用户反馈「核/质分布未严格遵循」）。
+  //   单核类型 nucleusInstances 首项 center=nucleusCenter/scale=1 —— 行为与旧版严格一致。
+  const nucInsts = nucleusInstances(spec.shape, R);
   const nucF = (lat: number, lon: number): number =>
     nucleusFactor(
       { x: Math.cos(lat) * Math.cos(lon), y: Math.sin(lat), z: Math.cos(lat) * Math.sin(lon) },
@@ -204,13 +210,15 @@ export function layout3D(
       { x: Math.cos(lat) * Math.cos(lon), y: Math.sin(lat), z: Math.cos(lat) * Math.sin(lon) },
       spec.shape, N, R,
     );
-  // 核内世界坐标: 自核中心沿 (lat,lon) 方向取核面半径的 frac 倍（TF/靶基因落入成形核内含偏移）
-  const nucWorld = (lat: number, lon: number, frac: number): Vec3 => {
-    const f = Math.max(0.08, nucF(lat, lon) * Math.min(1, Math.max(0, frac)));
+  // 核内世界坐标: 自【所属核实例】中心沿 (lat,lon) 方向取核面半径的 frac 倍
+  //   （TF/靶基因落入真实核内含偏移与实例缩放 —— 与渲染几何零漂移）
+  const nucWorld = (lat: number, lon: number, frac: number, instIdx: number): Vec3 => {
+    const inst = nucInsts[instIdx] ?? nucInsts[0];
+    const f = Math.max(0.08, nucF(lat, lon) * Math.min(1, Math.max(0, frac)) * inst.scale);
     return {
-      x: nucC.x + Math.cos(lat) * Math.cos(lon) * N * f,
-      y: nucC.y + Math.sin(lat) * N * f,
-      z: nucC.z + Math.cos(lat) * Math.sin(lon) * N * f,
+      x: inst.center.x + Math.cos(lat) * Math.cos(lon) * N * f,
+      y: inst.center.y + Math.sin(lat) * N * f,
+      z: inst.center.z + Math.cos(lat) * Math.sin(lon) * N * f,
     };
   };
 
@@ -315,6 +323,55 @@ export function layout3D(
     });
   });
 
+  /* ---- v38 核实例分配（多核细胞学真源）----
+   * 每个核内分子（TF/靶基因）确定性分配到一个核实例:
+   *   ① 信号束就近: 分子所属受体束方向 · 实例中心方向 点积最大者
+   *     （肝细胞双核: +x 侧受体束的级联入 +x 核 —— 信号流与核占用同侧, 直觉可追）
+   *   ② 载荷均衡: |A|−|B| ≤ 1（边际最小的节点优先迁移 —— 双核各自密度均衡,
+   *     防止一侧核拥挤一侧空置; 单核类型元组长度 1 → 全部分配首项, 行为不变） */
+  const nucAssign = new Map<string, number>();
+  {
+    const instDirs = nucInsts.map((inst) => {
+      const l = Math.hypot(inst.center.x, inst.center.y, inst.center.z) || 1;
+      return { x: inst.center.x / l, y: inst.center.y / l, z: inst.center.z / l };
+    });
+    const loads = nucInsts.map(() => 0);
+    const cand: { id: string; inst: number; margin: number }[] = [];
+    for (const node of [...tfs, ...genes]) {
+      const off = nucOffset.get(node.id);
+      const lon = off?.lon ?? clusterLon(node.id);
+      const lat = off?.lat ?? 0.1;
+      const dir = { x: Math.cos(lat) * Math.cos(lon), y: Math.sin(lat), z: Math.cos(lat) * Math.sin(lon) };
+      const dots = instDirs.map((d) => dir.x * d.x + dir.y * d.y + dir.z * d.z);
+      let best = 0;
+      dots.forEach((dot, k) => { if (dot > dots[best]) best = k; });
+      const sorted = [...dots].sort((a, b) => b - a);
+      cand.push({ id: node.id, inst: best, margin: sorted.length > 1 ? sorted[0] - sorted[1] : Infinity });
+      loads[best]++;
+    }
+    if (nucInsts.length > 1) {
+      let busy = true;
+      while (busy) {
+        busy = false;
+        let hi = 0, lo = 0;
+        loads.forEach((v, k) => { if (v > loads[hi]) hi = k; if (v < loads[lo]) lo = k; });
+        if (loads[hi] - loads[lo] > 1) {
+          let pick = -1;
+          for (let i = 0; i < cand.length; i++) {
+            if (cand[i].inst === hi && (pick < 0 || cand[i].margin < cand[pick].margin)) pick = i;
+          }
+          if (pick >= 0) {
+            cand[pick].inst = lo;
+            loads[hi]--;
+            loads[lo]++;
+            busy = true;
+          }
+        }
+      }
+    }
+    for (const c of cand) nucAssign.set(c.id, c.inst);
+  }
+
   // ---- 汇总节点位置 ----
   const positions = new Map<string, Vec3>();
   for (const node of nodes) {
@@ -345,10 +402,10 @@ export function layout3D(
       positions.set(node.id, sph(rr, lat, lon));
     } else if (node.tier === 5) {
       const off = nucOffset.get(node.id) ?? { lon: Math.PI * 0.5, lat: 0.4 };
-      positions.set(node.id, nucWorld(off.lat, off.lon, 0.74));
+      positions.set(node.id, nucWorld(off.lat, off.lon, 0.74, nucAssign.get(node.id) ?? 0));
     } else {
       const off = nucOffset.get(node.id) ?? { lon: Math.PI * 0.5, lat: -0.4 };
-      positions.set(node.id, nucWorld(off.lat, off.lon, 0.45));
+      positions.set(node.id, nucWorld(off.lat, off.lon, 0.45, nucAssign.get(node.id) ?? 0));
     }
   }
 
@@ -356,8 +413,10 @@ export function layout3D(
    * 初始径向布局在簇内同层分子密集时产生屏向堆叠（标签互压、分子叠影）。
    * 在区室硬约束下迭代求解节点最小间距:
    *   · 固定锚: 配体/受体（定义信号束起点, 不参与位移, 但作为斥力源）
-   *   · 胞质分子(tier 2-4): 壳层带内滑动（半径钳 ±0.62, 射线避核 nucExit+0.55）
-   *   · 核内分子(tier 5-6): 核被膜内钳制（N·nucF×0.93）
+   *   · 胞质分子(tier 2-4): 壳层带内滑动（半径钳 ±0.62, 射线避核 nucExit+0.55 ——
+   *     nucleusRayExit 多核并集, 胞质分子永不穿任一真实核）
+   *   · 核内分子(tier 5-6): 【所属核实例】被膜内钳制（N·scale·nucF×0.93, v38 ——
+   *     旧版钳入 nucleusCenter 幻影核 → 双核细胞 TF 悬浮胞质）
    * 斥力-回位弹簧平衡 + 固定迭代次数 → 纯确定性（无随机源, 重复计算零漂移）。
    * 复杂度 O(n²)×96, 58 节点 ≈ 16 万对次, 布局期一次性毫秒级。 */
   const shellFOf = (tier: number): number => (tier === 2 ? 0.845 : tier === 3 ? 0.715 : 0.59);
@@ -366,19 +425,19 @@ export function layout3D(
     interface Ent {
       p: Vec3; // 工作坐标（可动者为独立副本, 不污染 positions 原值）
       r: number;
-      mv: { id: string; tier: number; home: Vec3; p: Vec3 } | null;
+      mv: { id: string; tier: number; home: Vec3; p: Vec3; inst: number } | null;
     }
     const ents: Ent[] = nodes.map((node) => {
       const pos = positions.get(node.id)!;
       const r = NODE_R[node.kind] ?? 0.36;
       const mv =
         node.tier >= 2
-          ? { id: node.id, tier: node.tier, home: pos, p: { x: pos.x, y: pos.y, z: pos.z } }
+          ? { id: node.id, tier: node.tier, home: pos, p: { x: pos.x, y: pos.y, z: pos.z }, inst: nucAssign.get(node.id) ?? 0 }
           : null;
       return { p: mv ? mv.p : pos, r, mv };
     });
     /** 区室约束投影: 只改半径/方向保留 → 斥力产生的角向位移存活（约束面上滑动解） */
-    const constrain = (m: { tier: number; p: Vec3 }) => {
+    const constrain = (m: { tier: number; p: Vec3; inst: number }) => {
       const p = m.p;
       if (m.tier >= 2 && m.tier <= 4) {
         const len = Math.hypot(p.x, p.y, p.z) || 1e-6;
@@ -392,16 +451,18 @@ export function layout3D(
         p.y = Math.sin(lat) * rr;
         p.z = Math.cos(lat) * Math.sin(lon) * rr;
       } else {
-        const rx = p.x - nucC.x, ry = p.y - nucC.y, rz = p.z - nucC.z;
+        // v38: 钳制到【所属核实例】被膜内（肝细胞双核各自成東; 与渲染几何零漂移）
+        const inst = nucInsts[m.inst] ?? nucInsts[0];
+        const rx = p.x - inst.center.x, ry = p.y - inst.center.y, rz = p.z - inst.center.z;
         const len = Math.hypot(rx, ry, rz) || 1e-6;
         const lat = Math.asin(Math.max(-1, Math.min(1, ry / len)));
         const lon = Math.atan2(rz, rx);
-        const maxR = N * nucF(lat, lon) * 0.93;
+        const maxR = N * inst.scale * nucF(lat, lon) * 0.93;
         if (len > maxR) {
           const s = maxR / len;
-          p.x = nucC.x + rx * s;
-          p.y = nucC.y + ry * s;
-          p.z = nucC.z + rz * s;
+          p.x = inst.center.x + rx * s;
+          p.y = inst.center.y + ry * s;
+          p.z = inst.center.z + rz * s;
         }
       }
     };
@@ -439,12 +500,17 @@ export function layout3D(
     const r = NODE_R[node.kind] ?? 0.36;
     const pad = EDGE_PAD[node.kind] ?? 0.42;
     const normal = node.tier === 1 ? norm(pos) : undefined;
-    return { ...node, pos, r, pad, normal, cluster: clusterOf.get(node.id) ?? fallbackCluster };
+    return {
+      ...node, pos, r, pad, normal,
+      cluster: clusterOf.get(node.id) ?? fallbackCluster,
+      nucTag: node.tier >= 5 ? (nucInsts[nucAssign.get(node.id) ?? 0]?.tag ?? 'A') : undefined,
+    };
   });
 
   const edges3 = buildEdges3D(nodes3, edges);
 
   // v37 QA 探针: 最小分子对间距（无窗口环境/SSR 安全; agent-browser 数值验证分散度）
+  // v38 增: 核区室遵从率 nucIn —— tier≥5/6 节点位于【所属真实核实例】被膜内的比例（期望 1.0）
   if (typeof window !== 'undefined') {
     let minPair = Infinity, minA = '', minB = '';
     for (let i = 0; i < nodes3.length; i++) {
@@ -454,11 +520,25 @@ export function layout3D(
         if (d < minPair) { minPair = d; minA = nodes3[i].label; minB = nodes3[j].label; }
       }
     }
+    let nucIn = 0, nucTot = 0;
+    const tagIdx = new Map(nucInsts.map((inst, k) => [inst.tag, k]));
+    for (const nd of nodes3) {
+      if (nd.tier < 5) continue;
+      nucTot++;
+      const inst = nucInsts[tagIdx.get(nd.nucTag ?? 'A') ?? 0] ?? nucInsts[0];
+      const rx = nd.pos.x - inst.center.x, ry = nd.pos.y - inst.center.y, rz = nd.pos.z - inst.center.z;
+      const len = Math.hypot(rx, ry, rz);
+      const surf = N * inst.scale * nucleusFactor({ x: rx, y: ry, z: rz }, spec.shape);
+      if (len <= surf + 1e-6) nucIn++;
+    }
     (window as unknown as Record<string, unknown>).__layout3dQa = {
       n: nodes3.length,
       minPair: minPair === Infinity ? null : +minPair.toFixed(3),
       pair: [minA, minB],
       edges: edges3.length,
+      insts: nucInsts.length,
+      nucTot,
+      nucIn,
     };
   }
 
@@ -521,6 +601,9 @@ function buildEdges3D(nodes3: Node3D[], edges: CoreEdge[]): Edge3D[] {
  *     （跨膜蛋白贴切片膜缘）, 配体钳制轮盘外侧（胞外）
  *   · 核盘（核被膜∩切面）同法采样 → 胞质分子避核 + 核内分子钳制核盘内
  *   · 自适应最小间距按轮盘可用面积/分子数求解（浅切深轮盘小 → 密度自适应）
+ * v38 多核区室真源: 核盘改为【每核实例独立求交】（nucleusInstances 渲染同源
+ *   —— 肝细胞双核两盘, TF/靶基因按 nucTag 各就各盘）; 胞质分子避让全部有效盘;
+ *   所属盘未被切到且核在剖切保留侧 → 该核分子保持 3D 真位（离面入核叙事）。
  * 边曲线随松弛后节点位置整体重算（端点严格对齐）。平面近切线/离面时
  * 轮盘退化 → 回退纯投影（保持旧行为）。全部确定性。 */
 export function projectLayoutToPlane(
@@ -540,7 +623,6 @@ export function projectLayoutToPlane(
   const R = layout.spec.membraneR;
   const N = layout.spec.nucleusR;
   const shape = layout.spec.shape;
-  const nucC = nucleusCenter(shape, R);
 
   // ---- 面内正交基 (u, v) 与轮盘中心 d0（切面上离细胞中心最近的点）----
   let ux = -nz, uy = 0, uz = nx; // n̂ × (0,1,0)
@@ -579,34 +661,52 @@ export function projectLayoutToPlane(
     }
   }
 
-  // ---- 核盘（核被膜 ∩ 切面; 以核中心在切面上的投影为盘心）----
-  const nucPlaneDist = nucC.x * nx + nucC.y * ny + nucC.z * nz + cc;
-  const nC2 = { x: nucC.x - nucPlaneDist * nx, y: nucC.y - nucPlaneDist * ny, z: nucC.z - nucPlaneDist * nz };
-  const nC2a = (nC2.x - d0.x) * ux + (nC2.y - d0.y) * uy + (nC2.z - d0.z) * uz;
-  const nC2b = (nC2.x - d0.x) * vx + (nC2.y - d0.y) * vy + (nC2.z - d0.z) * vz;
-  const rhoNuc = new Array<number>(DIRS).fill(0);
-  let nucDiscValid = !degenerate;
-  {
-    const g = (rho: number, ex: number, ey: number, ez: number): number => {
-      const px = nC2.x + rho * ex, py = nC2.y + rho * ey, pz = nC2.z + rho * ez;
-      const rx = px - nucC.x, ry = py - nucC.y, rz = pz - nucC.z;
-      const rl = Math.hypot(rx, ry, rz) || 1e-6;
-      return rl - N * nucleusFactor({ x: rx / rl, y: ry / rl, z: rz / rl }, shape);
-    };
-    for (let k = 0; k < DIRS && nucDiscValid; k++) {
-      const th = (k / DIRS) * Math.PI * 2;
-      const ex = ux * Math.cos(th) + vx * Math.sin(th);
-      const ey = uy * Math.cos(th) + vy * Math.sin(th);
-      const ez = uz * Math.cos(th) + vz * Math.sin(th);
-      if (g(0, ex, ey, ez) >= 0) { nucDiscValid = false; break; } // 切面未及核
-      let lo = 0, hi = N * 2.2;
-      for (let it = 0; it < 20; it++) {
-        const mid = (lo + hi) / 2;
-        if (g(mid, ex, ey, ez) < 0) lo = mid; else hi = mid;
-      }
-      rhoNuc[k] = Math.max(0.3, hi);
-    }
+  // ---- 核盘（v38: 每核实例独立求交 —— 渲染同源多核几何; 肝细胞双核两盘）----
+  // 每实例: 盘心（实例中心在切面上的垂足, 面内 2D 坐标）+ 24 方向边界半径 + 有效性。
+  // 有效性 = 切面与该核实例相交（垂足处 g(0)<0）; 无效时区分保留侧:
+  //   实例整体位于剖切保留侧（sd ≥ 0）→ 其核内分子保持 3D 真位不投影（核在剖面
+  //   窗口后方完整可见, 信号边自切面潜入核内 —— 科学准确的"离面入核"叙事）;
+  //   位于裁剪侧 → 退化回退钳入轮盘（核不可见, 保持级联完整性的教学妥协）。
+  interface NucDisc {
+    a: number; b: number; rho: number[]; valid: boolean; retained: boolean;
   }
+  const nucInsts = nucleusInstances(shape, R);
+  const tagIdx = new Map(nucInsts.map((inst, k) => [inst.tag, k]));
+  const nucDiscs: NucDisc[] = nucInsts.map((inst) => {
+    const Nn = N * inst.scale;
+    const sd = inst.center.x * nx + inst.center.y * ny + inst.center.z * nz + cc;
+    const fx = inst.center.x - sd * nx, fy = inst.center.y - sd * ny, fz = inst.center.z - sd * nz;
+    const disc: NucDisc = {
+      a: (fx - d0.x) * ux + (fy - d0.y) * uy + (fz - d0.z) * uz,
+      b: (fx - d0.x) * vx + (fy - d0.y) * vy + (fz - d0.z) * vz,
+      rho: new Array<number>(DIRS).fill(0),
+      valid: !degenerate,
+      retained: sd >= 0,
+    };
+    if (disc.valid) {
+      const g = (rho: number, ex: number, ey: number, ez: number): number => {
+        const px = fx + rho * ex, py = fy + rho * ey, pz = fz + rho * ez;
+        const rx = px - inst.center.x, ry = py - inst.center.y, rz = pz - inst.center.z;
+        const rl = Math.hypot(rx, ry, rz) || 1e-6;
+        return rl - Nn * nucleusFactor({ x: rx / rl, y: ry / rl, z: rz / rl }, shape);
+      };
+      for (let k = 0; k < DIRS && disc.valid; k++) {
+        const th = (k / DIRS) * Math.PI * 2;
+        const ex = ux * Math.cos(th) + vx * Math.sin(th);
+        const ey = uy * Math.cos(th) + vy * Math.sin(th);
+        const ez = uz * Math.cos(th) + vz * Math.sin(th);
+        if (g(0, ex, ey, ez) >= 0) { disc.valid = false; break; } // 切面未及该核
+        let lo = 0, hi = Nn * 2.2;
+        for (let it = 0; it < 20; it++) {
+          const mid = (lo + hi) / 2;
+          if (g(mid, ex, ey, ez) < 0) lo = mid; else hi = mid;
+        }
+        disc.rho[k] = Math.max(0.3, hi);
+      }
+    }
+    return disc;
+  });
+  const discOf = (nd: Node3D): NucDisc => nucDiscs[tagIdx.get(nd.nucTag ?? 'A') ?? 0] ?? nucDiscs[0];
 
   if (degenerate) {
     // 轮盘退化（浅切深近切线）: 保持纯投影旧行为
@@ -653,31 +753,54 @@ export function projectLayoutToPlane(
   };
 
   // ---- 自适应最小间距（轮盘可用面积 / 分子数 → 密度感知, 标签净空上限钳制）----
+  // v38: 核盘面积 = 各有效实例盘之和（肝细胞双核两盘）; 离面保留侧核分子不占轮盘密度
   const avgMem = rhoMem.reduce((s, r) => s + r, 0) / DIRS;
-  const avgNuc = nucDiscValid ? rhoNuc.reduce((s, r) => s + r, 0) / DIRS : 0;
   const areaMem = Math.PI * avgMem * avgMem;
-  const areaNuc = nucDiscValid ? Math.PI * avgNuc * avgNuc : 0;
-  const cytoCount = layout.nodes.filter((n) => n.tier >= 2 && n.tier <= 4).length
-    + (nucDiscValid ? 0 : layout.nodes.filter((n) => n.tier >= 5).length);
+  let areaNuc = 0;
+  for (const disc of nucDiscs) {
+    if (!disc.valid) continue;
+    const avg = disc.rho.reduce((s, r) => s + r, 0) / DIRS;
+    areaNuc += Math.PI * avg * avg;
+  }
+  let cytoCount = layout.nodes.filter((n) => n.tier >= 2 && n.tier <= 4).length;
+  for (const nd of layout.nodes) {
+    if (nd.tier < 5) continue;
+    const disc = discOf(nd);
+    if (!disc.valid && !disc.retained) cytoCount++; // 裁剪侧退化核分子 → 钳入轮盘计入密度
+  }
   const minDBase = Math.max(0.92, Math.min(2.1, Math.sqrt(Math.max(2.4, (areaMem - areaNuc) * 0.68) / Math.max(1, cytoCount))));
 
   // ---- 2D 松弛（受体/配体强弹簧轻移; 胞质/核内自由 + 硬约束）----
+  // v38 离面保留: 所属核实例未被切到且整体位于保留侧 → 弹簧 1 固定 + 免约束
+  //   （面内坐标仅作斥力源影位; 最终同建时保持 3D 核内真位 —— 核在剖面窗口后方可见）
   interface Ent2 {
     id: string; tier: number; r: number;
     a: number; b: number; ha: number; hb: number;
     spring: number;
+    fixed: boolean;
+    disc: NucDisc | null;
   }
+  const keep3d = new Set<string>();
   const ents: Ent2[] = layout.nodes.map((nd) => {
     const q = pos2.get(nd.id)!;
+    let fixed = false;
+    let disc: NucDisc | null = null;
+    if (nd.tier >= 5) {
+      disc = discOf(nd);
+      if (!disc.valid && disc.retained) { fixed = true; keep3d.add(nd.id); }
+    }
     return {
       id: nd.id,
       tier: nd.tier,
       r: nd.r,
       a: q.a, b: q.b, ha: q.a, hb: q.b,
-      spring: nd.tier === 0 ? 0.34 : nd.tier === 1 ? 0.3 : 0.1,
+      spring: fixed ? 1 : nd.tier === 0 ? 0.34 : nd.tier === 1 ? 0.3 : 0.1,
+      fixed,
+      disc,
     };
   });
   const constrain2 = (e: Ent2) => {
+    if (e.fixed) return; // 离面保留: 3D 真位不参与面内约束
     const rr = Math.hypot(e.a, e.b) || 1e-6;
     const th = Math.atan2(e.b, e.a);
     const rm = rhoAt(rhoMem, th);
@@ -689,22 +812,26 @@ export function projectLayoutToPlane(
       // 受体: 不越轮盘缘（跨膜蛋白贴切片膜缘）
       if (rr > rm - 0.16) { const s = (rm - 0.16) / rr; e.a *= s; e.b *= s; }
     } else if (e.tier >= 5) {
-      if (nucDiscValid) {
-        const da = e.a - nC2a, db = e.b - nC2b;
+      // v38: 钳入【所属核实例】盘内（肝细胞双核各自成盘 —— TF/靶基因各就各核）;
+      //   所属盘无效且裁剪侧才退化落轮盘（核不可见的极端切深教学妥协）
+      if (e.disc && e.disc.valid) {
+        const da = e.a - e.disc.a, db = e.b - e.disc.b;
         const dn = Math.hypot(da, db) || 1e-6;
-        const rn = rhoAt(rhoNuc, Math.atan2(db, da)) * 0.88;
-        if (dn > rn) { const s = rn / dn; e.a = nC2a + da * s; e.b = nC2b + db * s; }
+        const rn = rhoAt(e.disc.rho, Math.atan2(db, da)) * 0.88;
+        if (dn > rn) { const s = rn / dn; e.a = e.disc.a + da * s; e.b = e.disc.b + db * s; }
       } else if (rr > rm - 0.42) { const s = (rm - 0.42) / rr; e.a *= s; e.b *= s; }
     } else {
-      // 胞质: 轮盘内 + 核盘外（方向感知边界 —— 束路穿核者沿核缘滑出）
+      // 胞质: 轮盘内 + 【所有】有效核盘外（v38 双核两盘全避让 —— 旧版仅幻影单盘,
+      //   双核间隙胞质分子可穿入真实核盘区 —— 区室遵从破坏的另一半根源）
       if (rr > rm - 0.42) { const s = (rm - 0.42) / rr; e.a *= s; e.b *= s; }
-      if (nucDiscValid) {
-        const da = e.a - nC2a, db = e.b - nC2b;
+      for (const disc of nucDiscs) {
+        if (!disc.valid) continue;
+        const da = e.a - disc.a, db = e.b - disc.b;
         const dn = Math.hypot(da, db);
-        const boundary = rhoAt(rhoNuc, Math.atan2(db, da)) + 0.5;
+        const boundary = rhoAt(disc.rho, Math.atan2(db, da)) + 0.5;
         if (dn < boundary) {
-          if (dn < 1e-4) { e.a = nC2a + boundary; e.b = nC2b; }
-          else { const s = boundary / dn; e.a = nC2a + da * s; e.b = nC2b + db * s; }
+          if (dn < 1e-4) { e.a = disc.a + boundary; e.b = disc.b; }
+          else { const s = boundary / dn; e.a = disc.a + da * s; e.b = disc.b + db * s; }
         }
       }
     }
@@ -736,6 +863,9 @@ export function projectLayoutToPlane(
   const final2 = new Map<string, { a: number; b: number }>();
   for (const e of ents) final2.set(e.id, { a: e.a, b: e.b });
   const nodes = layout.nodes.map((nd) => {
+    // v38 离面保留: 核内 3D 真位原样返回（核未被切到且在保留侧 —— 剖面窗口后方可见,
+    //   信号边自切面潜入核内, 「离面入核」科学叙事; 位置已在 3D 松弛引擎中保证核内）
+    if (keep3d.has(nd.id)) return { ...nd };
     const q = final2.get(nd.id)!;
     const pos: Vec3 = {
       x: d0.x + q.a * ux + q.b * vx,
@@ -760,11 +890,27 @@ export function projectLayoutToPlane(
         if (d < minPair) minPair = d;
       }
     }
+    // v38: 核盘遵从率（有效盘核分子落入所属盘比例, 期望 1.0） + 离面保留计数
+    let nucIn = 0, nucTot = 0, keep = 0;
+    for (const e of ents) {
+      if (e.tier < 5) continue;
+      if (e.fixed) { keep++; continue; }
+      if (!e.disc || !e.disc.valid) continue;
+      nucTot++;
+      const da = e.a - e.disc.a, db = e.b - e.disc.b;
+      const dn = Math.hypot(da, db);
+      const rn = rhoAt(e.disc.rho, Math.atan2(db, da));
+      if (dn <= rn + 1e-6) nucIn++;
+    }
     (window as unknown as Record<string, unknown>).__layoutPlaneQa = {
       n: nodes.length,
       minPair: minPair === Infinity ? null : +minPair.toFixed(3),
       minDBase: +minDBase.toFixed(3),
-      nucDiscValid,
+      discs: nucDiscs.filter((d) => d.valid).length,
+      insts: nucDiscs.length,
+      nucTot,
+      nucInDisc: nucTot > 0 ? +(nucIn / nucTot).toFixed(3) : null,
+      keep3d: keep,
       avgMem: +avgMem.toFixed(2),
     };
   }
