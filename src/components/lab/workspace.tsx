@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useQuery } from '@tanstack/react-query';
-import { Microscope, Map as MapIcon, FlaskConical, Boxes, Orbit, Pill, Activity, GitCompare, AlertTriangle, X, Split } from 'lucide-react';
+import { Microscope, Map as MapIcon, FlaskConical, Boxes, Orbit, Pill, Activity, GitCompare, AlertTriangle, X, Split, BookMarked } from 'lucide-react';
 import type { PathwayGraph } from '@/types/kegg';
 import { useLabStore } from '@/store/lab-store';
 import { useCompareStore } from '@/store/compare-store';
@@ -248,15 +248,28 @@ export function LabWorkspace() {
               </div>
             </div>
           )}
-          {/* v56a 无通路 3D 浏览态引导（初始不加载通路）: 细胞结构完整可览, 提示从左栏装配信号演示 */}
+          {/* v56a 无通路 3D 浏览态引导（初始不加载通路）: 细胞结构完整可览, 提示从左栏装配信号演示
+              v60 教学动线升级: 「先认识结构 → 再装配信号」两步引导 —— 图鉴 pill 可直接唤起（lab-store 真源） */}
           {!pathwayId && !graph && view === 'cell3d' && (
-            <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 -translate-x-1/2">
-              <div className="flex items-center gap-2 rounded-full border border-emerald-500/25 bg-slate-950/80 px-3.5 py-1.5 shadow-lg backdrop-blur-sm">
+            <div className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2">
+              <div className="flex max-w-[94vw] flex-wrap items-center justify-center gap-1.5 rounded-full border border-emerald-500/25 bg-slate-950/80 px-3 py-1.5 shadow-lg backdrop-blur-sm">
                 <FlaskConical className="h-3.5 w-3.5 shrink-0 text-emerald-400/80" />
                 <span className="whitespace-nowrap text-[10.5px] text-slate-400">
-                  {lang === 'zh'
-                    ? '3D 结构浏览中 · 左栏选择信号通路装配分子演示'
-                    : 'Browsing 3D structure · pick a pathway to assemble the demo'}
+                  {lang === 'zh' ? '3D 结构浏览中' : 'Browsing 3D structure'}
+                </span>
+                <span className="text-slate-600">·</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    useLabStore.getState().setAtlasOpen(true);
+                  }}
+                  className="flex items-center gap-1 whitespace-nowrap rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-300 transition hover:bg-emerald-500/20 hover:text-emerald-200"
+                >
+                  <BookMarked className="h-3 w-3" />
+                  {t('hud.atlas')}
+                </button>
+                <span className="whitespace-nowrap text-[10.5px] text-slate-400">
+                  {lang === 'zh' ? '认识结构 · 左栏选通路装配信号演示' : 'meet the organelles · pick a pathway to assemble the demo'}
                 </span>
               </div>
             </div>

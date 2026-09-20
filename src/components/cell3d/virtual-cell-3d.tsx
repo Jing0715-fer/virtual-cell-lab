@@ -9,7 +9,7 @@
  * 模拟状态通过 zustand 订阅写入快照引用，帧驱动 imperative 更新（60fps 流畅）
  */
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ComponentType, ReactNode, RefObject } from 'react';
+import type { ComponentType, ReactNode, RefObject, PointerEvent as RPointerEvent, KeyboardEvent as RKeyboardEvent } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, useThree, events as createPointerEvents } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
@@ -19,7 +19,7 @@ import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, ChromaticAberration, DepthOfField, Noise, N8AO, Vignette } from '@react-three/postprocessing';
 import type { DepthOfFieldEffect } from 'postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Eye, Tags, Focus, RotateCw, RotateCcw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick, ListTree, Split, Play, Pause, LocateFixed, Camera, Loader2, CheckCircle2, Dna, Grid2x2 } from 'lucide-react';
+import { Eye, Tags, Focus, RotateCw, RotateCcw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick, ListTree, Split, Play, Pause, LocateFixed, Camera, Loader2, CheckCircle2, Dna, Grid2x2, BookMarked } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
@@ -28,9 +28,10 @@ import type { SimEvent } from '@/lib/simulation/engine';
 import { layout3D, projectLayoutToPlane, EDGE_COLORS, CELL_BODY_SPECS, type CellBodySpec, type Vec3 } from '@/lib/simulation/layout3d';
 import { buildGuidedTour, tourIntro } from '@/lib/simulation/guided-tour';
 import { CellBody, type AvoidPoint } from './organelles';
-import { MITOSIS_PHASES, MitosisStage } from './mitosis';
-import { MEIOSIS_PHASES, MeiosisStage } from './meiosis';
+import { MITOSIS_PHASES, MitosisStage, phaseOf as mitoPhaseAt, PHASE_BOUNDS as MITO_BOUNDS } from './mitosis';
+import { MEIOSIS_PHASES, MeiosisStage, phaseOf as meiPhaseAt, PHASE_BOUNDS as MEI_BOUNDS } from './meiosis';
 import { FlyToController, HOVER_GROUP_LABEL, HOVER_GROUP_ORDER, type HoverTarget, type LocateReq } from './hover-labels';
+import { OrganelleAtlasPanel } from './organelle-atlas';
 import { MoleculeLayer, KIND_COLORS, type SimSnapshot } from './molecules';
 import { DrugMoleculeLayer } from './drug-molecules';
 import { EdgeLayer } from './signal-edges';
@@ -581,6 +582,9 @@ export function VirtualCell3D() {
   const [sectionSnap, setSectionSnap] = useState(true);
   // v14 悬停标记目录 + 定位飞行（用户需求: 「细胞器改成悬停显示标记, 包含所有细胞器」）
   const [orgIndexOpen, setOrgIndexOpen] = useState(false);
+  // v60 细胞器图鉴（双语百科 + 定位联动）—— lab-store 真源（HUD 与无通路引导 pill 双入口; 视图切换状态保持）
+  const atlasOpen = useLabStore((s) => s.atlasOpen);
+  const setAtlasOpen = useLabStore((s) => s.setAtlasOpen);
   const [locateReq, setLocateReq] = useState<LocateReq | null>(null);
   const [hoverTargets, setHoverTargets] = useState<HoverTarget[]>([]);
   const locateNonce = useRef(0);
@@ -602,12 +606,98 @@ export function VirtualCell3D() {
   const [mitoPhase, setMitoPhase] = useState(0);
   const [mitoSeek, setMitoSeek] = useState<{ phase: number; nonce: number } | null>(null);
   const mitoSeekNonce = useRef(0);
+  /* v60 连续 scrubber: 拖拽写入时钟 t 的 ref 通道（舞台 useFrame 消费即清零 —— 零 React 重渲染）
+   * 零状态设计: 拖拽中 data-dragging / 浮签位置 / 文本全部命令式直写 DOM（与进度条同范式） */
+  const mitoDragSeek = useRef<number | null>(null);
+  const mitoScrubRef = useRef<HTMLDivElement | null>(null);
+  const mitoScrubTipRef = useRef<HTMLDivElement | null>(null);
   /** 分裂进度条 DOM 引用（onMitoProgress 逐帧直写 style.width —— 零 React 重渲染） */
   const mitoProgressRef = useRef<HTMLDivElement | null>(null);
   const onMitoProgress = useCallback((frac: number) => {
     const el = mitoProgressRef.current;
     if (el) el.style.width = `${Math.min(1, Math.max(0, frac)) * 100}%`;
+    // v60: 拖拽中同步浮签（相位名 + 位置 —— 命令式跟随, 不经 React）
+    const tip = mitoScrubTipRef.current;
+    if (tip && tip.style.display !== 'none' && el) {
+      tip.style.left = el.style.width;
+    }
   }, []);
+  /** v60 scrubber: 指针事件 → 时钟 t（拖拽期间逐 pointermove 写入 ref; 相位名浮签命令式更新） */
+  const divisionClockMax = divisionMode === 'meiosis' ? 11 : 7;
+  const divisionPhaseAt = divisionMode === 'meiosis' ? meiPhaseAt : mitoPhaseAt;
+  const divisionBounds = divisionMode === 'meiosis' ? MEI_BOUNDS : MITO_BOUNDS;
+  const scrubClockFromEvent = (clientX: number): number | null => {
+    const el = mitoScrubRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, (clientX - r.left) / Math.max(1, r.width)));
+    return frac * divisionClockMax;
+  };
+  const updateScrubTip = (t: number) => {
+    const tip = mitoScrubTipRef.current;
+    if (!tip) return;
+    const p = divisionPhaseAt(t);
+    const info = divisionPhases[p];
+    const pct = Math.round((t / divisionClockMax) * 100);
+    tip.textContent = `${p + 1} · ${lang === 'zh' ? info?.zh : info?.en}  ·  ${pct}%`;
+    tip.style.left = `${(t / divisionClockMax) * 100}%`;
+  };
+  const onScrubPointerDown = (e: RPointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    // v23 语义延续: 拖拽 = 暂停细看（拖完保持暂停, 播放按钮继续）
+    setMitoPlaying(false);
+    const t = scrubClockFromEvent(e.clientX);
+    if (t == null) return;
+    mitoDragSeek.current = t;
+    // 先置拖拽态再捕获（合成事件/已释放指针下 setPointerCapture 可能抛 NotFoundError ——
+    // 不让捕获失败阻断拖拽主路径）
+    const box = mitoScrubRef.current;
+    if (box) box.dataset.dragging = 'true';
+    const tip = mitoScrubTipRef.current;
+    if (tip) tip.style.display = 'block';
+    updateScrubTip(t);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* 指针已消失或合成事件 —— 拖拽态已置, move/up 仍可推进 */
+    }
+  };
+  const onScrubPointerMove = (e: RPointerEvent<HTMLDivElement>) => {
+    if (mitoDragSeek.current == null && mitoScrubRef.current?.dataset.dragging !== 'true') return;
+    const t = scrubClockFromEvent(e.clientX);
+    if (t == null) return;
+    mitoDragSeek.current = t;
+    updateScrubTip(t);
+  };
+  const endScrub = () => {
+    mitoDragSeek.current = null;
+    const box = mitoScrubRef.current;
+    if (box) delete box.dataset.dragging;
+    const tip = mitoScrubTipRef.current;
+    if (tip) tip.style.display = 'none';
+  };
+  const onScrubPointerUp = (e: RPointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* 合成事件下 pointerId 不存在 —— 直接结束拖拽 */
+    }
+    endScrub();
+  };
+  /** v60 键盘无障碍: ←/→ 步进 0.15 时钟单位（Home/End 到两端）—— slider 语义 */
+  const onScrubKeyDown = (e: RKeyboardEvent<HTMLDivElement>) => {
+    const step = e.key === 'ArrowLeft' || e.key === 'ArrowRight' ? 0.15 * (e.key === 'ArrowLeft' ? -1 : 1) : 0;
+    const jump = e.key === 'Home' ? -divisionClockMax : e.key === 'End' ? divisionClockMax : 0;
+    if (step === 0 && jump === 0) return;
+    e.preventDefault();
+    setMitoPlaying(false);
+    // 当前时钟位置从进度条 DOM 反读（唯一持久真源在舞台 clock —— DOM 是其镜像）
+    const el = mitoProgressRef.current;
+    const cur = el ? (parseFloat(el.style.width) || 0) / 100 * divisionClockMax : 0;
+    const next = Math.max(0, Math.min(divisionClockMax, cur + step + jump));
+    mitoDragSeek.current = next;
+  };
   /** v23 seek 即暂停细看: 相位 chip 点击 → 跳到该相位并暂停（「翻到某一页细看」语义;
    *  播放按钮继续推进）; openMitosis 打开时传 playing=true 自动开播 */
   const seekMitosis = useCallback((phase: number, playing = false) => {
@@ -623,6 +713,7 @@ export function VirtualCell3D() {
       setAutoRotate(false);
       setTourOpen(false);
       setOrgIndexOpen(false);
+      setAtlasOpen(false);
       setCamMode('overview');
       seekMitosis(0, true);
       // v36 减数分裂舞台更宽（4 配子拉开 ±yG/±zD）—— 相机拉远一档
@@ -1115,6 +1206,7 @@ export function VirtualCell3D() {
                 playing={mitoPlaying}
                 speed={mitoSpeed}
                 seek={mitoSeek}
+                dragSeekRef={mitoDragSeek}
                 onPhaseChange={setMitoPhase}
                 onEnded={() => setMitoPlaying(false)}
                 showAnatomy={showAnatomy}
@@ -1126,6 +1218,7 @@ export function VirtualCell3D() {
                 playing={mitoPlaying}
                 speed={mitoSpeed}
                 seek={mitoSeek}
+                dragSeekRef={mitoDragSeek}
                 onPhaseChange={setMitoPhase}
                 onEnded={() => setMitoPlaying(false)}
                 showAnatomy={showAnatomy}
@@ -1320,6 +1413,8 @@ export function VirtualCell3D() {
           <HudToggle active={perfMode} onClick={() => setPerfMode(!perfMode)} icon={Gauge} label={perfMode ? t('hud.perf') : t('hud.hd')} />
           <HudToggle active={showAnatomy} onClick={() => setShowAnatomy(!showAnatomy)} icon={Tags} label={t('hud.hover')} />
           <HudToggle active={orgIndexOpen} onClick={() => setOrgIndexOpen(!orgIndexOpen)} icon={ListTree} label={t('hud.index')} disabled={mitosis} />
+          {/* v60 细胞器图鉴: 四维双语百科 + 定位联动（分裂模式下悬停锚点集不同 —— 与目录同判据禁用） */}
+          <HudToggle active={atlasOpen} onClick={() => setAtlasOpen(!atlasOpen)} icon={BookMarked} label={t('hud.atlas')} highlight disabled={mitosis} title={t('hud.atlasTip')} />
           <HudToggle active={showLabels} onClick={() => setShowLabels(!showLabels)} icon={Eye} label={t('hud.labels')} />
           <HudToggle active={focus} onClick={() => setFocus(!focus)} icon={Focus} label={t('hud.focus')} />
           <HudToggle active={clipView} onClick={() => setClipView(!clipView)} icon={Layers} label={t('hud.section')} highlight={false} />
@@ -1490,6 +1585,16 @@ export function VirtualCell3D() {
         </div>
       )}
 
+      {/* v60 右中: 细胞器图鉴面板（双语四维百科 + 「在细胞中定位」联动相机飞行与脉冲高亮） */}
+      {!mitosis && (
+        <OrganelleAtlasPanel
+          open={atlasOpen}
+          onClose={() => setAtlasOpen(false)}
+          hoverTargets={hoverTargets}
+          onLocate={locateTarget}
+        />
+      )}
+
       {/* v14 底部中央: 细胞分裂演示控制台（相位时间轴 + 播放/速度/重播 + 双语描述卡） */}
       {mitosis && (
         <div className="absolute bottom-3 left-1/2 z-20 w-[min(94%,680px)] -translate-x-1/2">
@@ -1601,9 +1706,32 @@ export function VirtualCell3D() {
               ))}
             </div>
 
-            {/* 进度条（DOM 直写, 零重渲染） */}
-            <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/8">
-              <div ref={mitoProgressRef} className="h-full w-0 rounded-full bg-gradient-to-r from-teal-500/70 to-emerald-400" />
+            {/* v60 连续 scrubber（拖拽逐帧细看）: 进度 DOM 直写零重渲染 + 相位边界刻度 + 拖拽相位浮签 + 键盘 slider 语义 */}
+            <div
+              ref={mitoScrubRef}
+              className={`mito-scrub mt-2 ${divisionMode === 'meiosis' ? 'mei' : ''}`}
+              role="slider"
+              aria-label={divisionMode === 'meiosis' ? t('mei.title') : t('mit.title')}
+              aria-valuemin={0}
+              aria-valuemax={divisionClockMax}
+              aria-valuenow={mitoPhase + 1}
+              aria-valuetext={lang === 'zh' ? divisionPhases[mitoPhase]?.zh : divisionPhases[mitoPhase]?.en}
+              tabIndex={0}
+              title={t('mit.scrubTip')}
+              onKeyDown={onScrubKeyDown}
+              onPointerDown={onScrubPointerDown}
+              onPointerMove={onScrubPointerMove}
+              onPointerUp={onScrubPointerUp}
+              onPointerCancel={endScrub}
+            >
+              <div className="mito-scrub-track">
+                {/* 相位边界刻度（PHASE_BOUNDS 投影 —— 拖拽时的「里程碑」感） */}
+                {divisionBounds.slice(1, -1).map((b) => (
+                  <span key={b} className="mito-scrub-tick" style={{ left: `${(b / divisionClockMax) * 100}%` }} />
+                ))}
+                <div ref={mitoProgressRef} className="mito-scrub-fill" style={{ width: '0%' }} />
+                <div ref={mitoScrubTipRef} className={`mito-scrub-tip ${divisionMode === 'meiosis' ? 'mei' : ''}`} style={{ display: 'none' }} />
+              </div>
             </div>
 
             {/* 当前相位双语描述（关键分子事件） */}

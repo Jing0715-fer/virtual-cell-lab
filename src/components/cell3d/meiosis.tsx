@@ -20,6 +20,7 @@
  * 相位时钟 t ∈ [0, 11]（12 相位, 每单位 7s × speed）
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { organelleMaterial, REF, createTimeUniform } from './materials';
@@ -105,8 +106,8 @@ export const MEIOSIS_PHASES: MeiosisPhaseInfo[] = [
 /** 每单位相位时钟时长（秒, × speed; 总周期 = 12 相位 11 单位 × 7s = 77s） */
 export const MEIOSIS_PHASE_SECONDS = 7;
 
-const PHASE_BOUNDS = [0, 0.5, 1.4, 2.3, 3.2, 4.1, 4.85, 5.65, 6.4, 7.5, 8.5, 9.5, 11];
-const phaseOf = (t: number): number => {
+export const PHASE_BOUNDS = [0, 0.5, 1.4, 2.3, 3.2, 4.1, 4.85, 5.65, 6.4, 7.5, 8.5, 9.5, 11];
+export const phaseOf = (t: number): number => {
   for (let i = PHASE_BOUNDS.length - 1; i >= 1; i--) {
     if (t >= PHASE_BOUNDS[i]) return Math.min(MEIOSIS_PHASES.length - 1, i);
   }
@@ -1864,10 +1865,12 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
 
 /* ============ React 组件（时钟驱动 + 相位上报） ============ */
 
-export const MeiosisStage = ({ playing, speed, seek, onPhaseChange, onEnded, showAnatomy, perf, onProgress }: {
+export const MeiosisStage = ({ playing, speed, seek, dragSeekRef, onPhaseChange, onEnded, showAnatomy, perf, onProgress }: {
   playing: boolean;
   speed: number;
   seek: { phase: number; nonce: number } | null;
+  /** v60 连续拖拽 seek（ref 通道 —— 每帧消费即清零; 与 MitosisStage 同构, 时钟域 [0,11]） */
+  dragSeekRef?: RefObject<number | null>;
   onPhaseChange: (phase: number) => void;
   onEnded: () => void;
   showAnatomy: boolean;
@@ -1899,6 +1902,11 @@ export const MeiosisStage = ({ playing, speed, seek, onPhaseChange, onEnded, sho
       lastPhase.current = seek.phase;
       setPhase(seek.phase);
       onPhaseChange(seek.phase);
+    }
+    // v60 scrubber 拖拽通道（相位上报统一走 phaseOf 边界跨越 —— 与 chip seek 同源）
+    if (dragSeekRef && dragSeekRef.current != null) {
+      clock.current = Math.max(0, Math.min(11, dragSeekRef.current));
+      dragSeekRef.current = null;
     }
     if (playing) {
       clock.current = Math.min(11, clock.current + (d * speed) / MEIOSIS_PHASE_SECONDS);

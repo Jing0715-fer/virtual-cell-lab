@@ -3384,3 +3384,92 @@ Stage Summary:
 - 下阶段建议: ①DrugMoleculeLayer 标签接入 v37 防叠注册表（worklog 长期建议项）②引导
   模式接入减数分裂站点叙事 ③无通路态「先认识结构, 再装配信号」教学动线打磨 ④星体微管
   NE 存活窗解析偏转（优先级低）
+
+---
+Task ID: 60
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户第 34 轮 —— 「继续打磨整个项目, 开发新功能, 优化 UI」
+
+Work Log:
+- 【基线确认】git log v59 (005ead8) 在位; dev server 正常; 本轮三大板块: 新功能 ×3 +
+  UI 打磨 + 无通路教学动线（worklog v59 建议项落地）
+- 【新功能 A: 细胞器图鉴（Organelle Atlas）】
+  · src/data/organelle-atlas.ts: 23 条双语四维百科（超微结构/生理功能/临床关联/标志蛋白
+    + 关键尺度 + 组别强调色）—— latin 与 HoverTarget.latin 严格同名（联动定位联接键）;
+    内容基准 Alberts 6e / 翟中和 5e（含 Zellweger/X-ALD/laminopathy/CHED 等 30+ 疾病关联）
+  · organelle-atlas.tsx: 右中滑出面板（与左中目录对称）—— 搜索过滤（中/拉丁/组别）+
+    六组分栏 + grid-rows 纯 CSS 手风琴 + 在场判定（●/○ 徽标, 缺席结构禁用态保留——
+    学习完整性优先）+ 「在细胞中定位」→ locateTarget → FlyToController 相机飞行 +
+    强制高亮 2.4s + is-located 脉冲反馈; framer-motion 入/出场（x:18 slide-in,
+    useReducedMotion 退化为纯淡入; AnimatePresence 条件子元素真退场）
+  · lab-store 新增 atlasOpen/setAtlasOpen 真源（HUD 与无通路引导 pill 双入口,
+    视图切换状态保持）; i18n atlas.* 19 词条 + globals.css atlas-* 动画
+- 【新功能 B: 分裂演示连续时间轴 scrubber】
+  · 舞台侧（mitosis/meiosis 同构）: dragSeekRef ref 通道（useFrame 每帧消费即清零——
+    零 React 重渲染; 相位上报统一走 phaseOf 边界跨越, 与 chip seek 同源）;
+    phaseOf/PHASE_BOUNDS 导出（宿主刻度投影 + 浮签相位名反查）
+  · 宿主侧: 进度条升级为可拖拽 slider —— pointer capture（try/catch 防合成事件
+    NotFoundError 阻断主路径—— 实测修复）+ 全宽 touch-action:none 热区（4px 轨道 +
+    ±9px 隐形命中带）+ 12px 手柄（hover/拖拽放大 1.35×）+ 7/11 根相位边界刻度 +
+    跟手相位浮签（「3 · 前中期 · 30%」命令式直写 DOM）+ role=slider 键盘无障碍
+    （←/→ 步进 0.15 时钟单位, Home/End 两端, focus-visible 亮环）+ mei 模式
+    fuchsia 配色镜像; v23 语义延续: 拖拽即暂停细看
+  · 实测: 有丝拖拽 30%→t=2.1 / 75%→t=5.25; 减数 50%→t=5.51（时钟域 [0,11] ✓）;
+    键盘 5.25→5.4→Home→0; 浮签文本/位置/隐藏全链正确
+- 【新功能 C: 药物标签接入防叠注册表（worklog v55 起长期建议项）】
+  · label-declutter.ts: v37 MoleculeLayer 内联求解器泛化为共享模块——模块级
+    labelRegistry Map + runLabelDeclutter(now)（0.22s 节流先到先跑, 多层驱动不重复
+    求解）; 求解逻辑 DOM 泛型零改动迁移（优先级 classList 判定, QA 探针 __declutQa 保留）
+  · MoleculeLayer 重构: useRef(labelRegistry) + 帧驱动一行化（regRef 协议不变）;
+    DrugMolecule3D 标签 effect 挂载即注册 drug:${id}:${target}:${slot} / 卸载即除名;
+    DrugMoleculeLayer 加帧驱动（分子层缺席时药物标签仍松弛）
+  · CSS: .drug3d-label 接入 --nudx/--nudy 位移协议（hover 微动效复合而非覆盖）+
+    is-declut 残余半避让 + reduced-motion 降级
+  · 实测: 投药曲美替尼后注册表 47→51（4 药物徽标入池）, 位移写入
+    （6.8/-13.0, 13.1/-21.1, -50.4/14.4, 41.7/6.1px）, 2 个残余重叠正确降级;
+    分子标签回归 48 可见/44 位移（v37 行为保持）
+- 【UI 打磨】
+  · 无通路态教学动线（worklog v59 建议项③）: 引导 pill 升级「先认识结构 → 再装配信号」
+    两步动线——「细胞器图鉴」可点击 pill 直接唤起图鉴（lab-store 真源跨组件控制）,
+    max-w-[94vw] flex-wrap 移动端自适应
+  · atlas HUD 按钮 tooltip（hud.atlasTip）; scrubber focus-visible 键盘可达性亮环
+- 【QA 双重验证】
+  · lint 零错误 / tsc src 零错误 / 全程 console 零页面错误 / 无横向溢出 / footer 在位
+  · v57 防线逐位全绿: mtNuc placed 18/18 · minClear +0.008 · centClear 0.5 ·
+    ifClear 0.1; org minCrown +0.059 · minTube 0.104（与 v57 记录精确一致——共享求解器
+    重构零行为漂移）
+  · v58 防线: 浏览器探针 chrSep minClear -2.2e-16（机器精度收敛）k=0.55 前期相位化
+    chrN=8; 离线 verify-mitosis-containment 三项全过（两两净空 -0.013 @t=4.64 /
+    核内余量 0.263 / 膜内 xy 1.31 z 0.99——与 v59 基线逐位一致）
+  · 图鉴全链: 开面板 → 搜索「线粒」过滤 23→1 → 展开四维档案 → 定位 → 强制高亮卡
+    （线粒体板层嵴 + ORG_INFO 描述）+ 30 个脉冲环元素; 无通路引导 pill → 图鉴
+    （store 驱动）✓
+  · 【环境坑记录】①VLM 全程 429 限流（视觉验证改 DOM 断言 + 计算样式 + 数值探针,
+    功能验证精度更高; 截图 14 张存档待后续 VLM 复核）②dev server postcss worker
+    缓存陈旧（CSS 改动不生效——重启 dev server + 清 .next/dev 根治; EADDRINUSE 历史
+    日志头为第二实例失败残留）③Radix Tabs 合成事件需完整 pointerdown/up+click 序列
+    （单纯 .click() 不激活 tab）④无头 rAF 深度节流（~1fps 且偶发停摆——探针需预置后
+    干净序列触发; 旧会话多次开关分裂后探针失灵为环境伪象非代码回归）⑤rg/sed 终端
+    回显吞 [min(...)] 方括号（Read 工具为权威视图——防误判假损坏）
+
+Stage Summary:
+- 三大新功能全部落地并实证: ①细胞器图鉴（23 条双语四维百科 + 3D 定位联动 + 动效）
+  ②分裂连续 scrubber（拖拽/键盘/刻度/浮签, 双时钟域）③药物标签共享防叠
+  （47→51 同池松弛, worklog 三轮悬置建议项闭环）
+- UI 打磨: 无通路教学动线升级（图鉴 pill 直达）+ tooltip/键盘可达性/reduced-motion
+- 回归: v57/v58 防线 + 离线求解器镜像全部逐位一致——本轮所有改动零行为漂移
+- 架构沉淀: ①「ref 通道 + 每帧消费即清零」交互范式（拖拽类高频输入零重渲染接入
+  既有 useFrame 时钟的标准通道）②「共享注册表 + 模块级节流先到先跑」多层帧驱动
+  去重范式 ③「latin 严格同名」数据-渲染联接键（图鉴 ↔ 悬停锚点零映射成本联动）
+- 产出: organelle-atlas.ts（数据）/ organelle-atlas.tsx（面板）/ label-declutter.ts
+  （共享求解器）/ mitosis+meiosis.tsx（dragSeekRef 通道 + phaseOf 导出）/
+  virtual-cell-3d.tsx（scrubber + 图鉴接线）/ workspace.tsx（教学动线 pill）/
+  lab-store.ts（atlasOpen 真源）/ i18n.tsx + globals.css（配套）; qa-shots/task60-*
+  14 张取证
+- 未解决/风险: ①VLM 429 限流致视觉评审缺位（DOM/数值验证已覆盖功能面; 建议下轮
+  VLM 恢复后对 task60-*.png 补一轮视觉复核）②移动端真机触摸拖拽 scrubber 未实测
+  （无头环境无触摸模拟; 热区/touch-action 已按规范设计）③图鉴 23 条为通用细胞器集,
+  特化结构（微绒毛/闰盘/突触扣结等 20+ 条目）可作下轮扩充
+- 下阶段建议: ①特化结构图鉴扩充（HOVER_TARGETS 特化清单 → ORG_ATLAS 续编）
+  ②引导模式接入减数分裂站点叙事（worklog v59 建议项②仍悬置）③VLM 恢复后补视觉
+  复核 + 移动端真机 QA ④DrugMoleculeLayer 视距补偿与图鉴定位联动的深度联动打磨

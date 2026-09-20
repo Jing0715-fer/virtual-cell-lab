@@ -27,6 +27,7 @@
  *   - 全程悬停标记（复用 OrganelleHoverLayer —— 相位感知动态目标）
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { organelleMaterial, REF, createTimeUniform, type TimeUniform } from './materials';
@@ -97,8 +98,8 @@ export const MITOSIS_PHASES: MitosisPhaseInfo[] = [
 export const MITOSIS_PHASE_SECONDS = 7;
 
 /** 相位边界（t ∈ [0,7] 不等分 —— 生物学时长: 间期展示较短, 中/后期事件紧凑; v19 增第 8 相位分离完成） */
-const PHASE_BOUNDS = [0, 0.78, 1.62, 2.42, 3.32, 4.22, 5.0, 5.72, 7];
-const phaseOf = (t: number): number => {
+export const PHASE_BOUNDS = [0, 0.78, 1.62, 2.42, 3.32, 4.22, 5.0, 5.72, 7];
+export const phaseOf = (t: number): number => {
   for (let i = PHASE_BOUNDS.length - 1; i >= 1; i--) {
     if (t >= PHASE_BOUNDS[i]) return Math.min(MITOSIS_PHASES.length - 1, i);
   }
@@ -2350,12 +2351,14 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
 
 /* ============ React 组件（时钟驱动 + 相位上报） ============ */
 
-export const MitosisStage = ({ playing, speed, seek, onPhaseChange, onEnded, showAnatomy, perf, onProgress }: {
+export const MitosisStage = ({ playing, speed, seek, dragSeekRef, onPhaseChange, onEnded, showAnatomy, perf, onProgress }: {
   playing: boolean;
   /** 播放速度倍率 */
   speed: number;
   /** 跳转请求（点击相位 chip） */
   seek: { phase: number; nonce: number } | null;
+  /** v60 连续拖拽 seek（ref 通道 —— 每帧消费即清零, 零 React 重渲染; 拖拽期宿主逐 pointermove 写入时钟 t） */
+  dragSeekRef?: RefObject<number | null>;
   onPhaseChange: (phase: number) => void;
   /** 完整播完一轮（t=6）时回调（自动暂停 + 提示重播） */
   onEnded: () => void;
@@ -2390,6 +2393,11 @@ export const MitosisStage = ({ playing, speed, seek, onPhaseChange, onEnded, sho
       lastPhase.current = seek.phase;
       setPhase(seek.phase);
       onPhaseChange(seek.phase);
+    }
+    // v60 scrubber 拖拽通道: 直接写时钟（相位上报统一走下方 phaseOf 边界跨越 —— 与 chip seek 同源）
+    if (dragSeekRef && dragSeekRef.current != null) {
+      clock.current = Math.max(0, Math.min(7, dragSeekRef.current));
+      dragSeekRef.current = null;
     }
     if (playing) {
       clock.current = Math.min(7, clock.current + (d * speed) / MITOSIS_PHASE_SECONDS);

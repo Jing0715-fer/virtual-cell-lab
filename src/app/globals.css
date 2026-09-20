@@ -495,7 +495,9 @@
 .mol3d-label.is-inhibited .mol3d-sym { color: #e9d5ff; }
 .mol3d-label.is-inhibited .mol3d-inh { display: inline; }
 
-/* 3D 药物分子徽标（球棍模型结合停泊后显示） */
+/* 3D 药物分子徽标（球棍模型结合停泊后显示）
+   v60: 接入标签屏幕空间防叠 —— 与 .mol3d-label 同一 --nudx/--nudy 位移协议
+   （共享求解器 label-declutter.ts 写入; hover 微动效与防叠位移复合而非覆盖） */
 .drug3d-label {
   display: inline-flex;
   flex-direction: column;
@@ -509,8 +511,9 @@
   white-space: nowrap;
   font-family: var(--font-mono, ui-monospace, monospace);
   box-shadow: 0 0 18px rgba(192, 132, 252, 0.3), inset 0 1px 0 rgba(233, 213, 255, 0.14);
-  transition: opacity 0.4s ease, border-color 0.25s ease, box-shadow 0.25s ease, transform 0.18s ease;
+  transition: opacity 0.4s ease, border-color 0.25s ease, box-shadow 0.25s ease, transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1);
   opacity: 0;
+  transform: translate(var(--nudx, 0px), var(--nudy, 0px));
   /* 可点击选中靶点（与分子标签同一交互语言） */
   pointer-events: auto;
   cursor: pointer;
@@ -518,7 +521,14 @@
 .drug3d-label:hover {
   border-color: rgba(216, 180, 254, 0.9);
   box-shadow: 0 0 22px rgba(192, 132, 252, 0.5), inset 0 1px 0 rgba(233, 213, 255, 0.14);
-  transform: translateY(-1px) scale(1.04);
+  transform: translate(var(--nudx, 0px), var(--nudy, 0px)) translateY(-1px) scale(1.04);
+}
+/* 防叠残余半避让（与分子标签同族语义） */
+.drug3d-label.is-declut {
+  border-color: rgba(148, 163, 184, 0.16);
+}
+@media (prefers-reduced-motion: reduce) {
+  .drug3d-label { transition: opacity 0.4s ease, border-color 0.25s ease, box-shadow 0.25s ease; }
 }
 .drug3d-name {
   font-size: 12px;
@@ -843,4 +853,128 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .mol3d-label { transition: border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease; }
+}
+
+/* ============ v60 细胞器图鉴面板（Organelle Atlas） ============ */
+/* 展开动画（grid-rows 技巧 —— 高度自适应的纯 CSS 手风琴, 无 JS 量高） */
+.atlas-item-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.32s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.26s ease;
+  opacity: 0;
+}
+.atlas-item-body[data-open='true'] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.atlas-item-body > div {
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .atlas-item-body { transition: none; }
+}
+/* 定位按钮的脉冲反馈（定位飞行 1.2s 期间琥珀呼吸） */
+.atlas-locate-btn.is-located {
+  animation: atlas-located-pulse 1.4s ease;
+}
+@keyframes atlas-located-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55); }
+  60% { box-shadow: 0 0 0 8px rgba(52, 211, 153, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+}
+
+/* ============ v60 分裂演示连续时间轴 scrubber ============ */
+/* 拖拽热区: 视觉 4px 轨道 + ±10px 隐形命中带（触控 44px 目标的折中 —— 全宽横移手势优先） */
+.mito-scrub {
+  position: relative;
+  cursor: pointer;
+  touch-action: none; /* 拖拽期间阻止页面滚动 —— pointermove 独占 */
+  padding: 9px 0;     /* 命中热区纵向扩展 */
+  margin: -6px 0;     /* 抵消 padding 占位, 视觉紧凑如旧 */
+  border-radius: 6px;
+}
+/* 键盘可达性: focus-visible 时轨道亮环（tab 进入 slider 的明确 affordance） */
+.mito-scrub:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(94, 234, 212, 0.45);
+}
+.mito-scrub.mei:focus-visible {
+  box-shadow: 0 0 0 2px rgba(240, 171, 252, 0.45);
+}
+.mito-scrub-track {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  overflow: visible;
+}
+.mito-scrub-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(20, 184, 166, 0.75), rgba(52, 211, 153, 0.95));
+  position: relative;
+}
+.mito-scrub-fill::after {
+  /* 进度头手柄（12px 圆点 + 外圈; 悬停/拖拽时放大） */
+  content: '';
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #5eead4;
+  border: 2px solid rgba(4, 30, 28, 0.9);
+  box-shadow: 0 0 10px rgba(45, 212, 191, 0.65);
+  transition: transform 0.16s ease;
+}
+.mito-scrub:hover .mito-scrub-fill::after,
+.mito-scrub[data-dragging='true'] .mito-scrub-fill::after {
+  transform: translateY(-50%) scale(1.35);
+}
+.mito-scrub[data-dragging='true'] .mito-scrub-track {
+  background: rgba(94, 234, 212, 0.22);
+}
+/* 相位边界刻度（PHASE_BOUNDS 投影 —— 拖拽时的「里程碑」感） */
+.mito-scrub-tick {
+  position: absolute;
+  top: -2px;
+  width: 1px;
+  height: 8px;
+  background: rgba(94, 234, 212, 0.35);
+  pointer-events: none;
+}
+/* 拖拽相位浮签（跟手移动; 渲染期 React 状态直写 —— 拖拽期间 ~60fps 更新可接受） */
+.mito-scrub-tip {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(45, 212, 191, 0.45);
+  background: rgba(4, 30, 28, 0.94);
+  font-size: 9px;
+  color: #99f6e4;
+  pointer-events: none;
+  z-index: 2;
+}
+/* 减数分裂模式的配色镜像（fuchsia 系） */
+.mito-scrub.mei .mito-scrub-fill {
+  background: linear-gradient(90deg, rgba(192, 132, 252, 0.7), rgba(240, 171, 252, 0.95));
+}
+.mito-scrub.mei .mito-scrub-fill::after {
+  background: #f5d0fe;
+  box-shadow: 0 0 10px rgba(232, 121, 249, 0.6);
+}
+.mito-scrub.mei .mito-scrub-tick {
+  background: rgba(240, 171, 252, 0.32);
+}
+.mito-scrub.mei[data-dragging='true'] .mito-scrub-track {
+  background: rgba(240, 171, 252, 0.2);
+}
+.mito-scrub-tip.mei {
+  border-color: rgba(232, 121, 249, 0.45);
+  color: #f5d0fe;
 }

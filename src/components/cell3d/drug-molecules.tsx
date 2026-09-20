@@ -24,6 +24,7 @@ import { Html } from '@react-three/drei';
 import type { Node3D } from '@/lib/simulation/layout3d';
 import type { SimSnapshot } from './molecules';
 import { noSectionClipTag } from './section-view';
+import { labelRegistry, runLabelDeclutter } from './label-declutter';
 import { INHIBITORS, type InhibitorSpec } from '@/data/inhibitors';
 import { useLabStore } from '@/store/lab-store';
 import { useLang } from '@/lib/i18n';
@@ -187,9 +188,11 @@ const DrugMolecule3D = memo(function DrugMolecule3D({ drug, target, sim, showLab
   // 药物标签点击 → 选中其靶点分子（与分子标签同一交互语言; 原生监听阻断冒泡至 R3F 事件容器,
   // 否则会触发 onPointerMissed 把刚选中的靶点又取消）
   // ⚠ drei Html 异步挂载 —— rAF 轮询直至标签元素就绪再挂监听
+  // v60: 就绪后同步登记进共享标签防叠注册表（与分子标签同池两两松弛 —— 互不遮挡）
   useEffect(() => {
     let el: HTMLDivElement | null = null;
     let raf = 0;
+    const regKey = `drug:${drug.id}:${target.id}:${slot}`;
     const stop = (e: Event) => e.stopPropagation();
     const onSelect = (e: MouseEvent) => {
       e.stopPropagation();
@@ -213,10 +216,12 @@ const DrugMolecule3D = memo(function DrugMolecule3D({ drug, target, sim, showLab
       el.addEventListener('pointermove', stop);
       el.addEventListener('pointerdown', stop);
       el.addEventListener('pointerup', stop);
+      labelRegistry.set(regKey, el);
     };
     attach();
     return () => {
       cancelAnimationFrame(raf);
+      labelRegistry.delete(regKey);
       if (!el) return;
       el.removeEventListener('click', onSelect);
       el.removeEventListener('mouseenter', onEnter);
@@ -225,7 +230,7 @@ const DrugMolecule3D = memo(function DrugMolecule3D({ drug, target, sim, showLab
       el.removeEventListener('pointerdown', stop);
       el.removeEventListener('pointerup', stop);
     };
-  }, [target.id]);
+  }, [drug.id, target.id, slot]);
 
   // 结合位姿: 靶点外缘（沿靶点→细胞外方向），slot 错开角度
   const bindPose = useMemo(() => {
@@ -394,6 +399,11 @@ export function DrugMoleculeLayer({
   sim: RefObject<SimSnapshot>;
   showLabels: boolean;
 }) {
+  // v60 防叠帧驱动（模块级节流先到先跑 —— 与 MoleculeLayer 的驱动互不重复求解;
+  // 分子层缺席时药物标签仍持续松弛）
+  useFrame((state) => {
+    runLabelDeclutter(state.clock.elapsedTime);
+  });
   // 活跃药物（面板开关）—— 药物粒度重渲染，非 tick 粒度
   const inhibitors = useLabStore((s) => s.inhibitors);
   const drugLevels = useLabStore((s) => s.drugLevels);
