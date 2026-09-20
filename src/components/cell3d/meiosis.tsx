@@ -386,13 +386,14 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
   const PAIR_N = perf ? 4 : 5;
   const CHR_N = PAIR_N * 2;
   const chromatidGeo = (seed: string) => {
-    const pLen = 0.3 + hash01(`p${seed}`) * 0.22;
-    const qLen = 0.6 + hash01(`q${seed}`) * 0.5;
-    const rr = 0.125 + hash01(`r${seed}`) * 0.035;
+    // v58b 二次缩减 ~15%（与 mitosis.tsx 镜像同步 —— 用户「可以缩小一些尺寸」）
+    const pLen = 0.27 + hash01(`p${seed}`) * 0.19;
+    const qLen = 0.53 + hash01(`q${seed}`) * 0.42;
+    const rr = 0.11 + hash01(`r${seed}`) * 0.03;
     return track(mergeGeoms([
-      { geo: track(new THREE.CapsuleGeometry(rr, pLen, 3, 8)), matrix: new THREE.Matrix4().makeTranslation(0, pLen / 2 + 0.14, 0) },
-      { geo: track(new THREE.CapsuleGeometry(rr + 0.008, qLen, 3, 8)), matrix: new THREE.Matrix4().makeTranslation(0, -(qLen / 2 + 0.14), 0) },
-      { geo: track(new THREE.SphereGeometry(0.14, 10, 8)) },
+      { geo: track(new THREE.CapsuleGeometry(rr, pLen, 3, 8)), matrix: new THREE.Matrix4().makeTranslation(0, pLen / 2 + 0.13, 0) },
+      { geo: track(new THREE.CapsuleGeometry(rr + 0.008, qLen, 3, 8)), matrix: new THREE.Matrix4().makeTranslation(0, -(qLen / 2 + 0.13), 0) },
+      { geo: track(new THREE.SphereGeometry(0.13, 10, 8)) },
     ]));
   };
   // 父本/母本双色: 同族薰衣草但可辨（父本暖调 / 母本冷调 —— 独立分配直接可读）
@@ -426,9 +427,10 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
       const ci = pi * 2 + homolog;
       const g = new THREE.Group();
       const chrGeoShared = chromatidGeo(`mchr${ci}`);
+      // v58b 与 chromatidGeo 新臂长族镜像同步（收纳钳/互斥半径真源）
       const armLocal = Math.max(
-        0.3 + hash01(`p${ci}`) * 0.22 + 0.14,
-        0.6 + hash01(`q${ci}`) * 0.5 + 0.14,
+        0.27 + hash01(`p${ci}`) * 0.19 + 0.13,
+        0.53 + hash01(`q${ci}`) * 0.42 + 0.13,
       ) + 0.15;
       const chrMA = homolog === 0 ? chrMatPat : chrMatMat; // 姐妹 A（深档）
       const chrMB = homolog === 0 ? chrMatPatB : chrMatMatB; // 姐妹 B（亮档 —— 单体可直接分读）
@@ -441,14 +443,14 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
       };
       const cA = makeChromatid(chrMA);
       const cB = makeChromatid(chrMB);
-      // v57 姐妹分离角加宽（±0.16 / ±0.24rad V 形 —— 两单体可分读）
-      cA.position.x = -0.16;
-      cB.position.x = 0.16;
+      // v58b 二次缩尺后侧向偏移同步收窄 0.16→0.14（与 mitosis.tsx 镜像）
+      cA.position.x = -0.14;
+      cB.position.x = 0.14;
       cA.rotation.z = 0.24;
       cB.rotation.z = -0.24;
-      const centro = new THREE.Mesh(track(new THREE.SphereGeometry(0.15, 10, 8)), centroMat);
+      const centro = new THREE.Mesh(track(new THREE.SphereGeometry(0.135, 10, 8)), centroMat);
       centro.renderOrder = 47;
-      const kinGeo = track(new THREE.CylinderGeometry(0.11, 0.11, 0.05, 10));
+      const kinGeo = track(new THREE.CylinderGeometry(0.098, 0.098, 0.045, 10));
       const kinA = new THREE.Mesh(kinGeo, kinMat);
       kinA.position.set(0, 0, 0.17);
       kinA.rotation.x = Math.PI / 2;
@@ -458,7 +460,7 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
       cB.add(kinA);
       cA.add(kinB);
       g.add(cA, cB, centro);
-      const scl = 1.16 + hash01(`cs${ci}`) * 0.3; // v57b 缩减 ~30%（旧 1.62-2.04）
+      const scl = 0.98 + hash01(`cs${ci}`) * 0.26; // v58b 二次缩减 ~15%（与 mitosis 镜像）
       void scl;
       g.scale.setScalar(0.001);
       group.add(g);
@@ -907,6 +909,148 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
   // 交叉跟随位置缓存（update 写入 → chiasma 定位）
   const pairMid = new THREE.Vector3();
 
+  /* ---------- v58 染色体两两互斥分离求解器（用户「染色质之间也要避免穿模 + 彼此分离
+   * 一定距离更容易看清楚」—— 与 mitosis.tsx chrSolve 同构范式, 减数分裂特化）----------
+   * need_ij = K(t)·(armR_i + armR_j) + GAP 对称推开; 同源配对（2pi/2pi+1）在联会窗内
+   * 豁免至 need≈1.05（四分体本就该并肩贴靠 —— 交叉/联会视觉语义保留, 仅防完全重合）。
+   * 收纳再钳制三段: ① 核被膜存活期核球域（凝聚前期不出核, 同 mitosis nebd 窗）
+   * ② MI 膜回转面 xyLim/zCap（互斥不得推出膜外）③ MII 期各自子细胞球域
+   * （双子球分离后染色体不得跨胞/出球）。确定性纯函数 → update 与悬停锚同源。 */
+  const MCHR_GAP = 0.26;
+  const MSEP_ITERS = 26;
+  const mSolveN = chromatids.length;
+  const mSolveX = new Float64Array(mSolveN), mSolveY = new Float64Array(mSolveN), mSolveZ = new Float64Array(mSolveN);
+  const mSolveScl = new Float64Array(mSolveN), mSolveArmR = new Float64Array(mSolveN), mSolveCZW = new Float64Array(mSolveN);
+  const mSolveState = { k: 0.5, minClear: Infinity, worstPair: '' };
+  const meiChrSolve = (tA: number): void => {
+    const condense = ramp(tA, 0.05, 0.9);
+    const synapse = ramp(tA, 0.55, 1.25);
+    const congress1 = ramp(tA, 1.35, 2.25);
+    const seg1 = ramp(tA, 3.2, 3.9);
+    const tight1 = ramp(tA, 3.85, 4.5);
+    const decon1 = ramp(tA, 4.1, 4.85) * 0.35;
+    const miiSetup = ramp(tA, 5.3, 6.5);
+    const seg2 = ramp(tA, 7.5, 8.3);
+    const tight2 = ramp(tA, 8.25, 8.85);
+    const decon2 = ramp(tA, 8.5, 9.4);
+    const reach1 = poleZ(tA) * 0.88;
+    const reach2 = PZ2 * 0.8;
+    const { L: memL, r: rProfile } = membraneProfile(tA);
+    // MI → MII 子细胞几何（与 update zD1/rD1 公式同源镜像）
+    const zD1s = THREE.MathUtils.lerp(R_CELL * 0.72, 6.5, ramp(tA, 5.75, 6.6));
+    const rD1s = THREE.MathUtils.lerp(R_CELL * 0.72, 5.9, ramp(tA, 5.75, 6.2));
+    const neAlive = clamp01(1 - ramp(tA, 1.15, 1.85)); // 核被膜存活度（与 nebd1 同窗）
+    const miClampW = 1 - ramp(tA, 5.4, 6.2); // MI 膜钳权重（MII 期退役 → 子细胞球钳接管）
+    // 联会豁免权重（联会窗内同源对 = 四分体并肩 —— 仅防重合）
+    const exemptW = ramp(tA, 0.5, 0.8) * (1 - ramp(tA, 3.2, 3.6));
+    let kk = THREE.MathUtils.lerp(0.5, 0.92, ramp(tA, 0.4, 2.2)); // 前期 → MI 中期板
+    kk = THREE.MathUtils.lerp(kk, 0.78, ramp(tA, 3.2, 4.0)); // 后期 I 极区
+    kk = THREE.MathUtils.lerp(kk, 0.9, ramp(tA, 5.3, 7.2)); // MII 列队/中期板 Ⅱ
+    kk = THREE.MathUtils.lerp(kk, 0.72, ramp(tA, 8.3, 9.0)); // 后期 II
+    kk = THREE.MathUtils.lerp(kk, 0.45, ramp(tA, 9.0, 9.8)); // 末去凝聚淡出
+    mSolveState.k = kk;
+    for (let i = 0; i < mSolveN; i++) {
+      const chr = chromatids[i];
+      // v58b 二次缩尺同步（1.16+h·0.3 → 0.98+h·0.26 —— 与 mitosis 镜像）
+      const scl = (0.98 + hash01(`cs${i}`) * 0.26) * (0.55 + condense * 0.45) * (1 + decon1 * 0.06 + decon2 * 0.1);
+      const armR = chr.armLocal * scl + 0.16;
+      const k = clamp01(congress1 + chr.delay * 0.12);
+      // MI 段: home → 联会位（并肩 ±x）→ 联会后并拢（1.7 → 1.0）
+      let px = chr.home.x + (chr.synPos.x - chr.home.x) * synapse;
+      let py = chr.home.y + (chr.synPos.y - chr.home.y) * synapse;
+      let pz = chr.home.z + (chr.synPos.z - chr.home.z) * synapse;
+      px += (chr.synPos.x * 0.6 - px) * k * 0.55;
+      py += (chr.synPos.y - py) * k * 0.55;
+      pz += (chr.synPos.z - pz) * k * 0.55;
+      const sepA = clamp01(seg1 - chr.delay * 0.3);
+      const zShift = chr.side * sepA * reach1;
+      const tightXY = Math.max(0.1, 1 - tight1 * 0.42);
+      const yFac = 1 - tight1 * 0.3;
+      const miX = THREE.MathUtils.clamp(px * tightXY, -6.2, 6.2);
+      const miY = THREE.MathUtils.clamp(py * yFac, -6.2, 6.2);
+      const miZ = pz * (1 - ramp(tA, 1.35, 2.2) * 0.92) + zShift;
+      // MII 列队位（相对子细胞中心）
+      const tight2XY = Math.max(0.1, 1 - tight2 * 0.42);
+      const cx = chr.ring2.x * tight2XY;
+      const cy = chr.ring2.y;
+      const cz = chr.cell * zD1s + chr.ring2.z * tight2XY;
+      // MI → MII 交接 lerp
+      const fx = miX + (cx - miX) * miiSetup;
+      const fy = miY + (cy - miY) * miiSetup;
+      const fz = miZ + (cz - miZ) * miiSetup;
+      // MII 姐妹分离量（世界空间, 沿子细胞 y）
+      const sepB = clamp01(seg2 - chr.delay * 0.3);
+      const zCap2 = Math.max(0.5, rD1s * 0.82 - armR);
+      const cZW = Math.min(0.08 + sepB * reach2, zCap2);
+      mSolveScl[i] = scl; mSolveArmR[i] = armR; mSolveCZW[i] = cZW;
+      mSolveX[i] = fx; mSolveY[i] = fy; mSolveZ[i] = fz;
+    }
+    for (let it = 0; it < MSEP_ITERS; it++) {
+      for (let i = 0; i < mSolveN; i++) {
+        for (let j = i + 1; j < mSolveN; j++) {
+          const fullNeed = kk * (mSolveArmR[i] + mSolveArmR[j]) + MCHR_GAP;
+          // 同源配对（i>>1 === j>>1）联会窗内豁免: 四分体并肩是科学正形 —— 仅防重合
+          const need = (i >> 1) === (j >> 1)
+            ? THREE.MathUtils.lerp(fullNeed, 1.05, exemptW)
+            : fullNeed;
+          let dx = mSolveX[j] - mSolveX[i];
+          let dy = mSolveY[j] - mSolveY[i];
+          let dz = mSolveZ[j] - mSolveZ[i];
+          const d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 >= need * need) continue;
+          let d = Math.sqrt(d2);
+          if (d < 1e-4) {
+            const ang = hash01(`msepc${i}_${j}`) * Math.PI * 2;
+            dx = Math.cos(ang); dy = Math.sin(ang); dz = 0.35;
+            d = Math.hypot(dx, dy, dz);
+          }
+          const push = ((need - d) / 2) * 0.85;
+          const ux = dx / d, uy = dy / d, uz = dz / d;
+          mSolveX[i] -= ux * push; mSolveY[i] -= uy * push; mSolveZ[i] -= uz * push;
+          mSolveX[j] += ux * push; mSolveY[j] += uy * push; mSolveZ[j] += uz * push;
+        }
+      }
+      if ((it & 3) === 3 || it === MSEP_ITERS - 1) {
+        for (let i = 0; i < mSolveN; i++) {
+          const chr = chromatids[i];
+          const armR = mSolveArmR[i];
+          if (miClampW > 0.01) {
+            // ② MI 膜回转面钳（互斥不得推出膜外）
+            const zCap = Math.max(0.6, memL * 0.9 - mSolveCZW[i] - armR);
+            const zc = THREE.MathUtils.clamp(mSolveZ[i], -zCap, zCap);
+            const lim = Math.max(0.55, rProfile(((zc + mSolveCZW[i]) / memL + 1) / 2) * 0.96 - armR - 0.2);
+            const xc = THREE.MathUtils.clamp(mSolveX[i], -lim, lim);
+            const yc = THREE.MathUtils.clamp(mSolveY[i], -lim, lim);
+            const w = miClampW;
+            mSolveZ[i] += (zc - mSolveZ[i]) * w;
+            mSolveX[i] += (xc - mSolveX[i]) * w;
+            mSolveY[i] += (yc - mSolveY[i]) * w;
+          }
+          if (miClampW < 0.99) {
+            // ③ MII 子细胞球域钳（双子球分离后不得跨胞/出球）
+            const cz = chr.cell * zD1s;
+            const rl = Math.hypot(mSolveX[i], mSolveY[i], mSolveZ[i] - cz);
+            const lim = Math.max(0.6, rD1s * 0.86 - armR);
+            if (rl > lim && rl > 1e-4) {
+              const f = 1 + (lim / rl - 1) * (1 - miClampW);
+              mSolveX[i] *= f; mSolveY[i] *= f;
+              mSolveZ[i] = cz + (mSolveZ[i] - cz) * f;
+            }
+          }
+          if (neAlive > 0.01) {
+            // ① 核被膜存活期: 中心钳回核球域（凝聚前期不出核）
+            const rl = Math.hypot(mSolveX[i], mSolveY[i], mSolveZ[i]);
+            const nLim = NUC_R * 0.96;
+            if (rl > nLim && rl > 1e-4) {
+              const f = THREE.MathUtils.lerp(1, nLim / rl, neAlive);
+              mSolveX[i] *= f; mSolveY[i] *= f; mSolveZ[i] *= f;
+            }
+          }
+        }
+      }
+    }
+  };
+
   const update = (t: number, dt: number) => {
     uTime.value += dt;
     const PZ = poleZ(t);
@@ -965,17 +1109,11 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
       m.scale.setScalar(Math.max(0.001, rG));
     }
 
-    /* 染色体运动学（全时间轴统一解算） */
-    const condense = ramp(t, 0.05, 0.9);
-    const synapse = ramp(t, 0.55, 1.25);
-    const congress1 = ramp(t, 1.35, 2.25);
-    const seg1 = ramp(t, 3.2, 3.9);
-    const tight1 = ramp(t, 3.85, 4.5);
-    const decon1 = ramp(t, 4.1, 4.85) * 0.35; // 末期 I 保持凝聚（仅 35%）
-    const miiSetup = ramp(t, 5.3, 6.5); // MI 极区 → MII 列队位交接
+    /* 染色体运动学 + v58 两两互斥分离（用户「染色质之间也要避免穿模, 彼此分离一定距离」）
+     * meiChrSolve 确定性求解器（含联会豁免/MI膜钳/MII子细胞球钳）—— 同源公式已并入求解器,
+     * 此处仅消费解; 交叉金点经 group.position 中点跟随自动同步 */
+    const condense = ramp(t, 0.05, 0.9); // 染色质网/核仁寿命消费（求解器内另有同窗副本）
     const miiOrient = ramp(t, 6.4, 7.2); // 旋转 x: 竖直面 → 水平面（局部 z → 世界 y）
-    const seg2 = ramp(t, 7.5, 8.3);
-    const tight2 = ramp(t, 8.25, 8.85);
     const decon2 = ramp(t, 8.5, 9.4);
     const chrOpacity = clamp01(ramp(t, 0.1, 0.75) * (1 - decon2 * 0.75));
     chrMatPatRef.opacity = chrOpacity;
@@ -985,46 +1123,18 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
     // 着丝粒球: MI 后期不切（Rec8 保护!）—— MII 后期 [7.55, 7.9] 才被 separase 切割淡出
     centroMatRef.opacity = chrOpacity * (1 - ramp(t, 7.55, 7.9));
     kinMatRef.opacity = clamp01(ramp(t, 0.8, 1.3) * (1 - ramp(t, 5.0, 5.6) * 0.4) * (1 - ramp(t, 8.9, 9.4)));
-    const reach1 = PZ * 0.88;
-    const reach2 = PZ2 * 0.8;
     const PZ2S = PZ2; // MII 纺锤半长（子细胞内）
 
+    meiChrSolve(t);
     chromatids.forEach((chr, ci) => {
       const g = chr.group;
-      const scl = (1.16 + hash01(`cs${ci}`) * 0.3) * (0.55 + condense * 0.45) * (1 + decon1 * 0.06 + decon2 * 0.1);
-      const armR = chr.armLocal * scl + 0.16;
-      // MI 段位置: home → 联会位 → 赤道板 → 同源分离 → 极区聚拢
-      const k = clamp01(congress1 + chr.delay * 0.12);
-      vA.copy(chr.home).lerp(chr.synPos, synapse);
-      vA.lerp(chr.synPos.clone().setX(chr.synPos.x * 0.6), k * 0.55); // 联会后并拢（并肩距 1.7 → 1.0）
-      const sepA = clamp01(seg1 - chr.delay * 0.3);
-      const zShift = chr.side * sepA * reach1;
-      const tightXY = Math.max(0.1, 1 - tight1 * 0.42);
-      const yFac = 1 - tight1 * 0.3;
-      const miPos = new THREE.Vector3(
-        THREE.MathUtils.clamp(vA.x * tightXY, -6.2, 6.2),
-        THREE.MathUtils.clamp(vA.y * yFac, -6.2, 6.2),
-        vA.z * (1 - ramp(t, 1.35, 2.2) * 0.92) + zShift,
-      );
-      // MII 列队位（相对子细胞中心）
-      const cellC = new THREE.Vector3(0, 0, chr.cell * zD1);
-      const tight2XY = Math.max(0.1, 1 - tight2 * 0.42);
-      const miiPos = new THREE.Vector3(
-        cellC.x + chr.ring2.x * tight2XY,
-        cellC.y + chr.ring2.y,
-        cellC.z + chr.ring2.z * tight2XY,
-      );
-      // MI → MII 交接 lerp（联会/分离终位 → 子细胞列队位）
-      const pos = miPos.clone().lerp(miiPos, miiSetup);
-      // MII 姐妹分离: 单体沿世界 ±y（局部 z 经 rotation.x=-π/2 映射）
-      const sepB = clamp01(seg2 - chr.delay * 0.3);
-      const zCap2 = Math.max(0.5, rD1 * 0.82 - armR);
-      const cZW = Math.min(0.08 + sepB * reach2, zCap2);
+      const scl = mSolveScl[ci];
+      const cZW = mSolveCZW[ci];
       chr.cA.position.z = -cZW / Math.max(0.35, scl) * Math.max(0.35, 1); // 局部（旋转后 → 世界 y）
       chr.cB.position.z = cZW / Math.max(0.35, scl);
-      chr.cA.position.x = -0.16;
-      chr.cB.position.x = 0.16;
-      g.position.copy(pos);
+      chr.cA.position.x = -0.14; // v58b 0.16→0.14（二次缩尺同步）
+      chr.cB.position.x = 0.14;
+      g.position.set(mSolveX[ci], mSolveY[ci], mSolveZ[ci]);
       // 旋转: 前期随机方位 → 中期极轴对齐（MI z 轴）→ MII 翻转（局部 z → 世界 y）
       const orient = ramp(t, 1.35, 2.15);
       const wobble = Math.sin(uTime.value * 2.4 + chr.spin * 5) * (1 - orient) * 0.9;
@@ -1048,6 +1158,29 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
       g.rotation.set(rx, ry, rz);
       g.scale.setScalar(Math.max(0.001, scl * clamp01(ramp(t, 0.02, 0.4))));
     });
+
+    /* v58 QA 插桩: 染色体两两净空（__meiChrQaProbe 门控 —— 含联会豁免口径） */
+    if (typeof window !== 'undefined' && (window as { __meiChrQaProbe?: boolean }).__meiChrQaProbe) {
+      let worst = Infinity;
+      let worstPair = '';
+      const exW = ramp(t, 0.5, 0.8) * (1 - ramp(t, 3.2, 3.6));
+      for (let i = 0; i < mSolveN; i++) {
+        for (let j = i + 1; j < mSolveN; j++) {
+          const fullNeed = mSolveState.k * (mSolveArmR[i] + mSolveArmR[j]) + MCHR_GAP;
+          const need = (i >> 1) === (j >> 1)
+            ? THREE.MathUtils.lerp(fullNeed, 1.05, exW)
+            : fullNeed;
+          const d = Math.hypot(mSolveX[j] - mSolveX[i], mSolveY[j] - mSolveY[i], mSolveZ[j] - mSolveZ[i]);
+          const m = d - need;
+          if (m < worst) { worst = m; worstPair = `${i}-${j}`; }
+        }
+      }
+      mSolveState.minClear = worst === Infinity ? Infinity : worst;
+      mSolveState.worstPair = worstPair;
+      (window as unknown as { __meiChrQa?: unknown }).__meiChrQa = {
+        t, minClear: worst === Infinity ? null : worst, pair: worstPair, k: mSolveState.k, chrN: mSolveN,
+      };
+    }
 
     /* 交叉金点: 联会期沿配对缝隙出现, 后期 I 滑向端部并脱落 */
     const chiasmaOp = clamp01(ramp(t, 0.75, 1.3) * (1 - ramp(t, 3.2, 3.85)));

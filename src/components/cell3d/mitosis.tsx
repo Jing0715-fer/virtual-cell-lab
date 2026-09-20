@@ -379,13 +379,14 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   const CHR_N = perf ? 8 : 10;
   const chromatidGeo = (seed: string) => {
     // 短臂 p + 长臂 q + 着丝粒（随染色体变异: 臂长比/粗细 —— 染色体核型多样性）
-    const pLen = 0.3 + hash01(`p${seed}`) * 0.22;
-    const qLen = 0.6 + hash01(`q${seed}`) * 0.5;
-    const rr = 0.125 + hash01(`r${seed}`) * 0.035;
+    // v58b 二次缩减 ~15%（用户「可以缩小一些尺寸」: v57 −30% 后仍偏大 → 0.27/0.53 臂长族 + 更细管径）
+    const pLen = 0.27 + hash01(`p${seed}`) * 0.19;
+    const qLen = 0.53 + hash01(`q${seed}`) * 0.42;
+    const rr = 0.11 + hash01(`r${seed}`) * 0.03;
     return track(mergeGeoms([
-      { geo: track(new THREE.CapsuleGeometry(rr, pLen, 3, 8)), matrix: new THREE.Matrix4().makeTranslation(0, pLen / 2 + 0.14, 0) },
-      { geo: track(new THREE.CapsuleGeometry(rr + 0.008, qLen, 3, 8)), matrix: new THREE.Matrix4().makeTranslation(0, -(qLen / 2 + 0.14), 0) },
-      { geo: track(new THREE.SphereGeometry(0.14, 10, 8)) },
+      { geo: track(new THREE.CapsuleGeometry(rr, pLen, 3, 8)), matrix: new THREE.Matrix4().makeTranslation(0, pLen / 2 + 0.13, 0) },
+      { geo: track(new THREE.CapsuleGeometry(rr + 0.008, qLen, 3, 8)), matrix: new THREE.Matrix4().makeTranslation(0, -(qLen / 2 + 0.13), 0) },
+      { geo: track(new THREE.SphereGeometry(0.13, 10, 8)) },
     ]));
   };
   /* v57 姐妹染色单体双色分层（用户「姐妹染色质和普通染色质的区别要做得明显一些」）:
@@ -427,10 +428,10 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   for (let ci = 0; ci < CHR_N; ci++) {
     const g = new THREE.Group();
     const chrGeoShared = chromatidGeo(`chr${ci}`); // 姐妹单体共享同一（含臂比变异的）几何
-    // 臂展局部半径（收纳钳消费: 世界臂展 = armLocal·scl）
+    // 臂展局部半径（收纳钳消费: 世界臂展 = armLocal·scl; v58b 与 chromatidGeo 新臂长族镜像同步）
     const armLocal = Math.max(
-      0.3 + hash01(`pchr${ci}`) * 0.22 + 0.14,
-      0.6 + hash01(`qchr${ci}`) * 0.5 + 0.14,
+      0.27 + hash01(`pchr${ci}`) * 0.19 + 0.13,
+      0.53 + hash01(`qchr${ci}`) * 0.42 + 0.13,
     ) + 0.15;
     const makeChromatid = (bodyMat: THREE.Material) => {
       const cg = new THREE.Group();
@@ -441,16 +442,17 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     };
     const cA = makeChromatid(chrMatA);
     const cB = makeChromatid(chrMatB);
-    // v57 姐妹分离角加宽（旧 ±0.105/±0.14° 两单体几乎贴合不可分读; 0.16 + ±0.24rad V 形）
-    cA.position.x = -0.16;
-    cB.position.x = 0.16;
+    // v58 姐妹分离角加宽（旧 ±0.105/±0.14° 两单体几乎贴合不可分读; 0.16 + ±0.24rad V 形）
+    // v58b 二次缩尺后侧向偏移同步收窄 0.16→0.14（单体间距读感保持而整体更紧凑）
+    cA.position.x = -0.14;
+    cB.position.x = 0.14;
     cA.rotation.z = 0.24;
     cB.rotation.z = -0.24;
     // 着丝粒（连接姐妹染色单体 —— cohesin 黏合读感; anaphase separase 切割 → 淡出）
-    const centro = new THREE.Mesh(track(new THREE.SphereGeometry(0.15, 10, 8)), centroMat);
+    const centro = new THREE.Mesh(track(new THREE.SphereGeometry(0.135, 10, 8)), centroMat);
     centro.renderOrder = 47;
     // 动粒（每单体着丝粒朝极面金盘 —— 微管锚定点）
-    const kinGeo = track(new THREE.CylinderGeometry(0.11, 0.11, 0.05, 10));
+    const kinGeo = track(new THREE.CylinderGeometry(0.098, 0.098, 0.045, 10));
     // v30 动粒盘随单体迁移（用户「纺锤丝没有拉着染色体动」根因①: 旧金盘挂组原点 ——
     //   后期单体分离时盘恒悬留赤道板、纤维端点又用组心近似 → 「染色体动了, 纺锤丝没动」读感）:
     //   盘改挂各自姐妹单体的着丝粒外缘朝极面 —— 全程随单体迁移至两极, 纤维端点即盘位（见 k-fibers 段）
@@ -463,8 +465,8 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     cB.add(kinA); // +z 极侧盘 → 随 +z 单体
     cA.add(kinB); // -z 极侧盘 → 随 -z 单体
     g.add(cA, cB, centro);
-    // 尺寸: v57b 缩减 ~30%（旧 1.62-2.04 → 1.16-1.46; 中期染色体 ≈ 细胞半径 1/5 —— 用户「染色质太大」）
-    const scl = 1.16 + hash01(`cs${ci}`) * 0.3;
+    // 尺寸: v58b 二次缩减 ~15%（v57 −30% 后 1.16-1.46 → 0.98-1.24; 用户「可以缩小一些尺寸」）
+    const scl = 0.98 + hash01(`cs${ci}`) * 0.26;
     g.scale.setScalar(0.001);
     group.add(g);
     // 赤道板位（XY 平面环带分布, 避免重叠）
@@ -1134,6 +1136,101 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   const vB = new THREE.Vector3();
   const vC = new THREE.Vector3();
 
+  /* ---------- v58 染色体两两互斥分离求解器（用户「染色质之间也要避免穿模 + 彼此分离
+   * 一定距离更容易看清楚」）----------
+   * 既有运动学（home→plate 汇集 / 后期分离 / 极区聚拢）之上叠加两两互斥松弛:
+   *   need_ij = K(t)·(armR_i + armR_j) + GAP, 对称推开（各承半数, 0.85 松弛系数平滑收敛）。
+   * K(t) 相位化: 前期 0.55（凝聚初期自然近邻）→ 中期板 0.92（rosette 全展开互不接触的主
+   * 视觉帧）→ 后期极区 0.78（极区聚簇仍可分读）→ 末期去凝聚 0.45（融入子核淡出）。
+   * 松弛后收纳再钳制: ① 膜回转面 xyLim/zCap（互斥不得推出膜外）② 核被膜存活期核球域
+   * （凝聚前期染色体不出核）。确定性纯函数（固定迭代序 + 无随机）→ update() 与
+   * chrPosAt() 悬停锚共用同一解 —— v36「同源公式」范式的升级: 同源求解器。 */
+  const CHR_GAP = 0.26;
+  const SEP_ITERS = 26;
+  const solveN = chromosomes.length;
+  const solveX = new Float64Array(solveN), solveY = new Float64Array(solveN), solveZ = new Float64Array(solveN);
+  const solveScl = new Float64Array(solveN), solveArmR = new Float64Array(solveN), solveCZW = new Float64Array(solveN);
+  const solveStag = new Float64Array(solveN), solveSepA = new Float64Array(solveN);
+  const solveState = { k: 0.55, minClear: Infinity, worstPair: '' };
+  const chrSolve = (tA: number): void => {
+    const condense = ramp(tA, 0.42, 1.45);
+    const decondense = ramp(tA, 4.3, 5.5);
+    const congress = ramp(tA, 1.4, 2.75);
+    const segregate = ramp(tA, 3.05, 3.85);
+    const clusterTight = ramp(tA, 4.0, 4.6);
+    const PZA = poleZ(tA);
+    const { L: memL, r: rProfile } = membraneProfile(tA);
+    const neAlive = clamp01(1 - ramp(tA, 1.1, 1.85)); // 核被膜存活度（崩解前染色体不出核）
+    let kk = THREE.MathUtils.lerp(0.55, 0.92, ramp(tA, 0.5, 2.4)); // 前期 → 中期板（全展开）
+    kk = THREE.MathUtils.lerp(kk, 0.78, ramp(tA, 3.0, 4.0)); // 中期 → 后期极区
+    kk = THREE.MathUtils.lerp(kk, 0.45, ramp(tA, 4.6, 5.4)); // 极区 → 末期去凝聚
+    solveState.k = kk;
+    for (let i = 0; i < solveN; i++) {
+      const chr = chromosomes[i];
+      // v58b 二次缩尺同步（1.16+h·0.3 → 0.98+h·0.26 —— 三处镜像之一）
+      const scl = (0.98 + hash01(`cs${i}`) * 0.26) * (0.55 + condense * 0.45) * (1 + decondense * 0.12);
+      const armR = chr.armLocal * scl + 0.16; // 臂展世界半径（含着丝粒）
+      const k = clamp01(congress + chr.delay * 0.12);
+      const tightXY = Math.max(0.1, 1 - clusterTight * 0.42 - segregate * 0.34 - decondense * 0.45);
+      const yFac = 1 - clusterTight * 0.3 - segregate * 0.18;
+      const flatZ = 1 - ramp(tA, 1.4, 2.6) * 0.92;
+      const sepA = clamp01(segregate - chr.delay * 0.3);
+      const stagW = (0.14 + sepA * 0.09) * scl; // 单体侧向错位世界半径（v58b 0.16→0.14 同步）
+      const zCapW = Math.max(0.6, memL * 0.9 - armR);
+      const cZW = Math.min(0.08 + sepA * PZA * 0.92, zCapW);
+      const gx0 = chr.home.x + (chr.plate.x - chr.home.x) * k;
+      const gy0 = chr.home.y + (chr.plate.y - chr.home.y) * k;
+      const gz0 = (chr.home.z + (chr.plate.z - chr.home.z) * k) * flatZ;
+      const xyLim = Math.max(0.55, rProfile(((gz0 + cZW) / memL + 1) / 2) * 0.96 - armR - stagW);
+      solveScl[i] = scl; solveArmR[i] = armR; solveCZW[i] = cZW; solveStag[i] = stagW; solveSepA[i] = sepA;
+      solveX[i] = THREE.MathUtils.clamp(gx0 * tightXY, -xyLim, xyLim);
+      solveY[i] = THREE.MathUtils.clamp(gy0 * yFac, -xyLim, xyLim);
+      solveZ[i] = gz0;
+    }
+    for (let it = 0; it < SEP_ITERS; it++) {
+      for (let i = 0; i < solveN; i++) {
+        for (let j = i + 1; j < solveN; j++) {
+          const need = kk * (solveArmR[i] + solveArmR[j]) + CHR_GAP;
+          let dx = solveX[j] - solveX[i];
+          let dy = solveY[j] - solveY[i];
+          let dz = solveZ[j] - solveZ[i];
+          const d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 >= need * need) continue;
+          let d = Math.sqrt(d2);
+          if (d < 1e-4) {
+            // 完全重合的确定性回退方向（对索引 hash —— 无随机, 帧间稳定）
+            const ang = hash01(`chsep${i}_${j}`) * Math.PI * 2;
+            dx = Math.cos(ang); dy = Math.sin(ang); dz = 0.35;
+            d = Math.hypot(dx, dy, dz);
+          }
+          const push = ((need - d) / 2) * 0.85;
+          const ux = dx / d, uy = dy / d, uz = dz / d;
+          solveX[i] -= ux * push; solveY[i] -= uy * push; solveZ[i] -= uz * push;
+          solveX[j] += ux * push; solveY[j] += uy * push; solveZ[j] += uz * push;
+        }
+      }
+      if ((it & 3) === 3 || it === SEP_ITERS - 1) {
+        // 收纳再钳制: 互斥不得推出膜外（膜回转面 + 极帽）; 核被膜存活期钳回核球域
+        for (let i = 0; i < solveN; i++) {
+          const armR = solveArmR[i];
+          const zCap = Math.max(0.6, memL * 0.9 - solveCZW[i] - armR);
+          solveZ[i] = THREE.MathUtils.clamp(solveZ[i], -zCap, zCap);
+          const lim = Math.max(0.55, rProfile(((solveZ[i] + solveCZW[i]) / memL + 1) / 2) * 0.96 - armR - solveStag[i]);
+          solveX[i] = THREE.MathUtils.clamp(solveX[i], -lim, lim);
+          solveY[i] = THREE.MathUtils.clamp(solveY[i], -lim, lim);
+          if (neAlive > 0.01) {
+            const rl = Math.hypot(solveX[i], solveY[i], solveZ[i]);
+            const nLim = NUC_R * 0.96;
+            if (rl > nLim && rl > 1e-4) {
+              const f = THREE.MathUtils.lerp(1, nLim / rl, neAlive);
+              solveX[i] *= f; solveY[i] *= f; solveZ[i] *= f;
+            }
+          }
+        }
+      }
+    }
+  };
+
   const update = (t: number, dt: number) => {
     uTime.value += dt;
     const PZ = poleZ(t);
@@ -1163,10 +1260,9 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
     memDauMatARef.opacity = (perf ? 0.5 : 0.42) * dauFade; // 断离帧即全不透明（无淡入）
     memDauMatBRef.opacity = (perf ? 0.5 : 0.42) * dauFade;
 
-    /* 凝聚/去凝聚与不透明度 */
+    /* 凝聚与不透明度（v58: decondense 移入 chrSolve 求解器 —— 此处仅保留凝聚窗） */
     // v18: 凝聚推迟到 0.42 起 —— 给 S 期复制可视化留出完整间期窗口（0-0.42 纤维态 + 复制叉行进）
     const condense = ramp(t, 0.42, 1.45); // 前期凝聚
-    const decondense = ramp(t, 4.3, 5.5); // 末期去凝聚
     // 染色体凝聚可见（跟随凝聚时序）→ 末期大幅淡出（去凝聚染色质融入双子核读感; v16: 0.55→0.7）
     const chrOpacity = clamp01(ramp(t, 0.5, 1.25) * (1 - ramp(t, 4.4, 5.6) * 0.7));
     chrMatRef.opacity = chrOpacity;
@@ -1202,41 +1298,25 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       forks.instanceMatrix.needsUpdate = true;
     }
 
-    /* 染色体运动学 */
-    const congress = ramp(t, 1.4, 2.75); // 前中期汇集到赤道板
-    const segregate = ramp(t, 3.05, 3.85); // 后期分离
-    const clusterTight = ramp(t, 4.0, 4.6); // 后期末聚拢于两极
+    /* 染色体运动学 + v58 两两互斥分离（用户「染色质之间也要避免穿模, 彼此分离一定距离」）
+     * chrSolve 确定性求解器 = 基础运动学 + 两两松弛 + 收纳再钳 —— update 与悬停锚同源;
+     * 动粒微管端点经 getWorldPosition 消费本帧刚写入的组位（分离后纤维自动跟随） */
+    chrSolve(t);
     chromosomes.forEach((chr, ci) => {
       const g = chr.group;
       // v18c 尺寸先解算: 组缩放会放大子节点局部偏移 —— 单体 z 偏移的世界量 = local·scl。
       //   旧版 cZ 直接作 local 偏移 → 世界分离被 ~1.85× 放大（实测 cA 世界 z ±9.2, 戳出极帽 L=9.7）
       //   —— 用户两轮「染色质飞出细胞外」的真根因; 收纳钳因此必须在世界空间解算后除回 scl。
-      const scl = (1.16 + hash01(`cs${ci}`) * 0.3) * (0.55 + condense * 0.45) * (1 + decondense * 0.12);
-      const armR = chr.armLocal * scl + 0.16; // 臂展世界半径（含着丝粒）
-      // 位置: home（间期核内散布）→ plate（赤道板）; 个体微延迟 → 汇集不同步的自然读感
-      const k = clamp01(congress + chr.delay * 0.12);
-      vA.copy(chr.home).lerp(chr.plate, k);
-      const tightXY = Math.max(0.1, 1 - clusterTight * 0.42 - segregate * 0.34 - decondense * 0.45);
-      const yFac = 1 - clusterTight * 0.3 - segregate * 0.18;
-      const flatZ = 1 - ramp(t, 1.4, 2.6) * 0.92;
-      const gz = vA.z * flatZ;
-      // 后期: 姐妹染色单体反向拉向两极（世界空间分离量; 动粒微管消费同一真源）
-      const sepA = clamp01(segregate - chr.delay * 0.3);
-      const reach = PZ * 0.92;
-      // v18c 世界空间收纳硬钳: 单体中心+臂展恒留膜内（z 极帽 0.9·L; xy 取单体 z 处回转面半径）
-      const stagW = (0.16 + sepA * 0.1) * scl; // 单体侧向错位世界半径（v57 姐妹分离角加宽 0.105→0.16）
-      const zCapW = Math.max(0.6, memL * 0.9 - armR);
-      const cZW = Math.min(0.08 + sepA * reach, zCapW);
+      const scl = solveScl[ci];
+      const sepA = solveSepA[ci];
+      const cZW = solveCZW[ci];
       chr.cZW = cZW; // 动粒微管端点消费（世界坐标）
       const cZ = cZW / Math.max(0.35, scl); // local 偏移 = 世界量 / 组缩放
-      const xyLim = Math.max(0.55, rProfile(((gz + cZW) / memL + 1) / 2) * 0.96 - armR - stagW);
-      const gx = THREE.MathUtils.clamp(vA.x * tightXY, -xyLim, xyLim);
-      const gy = THREE.MathUtils.clamp(vA.y * yFac, -xyLim, xyLim);
-      g.position.set(gx, gy, gz);
+      g.position.set(solveX[ci], solveY[ci], solveZ[ci]);
       chr.cA.position.z = -cZ;
       chr.cB.position.z = cZ;
-      chr.cA.position.x = -0.16 - sepA * 0.1;
-      chr.cB.position.x = 0.16 + sepA * 0.1;
+      chr.cA.position.x = -0.14 - sepA * 0.09;
+      chr.cB.position.x = 0.14 + sepA * 0.09;
       // 旋转 v18 极轴对齐（用户反馈「后期染色质飞出细胞外 + 纺锤丝跑到细胞外」的共同根因）:
       //  旧 rotation.y = spin（随机方位）→ 后期单体沿「随机方位」分离 —— spin≈±π/2 的染色体
       //  横向（垂直于纺锤轴）戳穿赤道膜面; 且动粒微管端点公式假设局部 z = 世界 z, 与真实单体
@@ -1256,6 +1336,25 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
       );
       g.scale.setScalar(Math.max(0.001, scl * clamp01(ramp(t, 0.05, 0.6))));
     });
+
+    /* v58 QA 插桩: 染色体两两净空（__chrSepQaProbe 门控 —— 用户「染色质之间避免穿模」回归防线） */
+    if (typeof window !== 'undefined' && (window as { __chrSepQaProbe?: boolean }).__chrSepQaProbe) {
+      let worst = Infinity;
+      let worstPair = '';
+      for (let i = 0; i < solveN; i++) {
+        for (let j = i + 1; j < solveN; j++) {
+          const need = solveState.k * (solveArmR[i] + solveArmR[j]) + CHR_GAP;
+          const d = Math.hypot(solveX[j] - solveX[i], solveY[j] - solveY[i], solveZ[j] - solveZ[i]);
+          const m = d - need;
+          if (m < worst) { worst = m; worstPair = `${i}-${j}`; }
+        }
+      }
+      solveState.minClear = worst === Infinity ? Infinity : worst;
+      solveState.worstPair = worstPair;
+      (window as unknown as { __chrSepQa?: unknown }).__chrSepQa = {
+        t, minClear: worst === Infinity ? null : worst, pair: worstPair, k: solveState.k, chrN: solveN,
+      };
+    }
 
     /* 动粒微管（逐帧: 极 → 染色体着丝粒）
      * v25 [4.1,4.9]→[4.2,5.02]: 与星体微管同拍退役 —— 三族纤维整齐谢事,
@@ -1924,38 +2023,14 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
   };
 
   /* ---------- 相位感知悬停目标 ---------- */
-  /* v36 染色体确定性位置求解（update 运动学同源公式重解 —— 悬停锚逐条跟随赤道板列队/分离位;
-   *   同 v20 线粒体逐颗跟随范式: 静态近似锚 → 动态真位锚） */
+  /* v36 染色体确定性位置求解 + v58 升级为同源求解器（chrSolve 含两两互斥分离 —— 悬停锚
+   *   逐条跟随赤道板 rosette 分离位/后期极区位; 同 v20 线粒体逐颗跟随范式: 静态近似锚 →
+   *   动态真位锚; update() 与本函数共用同一解 —— 公式漂移风险归零） */
   const chrPosAt = (ci: number, tA: number): { x: number; y: number; z: number; cZW: number } => {
     const chr = chromosomes[ci];
     if (!chr) return { x: 0, y: 0, z: 0, cZW: 0 };
-    const condense = ramp(tA, 0.42, 1.45);
-    const decondense = ramp(tA, 4.3, 5.5);
-    const congress = ramp(tA, 1.4, 2.75);
-    const segregate = ramp(tA, 3.05, 3.85);
-    const clusterTight = ramp(tA, 4.0, 4.6);
-    const PZA = poleZ(tA);
-    const { L: memL, r: rProfile } = membraneProfile(tA);
-    const scl = (1.16 + hash01(`cs${ci}`) * 0.3) * (0.55 + condense * 0.45) * (1 + decondense * 0.12);
-    const armR = chr.armLocal * scl + 0.16;
-    const k = clamp01(congress + chr.delay * 0.12);
-    const v = chr.home.clone().lerp(chr.plate, k);
-    const tightXY = Math.max(0.1, 1 - clusterTight * 0.42 - segregate * 0.34 - decondense * 0.45);
-    const yFac = 1 - clusterTight * 0.3 - segregate * 0.18;
-    const flatZ = 1 - ramp(tA, 1.4, 2.6) * 0.92;
-    const gz = v.z * flatZ;
-    const sepA = clamp01(segregate - chr.delay * 0.3);
-    const reach = PZA * 0.92;
-    const stagW = (0.16 + sepA * 0.1) * scl;
-    const zCapW = Math.max(0.6, memL * 0.9 - armR);
-    const cZW = Math.min(0.08 + sepA * reach, zCapW);
-    const xyLim = Math.max(0.55, rProfile(((gz + cZW) / memL + 1) / 2) * 0.96 - armR - stagW);
-    return {
-      x: THREE.MathUtils.clamp(v.x * tightXY, -xyLim, xyLim),
-      y: THREE.MathUtils.clamp(v.y * yFac, -xyLim, xyLim),
-      z: gz,
-      cZW,
-    };
+    chrSolve(tA);
+    return { x: solveX[ci], y: solveY[ci], z: solveZ[ci], cZW: solveCZW[ci] };
   };
   const targets = (phase: number): HoverTarget[] => {
     const T: HoverTarget[] = [];
