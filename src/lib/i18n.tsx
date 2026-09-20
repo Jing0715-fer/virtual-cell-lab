@@ -107,6 +107,12 @@ export const T: Record<string, Entry> = {
   'fig.busy': { zh: '正在合成图版…', en: 'Composing figure…' },
   'fig.ok': { zh: '图版已导出 · PNG 已开始下载', en: 'Figure exported · PNG download started' },
   'fig.err': { zh: '导出失败，请稍后重试', en: 'Export failed — please retry' },
+  /* v59 多面板对照图版（2×2 四视角） */
+  'hud.panel': { zh: '对照图版', en: 'Panel' },
+  'hud.panelTip': {
+    zh: '多面板模式 · 以同一表观尺度导出四视角对照图版 PNG（A 当前视角 / B 正面观 / C 顶面观 / D 侧面观 + 共享比例标尺）',
+    en: 'Panel mode · export a four-view survey figure at identical apparent scale (A current / B frontal / C apical / D lateral + shared scale bar)',
+  },
   'hud.snapTip': {
     zh: '信号级联正交投影到剖切面上演示 —— 全部分子落于切面, 无一被剖切裁掉（50% 过心切面视野最佳）',
     en: 'Orthogonally projects the cascade onto the section plane — every molecule stays visible on the cut face (best at the 50% mid-plane)',
@@ -443,6 +449,16 @@ export const T: Record<string, Entry> = {
     en: 'This molecule appears in the full map but lies outside the core demo subgraph (the set demonstrated in the 3D/2D views)',
   },
   'pm.officialMap': { zh: 'KEGG 官方通路图 ↗', en: 'KEGG official pathway map ↗' },
+  'pm.locate': { zh: '聚焦选中分子', en: 'Focus selected molecule' },
+  'pm.focusHint': {
+    zh: '聚焦模式 · 点击空白处退出',
+    en: 'Focus mode · click blank space to exit',
+  },
+  'pm.zoomLevel': { zh: '缩放', en: 'Zoom' },
+  'pm.lodHint': {
+    zh: '已隐藏次要标签 · 放大查看全部分子名',
+    en: 'Minor labels hidden · zoom in to reveal all',
+  },
 
   /* ============ 对照实验 compare-view ============ */
   'cmp.arm': { zh: '臂', en: 'Arm' },

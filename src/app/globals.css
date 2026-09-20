@@ -148,6 +148,21 @@
   /* expression 虚线同样流动 */
 }
 
+/* v59 图谱视图 · 选中分子剧场聚焦 —— 琥珀光环呼吸 + 节点/边透明度平滑过渡 */
+@keyframes pmHaloPulse {
+  0%, 100% { stroke-opacity: 0.22; }
+  50% { stroke-opacity: 0.95; }
+}
+.pm-halo { animation: pmHaloPulse 1.6s ease-in-out infinite; }
+.pm-node { transition: opacity 0.28s ease; }
+.pm-edge { transition: opacity 0.28s ease, stroke-width 0.28s ease; }
+/* v59 聚焦边流动（比常规 edge-flow 更亮的行进节奏） */
+@keyframes pmFocusMarch { to { stroke-dashoffset: -22; } }
+.pm-focus-flow {
+  stroke-dasharray: 10 5;
+  animation: pmFocusMarch 0.55s linear infinite;
+}
+
 /* 节点激活脉冲 */
 @keyframes nodePulse {
   0% { opacity: 0.9; transform: scale(1); }

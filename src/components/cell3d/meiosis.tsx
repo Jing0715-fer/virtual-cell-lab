@@ -917,7 +917,8 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
    * ② MI 膜回转面 xyLim/zCap（互斥不得推出膜外）③ MII 期各自子细胞球域
    * （双子球分离后染色体不得跨胞/出球）。确定性纯函数 → update 与悬停锚同源。 */
   const MCHR_GAP = 0.26;
-  const MSEP_ITERS = 26;
+  // v59: 26 → 40 + 末 4 轮逐轮钳（与 mitosis chrSolve 同步 —— 末期/交接窗净空收敛加固）
+  const MSEP_ITERS = 40;
   const mSolveN = chromatids.length;
   const mSolveX = new Float64Array(mSolveN), mSolveY = new Float64Array(mSolveN), mSolveZ = new Float64Array(mSolveN);
   const mSolveScl = new Float64Array(mSolveN), mSolveArmR = new Float64Array(mSolveN), mSolveCZW = new Float64Array(mSolveN);
@@ -1010,7 +1011,7 @@ function buildMeiosisScene(perf: boolean): MeiosisBuild {
           mSolveX[j] += ux * push; mSolveY[j] += uy * push; mSolveZ[j] += uz * push;
         }
       }
-      if ((it & 3) === 3 || it === MSEP_ITERS - 1) {
+      if ((it & 3) === 3 || it >= MSEP_ITERS - 4) {
         for (let i = 0; i < mSolveN; i++) {
           const chr = chromatids[i];
           const armR = mSolveArmR[i];

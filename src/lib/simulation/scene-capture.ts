@@ -58,3 +58,27 @@ export function consumeFigureRequest(): FigureCb | null {
   figureCb = null;
   return cb;
 }
+
+/* ============ v59 多面板图版（2×2 对照版式）视图覆盖通道 ============
+ *  导出流程逐面板设置正交视角方向（距离沿用当前相机-目标距离 —— 四面板同表观尺度,
+ *  共享同一比例标尺标定）; PublicationCapture 在捕获前应用并 lookAt 目标。
+ *  dir = null 表示沿用当前视角（面板 A）。 */
+export interface FigureViewDir {
+  x: number;
+  y: number;
+  z: number;
+}
+
+let figureViewDir: FigureViewDir | null | undefined;
+
+/** 设置下一次捕获的视角方向（null = 沿用当前; undefined = 未设置 —— 与 null 语义区分见 consume） */
+export function setFigureViewDir(dir: FigureViewDir | null): void {
+  figureViewDir = dir;
+}
+
+/** PublicationCapture 捕获前消费（返回 undefined = 无覆盖; null = 显式沿用当前视角） */
+export function consumeFigureViewDir(): FigureViewDir | null | undefined {
+  const v = figureViewDir;
+  figureViewDir = undefined;
+  return v;
+}

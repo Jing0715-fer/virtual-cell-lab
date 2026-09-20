@@ -1146,7 +1146,9 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
    * （凝聚前期染色体不出核）。确定性纯函数（固定迭代序 + 无随机）→ update() 与
    * chrPosAt() 悬停锚共用同一解 —— v36「同源公式」范式的升级: 同源求解器。 */
   const CHR_GAP = 0.26;
-  const SEP_ITERS = 26;
+  // v59: 26 → 40（v58 遗留末期钳位竞争最差净空 −0.03 根治）+ 末 4 轮每轮钳制
+  // （钳制频率加密: (it&3)===3 周期钳 + 尾段逐轮钳 —— 收纳约束与互斥的竞争在送代尾段充分收敛）
+  const SEP_ITERS = 40;
   const solveN = chromosomes.length;
   const solveX = new Float64Array(solveN), solveY = new Float64Array(solveN), solveZ = new Float64Array(solveN);
   const solveScl = new Float64Array(solveN), solveArmR = new Float64Array(solveN), solveCZW = new Float64Array(solveN);
@@ -1209,7 +1211,7 @@ function buildMitosisScene(perf: boolean): MitosisBuild {
           solveX[j] += ux * push; solveY[j] += uy * push; solveZ[j] += uz * push;
         }
       }
-      if ((it & 3) === 3 || it === SEP_ITERS - 1) {
+      if ((it & 3) === 3 || it >= SEP_ITERS - 4) {
         // 收纳再钳制: 互斥不得推出膜外（膜回转面 + 极帽）; 核被膜存活期钳回核球域
         for (let i = 0; i < solveN; i++) {
           const armR = solveArmR[i];

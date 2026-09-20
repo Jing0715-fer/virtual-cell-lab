@@ -370,9 +370,9 @@ export default function Home() {
               >
                 <a
                   href="#lab"
-                  className="group inline-flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-5 py-2.5 text-[13.5px] font-medium text-emerald-200 transition-all hover:bg-emerald-500/25 hover:shadow-[0_0_24px_rgba(52,211,153,0.3)]"
+                  className="group inline-flex items-center gap-2 rounded-xl border border-emerald-400/60 bg-gradient-to-b from-emerald-500/35 to-emerald-600/20 px-5 py-2.5 text-[13.5px] font-semibold text-emerald-100 shadow-[0_0_18px_rgba(52,211,153,0.22),inset_0_1px_0_rgba(255,255,255,0.12)] transition-all hover:from-emerald-400/45 hover:to-emerald-500/30 hover:shadow-[0_0_30px_rgba(52,211,153,0.4),inset_0_1px_0_rgba(255,255,255,0.18)]"
                 >
-                  <MousePointerClick className="h-4 w-4" />
+                  <MousePointerClick className="h-4 w-4 transition-transform duration-300 group-hover:scale-110" />
                   {t('hero.cta1')}
                   <ArrowDown className="h-3.5 w-3.5 transition-transform group-hover:translate-y-0.5" />
                 </a>
@@ -393,7 +393,7 @@ export default function Home() {
                 {stats.map((s) => (
                   <div
                     key={s.label}
-                    className="group relative overflow-hidden rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2.5 transition-all duration-300 hover:border-emerald-500/25 hover:bg-emerald-500/[0.03]"
+                    className="group relative overflow-hidden rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2.5 transition-all duration-300 hover:-translate-y-0.5 hover:border-emerald-500/25 hover:bg-emerald-500/[0.03] hover:shadow-[0_6px_18px_-6px_rgba(16,185,129,0.25)]"
                   >
                     <span className="absolute inset-y-0 left-0 w-px scale-y-0 bg-emerald-400/60 transition-transform duration-300 group-hover:scale-y-100" aria-hidden />
                     {/* 角标刻度（仪器蓝图感） */}
@@ -506,7 +506,7 @@ export default function Home() {
       <footer className="mt-auto border-t border-white/5 bg-[#02040c]">
         {/* 顶部荧光发丝线 */}
         <div className="h-px bg-gradient-to-r from-transparent via-emerald-500/25 to-transparent" aria-hidden />
-        <div className="mx-auto max-w-[1680px] px-4 lg:px-6">
+        <div className="mx-auto max-w-[1680px] px-4 pt-2 lg:px-6">
           {/* 期刊式页眉小标（kicker） */}
           <div className="flex items-center justify-between gap-4 border-b border-white/5 py-2.5">
             <span className="font-mono text-[9px] uppercase tracking-[0.28em] text-slate-600">
@@ -531,7 +531,7 @@ export default function Home() {
             >
               Pathway data: KEGG REST API (Kanehisa Laboratory)
             </a>
-            <span className="ml-auto flex items-center gap-1.5 font-mono text-[10px] text-slate-600">
+            <span className="ml-auto flex items-center gap-1.5 font-mono text-[10px] text-slate-500">
               <span className="h-1 w-1 rounded-full bg-emerald-500/50" aria-hidden />
               Next.js 16 · Prisma · zustand · z-ai-web-dev-sdk
             </span>

@@ -109,16 +109,18 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number,
   return lines;
 }
 
-/** 选取「美观标尺」长度: 目标像素宽度 64 ~ 22% 图宽的 1-2-5 序列 */
+/** 选取「美观标尺」长度: 目标像素宽度 64 ~ 22% 图宽的 1-2-5 序列
+ *  v59b 修复: umPerPx 语义为「µm / px」—— 64px 对应 64·umPerPx µm（旧版 64/umPerPx
+ *  方向反转 → lo 恒远超候选上限 → 标尺从未渲染的根因）; 兜底取杆长 ≥ 40px 的最小候选 */
 function niceScaleUm(umPerPx: number, imgW: number): number | null {
   if (!umPerPx || !Number.isFinite(umPerPx) || umPerPx <= 0) return null;
   const candidates = [0.2, 0.5, 1, 2, 5, 10, 20, 50, 100];
-  const lo = 64 / umPerPx;
-  const hi = (imgW * 0.22) / umPerPx;
+  const lo = 64 * umPerPx;
+  const hi = (imgW * 0.22) * umPerPx;
   for (const c of candidates) {
     if (c >= lo && c <= hi) return c;
   }
-  return candidates.find((c) => c * umPerPx >= 40) ?? null;
+  return candidates.find((c) => c / umPerPx >= 40) ?? null;
 }
 
 function stamp(): string {
@@ -294,6 +296,234 @@ export async function composeAndDownloadFigure(input: FigureInput): Promise<'ok'
 
   /* ---- 下载 ---- */
   const filename = `vcl_fig${figCounter}_${input.cellId}_${input.pathwayId}_${stamp()}.png`;
+  await new Promise<void>((resolve) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+      }
+      resolve();
+    }, 'image/png');
+  });
+  return 'ok';
+}
+
+/* ============ v59 多面板图版（2×2 对照版式） ============
+ *  四面板同表观尺度（共享相机-目标距离）: A 当前视角 / B 正面观 / C 顶面观 / D 侧面观。
+ *  科研拼版语言: 面板字母角标（A–D 白底黑字）+ 视角名 + 面板级比例标尺（仅 A, 标定全图通用）。
+ *  每面板独立空白检测（跳过空白面板, 不阻塞其余面板）。 */
+export interface MultiPanelInput {
+  lang: 'zh' | 'en';
+  cellName: string;
+  cellId: string;
+  pathwayName: string;
+  pathwayId: string;
+  phase: number;
+  simTimeS: string;
+  running: boolean;
+  moleculeCount: number;
+  sectionView: boolean;
+  umPerPx: number | null;
+  /** 面板快照（png dataURL; label 已本地化） —— 不足 4 面板时按现有数量降级排版 */
+  panels: { png: string; label: string }[];
+}
+
+export async function composeAndDownloadFigureMulti(input: MultiPanelInput): Promise<'ok' | 'blank' | 'error'> {
+  if (input.panels.length === 0) return 'blank';
+  const imgs = await Promise.all(
+    input.panels.map(async (p) => {
+      if (await isBlankPng(p.png)) return null;
+      const i = await new Promise<HTMLImageElement | null>((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = p.png;
+      });
+      return i ? { img: i, label: p.label } : null;
+    }),
+  );
+  const valid = imgs.filter((x): x is { img: HTMLImageElement; label: string } => x !== null);
+  if (valid.length === 0) return 'blank';
+
+  figCounter += 1;
+  const zh = input.lang === 'zh';
+  const W = 2048;
+  const M = Math.round(W * 0.036);
+  const gap = Math.round(W * 0.018);
+  const panelW = Math.floor((W - M * 2 - gap) / 2);
+  const aspect = valid[0].img.height / valid[0].img.width;
+  const panelH = Math.round(panelW * aspect);
+  const panelLabelH = Math.round(W * 0.022);
+
+  const brandH = Math.max(24, W * 0.028);
+  const titleH = Math.max(36, W * 0.052);
+  const capH = Math.max(120, W * 0.14);
+  const gridH = panelH * 2 + panelLabelH * 2 + gap;
+  const H = Math.round(M + brandH + 10 + titleH + 14 + gridH + 18 + capH + M);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return 'error';
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+  let y = M;
+
+  /* 刊头 */
+  const brandFs = Math.max(11, W * 0.011);
+  setFont(ctx, brandFs, 600);
+  ctx.fillStyle = '#1a1a1a';
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+  try { (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = `${Math.round(W * 0.0055)}px`; } catch { /* noop */ }
+  ctx.fillText('VIRTUAL CELL LAB', M, y + brandFs);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#8a8a85';
+  ctx.fillText(zh ? `对照图版 · PANEL FIG. ${figCounter}` : `PANEL FIGURE ${figCounter}`, W - M, y + brandFs);
+  try { (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = '0px'; } catch { /* noop */ }
+  y += brandH + 10;
+  ctx.strokeStyle = '#e6e6e0';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(M, y);
+  ctx.lineTo(W - M, y);
+  ctx.stroke();
+  y += 14;
+
+  /* 标题 */
+  const titleFs = Math.max(17, W * 0.018);
+  setFont(ctx, titleFs, 700);
+  ctx.fillStyle = '#111111';
+  ctx.textAlign = 'left';
+  wrapText(ctx, `${input.cellName} · ${input.pathwayName}`, W - M * 2, 1).forEach((line) => {
+    ctx.fillText(line, M, y + titleFs * 0.9);
+  });
+  y += titleH;
+
+  /* 2×2 网格 */
+  const letters = ['A', 'B', 'C', 'D'];
+  const badgeFs = Math.max(13, W * 0.013);
+  const labelFs = Math.max(12, W * 0.0115);
+  valid.forEach(({ img, label }, idx) => {
+    const col = idx % 2;
+    const row = Math.floor(idx / 2);
+    const px = M + col * (panelW + gap);
+    const py = y + row * (panelH + panelLabelH + gap);
+    ctx.drawImage(img, px, py, panelW, panelH);
+    ctx.strokeStyle = '#deded8';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px + 0.5, py + 0.5, panelW - 1, panelH - 1);
+    // 面板字母角标（左上, 白底黑字圆角块）
+    const bw = badgeFs * 1.9;
+    const bh = badgeFs * 1.7;
+    const bpad = Math.round(W * 0.006);
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+    ctx.beginPath();
+    ctx.roundRect(px + bpad, py + bpad, bw, bh, Math.min(6, bh / 2));
+    ctx.fill();
+    ctx.stroke();
+    setFont(ctx, badgeFs, 700);
+    ctx.fillStyle = '#161616';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(letters[idx] ?? String(idx + 1), px + bpad + bw / 2, py + bpad + bh / 2 + 1);
+    ctx.textBaseline = 'alphabetic';
+    // 视角名（面板下方）
+    setFont(ctx, labelFs, 600);
+    ctx.fillStyle = '#333333';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${letters[idx] ?? ''} · ${label}`, px + 2, py + panelH + labelFs);
+  });
+
+  /* 面板 A 比例标尺（标定对四面板通用 —— 同表观尺度） */
+  const barUm = niceScaleUm(input.umPerPx ?? 0, panelW);
+  if (barUm && input.umPerPx) {
+    const barPx = Math.round(barUm / input.umPerPx);
+    const barH = Math.max(3, Math.round(W * 0.0024));
+    const blFs = Math.max(10, W * 0.0105);
+    const pad = Math.max(8, W * 0.008);
+    const boxW = barPx + pad * 2;
+    const boxH = blFs + barH * 2.6 + pad * 1.6;
+    const bx = M + panelW - boxW - Math.max(10, W * 0.01);
+    const by = y + panelH - boxH - Math.max(10, W * 0.01);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.strokeStyle = 'rgba(0,0,0,0.10)';
+    ctx.beginPath();
+    ctx.roundRect(bx, by, boxW, boxH, boxH / 2);
+    ctx.fill();
+    ctx.stroke();
+    setFont(ctx, blFs, 600);
+    ctx.fillStyle = '#161616';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${barUm} µm`, bx + boxW / 2, by + pad + blFs * 0.82);
+    const barY = by + pad + blFs * 1.05 + barH * 0.8;
+    ctx.fillStyle = '#111111';
+    ctx.fillRect(bx + pad, barY, barPx, barH);
+    ctx.fillRect(bx + pad, barY - barH * 0.8, Math.max(2, barH * 0.6), barH * 2.6);
+    ctx.fillRect(bx + pad + barPx - Math.max(2, barH * 0.6), barY - barH * 0.8, Math.max(2, barH * 0.6), barH * 2.6);
+  }
+  y += gridH + 18;
+
+  /* 图注 */
+  const leadFs = Math.max(13, W * 0.0135);
+  const bodyFs = Math.max(11.5, W * 0.0112);
+  const footFs = Math.max(10, W * 0.0098);
+  const lineGap = bodyFs * 1.5;
+  setFont(ctx, leadFs, 700);
+  ctx.fillStyle = '#161616';
+  ctx.textAlign = 'left';
+  const lead = zh
+    ? `图 ${figCounter} | ${input.cellName}四视角对照（当前视角 / 正面观 / 顶面观 / 侧面观）与 ${input.pathwayName}信号级联`
+    : `Figure ${figCounter} | Four-view survey of ${input.cellName} (current / frontal / apical / lateral) with the ${input.pathwayName} cascade`;
+  let cy = y + leadFs;
+  wrapText(ctx, lead, W - M * 2, 2).forEach((line) => {
+    ctx.fillText(line, M, cy);
+    cy += leadFs * 1.3;
+  });
+  cy += 4;
+  setFont(ctx, bodyFs, 400);
+  ctx.fillStyle = '#3f3f3f';
+  const status = zh
+    ? `信号阶段 ${input.phase}/4 · T+${input.simTimeS}s · ${input.running ? '动态模拟运行中' : '静息观测'} · ${input.moleculeCount} 个核心分子 · 四面板同表观尺度（比例标尺见图 A）${input.sectionView ? ' · 剖面视图' : ''}`
+    : `Signalling phase ${input.phase}/4 · T+${input.simTimeS}s · ${input.running ? 'live simulation' : 'resting state'} · ${input.moleculeCount} core molecules · all panels at identical apparent scale (scale bar in A)${input.sectionView ? ' · section view' : ''}`;
+  wrapText(ctx, status, W - M * 2, 2).forEach((line) => {
+    ctx.fillText(line, M, cy);
+    cy += lineGap;
+  });
+  ctx.fillStyle = '#767672';
+  const methods = zh
+    ? 'WebGL 实时渲染 · ACES Filmic 色调映射 · 环境光遮蔽与辉光后处理 · 微结构参照 Alberts《Molecular Biology of the Cell》6th · 非等比示意'
+    : 'Rendered in real time (WebGL, ACES filmic tone mapping, AO & bloom) · ultrastructure after Alberts, MBoC 6th ed. · not to scale';
+  wrapText(ctx, methods, W - M * 2, 2).forEach((line) => {
+    ctx.fillText(line, M, cy);
+    cy += lineGap;
+  });
+
+  /* 脚注 */
+  const footY = H - M - footFs * 0.35;
+  ctx.strokeStyle = '#ecece7';
+  ctx.beginPath();
+  ctx.moveTo(M, footY - footFs * 2.1);
+  ctx.lineTo(W - M, footY - footFs * 2.1);
+  ctx.stroke();
+  setFont(ctx, footFs, 400);
+  ctx.fillStyle = '#9a9a94';
+  const now = new Date();
+  const loc = zh ? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}` : now.toISOString().slice(0, 16).replace('T', ' ');
+  ctx.fillText(`${loc} · KEGG ${input.pathwayId}`, M, footY);
+  ctx.textAlign = 'right';
+  ctx.fillText('VIRTUAL CELL LAB', W - M, footY);
+
+  const filename = `vcl_panel${figCounter}_${input.cellId}_${input.pathwayId}_${stamp()}.png`;
   await new Promise<void>((resolve) => {
     canvas.toBlob((blob) => {
       if (blob) {

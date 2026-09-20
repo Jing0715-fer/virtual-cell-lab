@@ -13,13 +13,13 @@ import type { ComponentType, ReactNode, RefObject } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, useThree, events as createPointerEvents } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
-import { consumeFigureRequest, requestFigureCapture, setSceneSnapshot, type FigureMeta } from '@/lib/simulation/scene-capture';
-import { composeAndDownloadFigure, parseDiameterUm } from '@/lib/simulation/figure-compose';
+import { consumeFigureRequest, consumeFigureViewDir, requestFigureCapture, setSceneSnapshot, setFigureViewDir, type FigureMeta } from '@/lib/simulation/scene-capture';
+import { composeAndDownloadFigure, composeAndDownloadFigureMulti, parseDiameterUm } from '@/lib/simulation/figure-compose';
 import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, ChromaticAberration, DepthOfField, Noise, N8AO, Vignette } from '@react-three/postprocessing';
 import type { DepthOfFieldEffect } from 'postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Eye, Tags, Focus, RotateCw, RotateCcw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick, ListTree, Split, Play, Pause, LocateFixed, Camera, Loader2, CheckCircle2, Dna } from 'lucide-react';
+import { Eye, Tags, Focus, RotateCw, RotateCcw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick, ListTree, Split, Play, Pause, LocateFixed, Camera, Loader2, CheckCircle2, Dna, Grid2x2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
@@ -447,16 +447,17 @@ function SceneCapture() {
  *  帧序: EffectComposer useFrame(priority 1) 渲染 → 本组件 priority 2 捕获;
  *  辉光关闭时退 priority 0（读上一帧 —— HD 模式 preserveDrawingBuffer 保证有效;
  *  流畅模式由 figure-compose 空白检测兜底），绝不单独接管渲染循环（避免无 composer 时黑屏）。
- *  同时采集标尺标定元数据（fov/相机-目标距离/画布像素 → 物平面 px/世界单位）。 */
+ *  同时采集标尺标定元数据（fov/相机-目标距离/画布像素 → 物平面 px/世界单位）。
+ *  v59b 视角覆盖延迟一帧: 覆盖发生在 composer 渲染之后（priority 2 > 1）—— 若同帧捕获,
+ *  读到的是旧相机位画面（面板 B/C/D 图像滞后一帧实测确认）。改为: 覆盖帧只改相机,
+ *  下一帧（已按新相机渲染）再捕获 → 四面板视角与标签严格对应。 */
 function PublicationCapture({ controlsRef, priority }: {
   controlsRef: RefObject<OrbitControlsImpl | null>;
   priority: number;
 }) {
-  useFrame(({ gl, camera }) => {
-    const cb = consumeFigureRequest();
-    if (!cb) return;
+  const deferredCb = useRef<((png: string | null, meta: FigureMeta | null) => void) | null>(null);
+  const captureNow = (gl: { domElement: HTMLCanvasElement }, camera: THREE.Camera, persp: THREE.PerspectiveCamera, cb: (png: string | null, meta: FigureMeta | null) => void) => {
     const el = gl.domElement;
-    const persp = camera as THREE.PerspectiveCamera;
     const target = controlsRef.current?.target ?? new THREE.Vector3();
     const camDist = camera.position.distanceTo(target);
     const aspect = el.width / Math.max(1, el.height);
@@ -475,6 +476,35 @@ function PublicationCapture({ controlsRef, priority }: {
       png = null;
     }
     cb(png, meta);
+  };
+  useFrame(({ gl, camera }) => {
+    // 延迟捕获: 上一帧已应用视角覆盖且已按新相机渲染 —— 本帧直读
+    if (deferredCb.current) {
+      const cb = deferredCb.current;
+      deferredCb.current = null;
+      captureNow(gl, camera, camera as THREE.PerspectiveCamera, cb);
+      return;
+    }
+    const cb = consumeFigureRequest();
+    if (!cb) return;
+    // v59 多面板视角覆盖: 改相机 → 延迟到下一帧捕获（该帧已按新相机位渲染）
+    const dir = consumeFigureViewDir();
+    const controls = controlsRef.current;
+    if (dir && controls) {
+      const target = controls.target.clone();
+      const dist = camera.position.distanceTo(target);
+      const len = Math.hypot(dir.x, dir.y, dir.z) || 1;
+      camera.position.set(
+        target.x + (dir.x / len) * dist,
+        target.y + (dir.y / len) * dist,
+        target.z + (dir.z / len) * dist,
+      );
+      camera.lookAt(target);
+      controls.update();
+      deferredCb.current = cb;
+      return;
+    }
+    captureNow(gl, camera, camera as THREE.PerspectiveCamera, cb);
   }, priority);
   return null;
 }
@@ -805,6 +835,76 @@ export function VirtualCell3D() {
         flashFigure(res === 'ok' ? 'ok' : 'err');
       })();
     });
+  }, [figState, lang, cell, cellId, graph, layoutSpec, phase, tick, running, clipView, t, flashFigure]);
+
+  /* ============ v59 多面板图版导出（2×2 对照版式） ============
+   *  四面板同表观尺度（视角方向覆盖 + 距离沿用 → A 当前 / B 正面 / C 顶面 / D 侧面），
+   *  逐面板 requestFigureCapture（覆盖帧改相机 → 下一帧捕获, PublicationCapture v59b 延迟设计）;
+   *  流程结束后恢复用户原视角（相机位/目标快照回写）。 */
+  const exportMultiFigure = useCallback(() => {
+    if (figState === 'busy' || !graph) return;
+    setFigState('busy');
+    // 用户视角快照（流程结束后回写 —— 避免导出后停在末面板覆盖位）
+    const controls = controlsRef.current;
+    const saved = controls
+      ? { pos: controls.object.position.clone(), target: controls.target.clone() }
+      : null;
+    const restoreView = () => {
+      const c = controlsRef.current;
+      if (saved && c) {
+        c.object.position.copy(saved.pos);
+        c.target.copy(saved.target);
+        c.update();
+      }
+    };
+    const views: { dir: { x: number; y: number; z: number } | null; zh: string; en: string }[] = [
+      { dir: null, zh: '当前视角', en: 'Current view' },
+      { dir: { x: 0, y: 0.06, z: 1 }, zh: '正面观', en: 'Frontal view' },
+      { dir: { x: 0, y: 1, z: 0.1 }, zh: '顶面观', en: 'Apical view' },
+      { dir: { x: 1, y: 0.05, z: 0 }, zh: '侧面观', en: 'Lateral view' },
+    ];
+    const panels: { png: string; label: string }[] = [];
+    let metaFirst: FigureMeta | null = null;
+    const captureNext = (idx: number) => {
+      if (idx >= views.length) {
+        restoreView();
+        void (async () => {
+          if (panels.length === 0) { flashFigure('err'); return; }
+          const cellName = (lang === 'zh' ? cell?.name : cell?.nameEn ?? cell?.name) ?? t('loading.cell');
+          const diameterUm = parseDiameterUm(lang === 'zh' ? cell?.diameter : cell?.diameterEn ?? cell?.diameter);
+          const membraneR = layoutSpec.membraneR;
+          const umPerPx = metaFirst && diameterUm && membraneR > 0 && metaFirst.pxPerWorld > 0
+            ? membraneR * 2 / diameterUm / metaFirst.pxPerWorld
+            : null;
+          const res = await composeAndDownloadFigureMulti({
+            lang,
+            cellName,
+            cellId,
+            pathwayName: lang === 'zh' ? graph.meta.nameZh : graph.meta.name,
+            pathwayId: graph.meta.id,
+            phase,
+            simTimeS: (tick * 0.5).toFixed(1),
+            running,
+            moleculeCount: graph.stats.coreCount,
+            sectionView: clipView,
+            umPerPx,
+            panels,
+          });
+          flashFigure(res === 'ok' ? 'ok' : 'err');
+        })();
+        return;
+      }
+      const v = views[idx];
+      setFigureViewDir(v.dir);
+      requestFigureCapture((png, meta) => {
+        if (png) {
+          if (idx === 0) metaFirst = meta;
+          panels.push({ png, label: lang === 'zh' ? v.zh : v.en });
+        }
+        captureNext(idx + 1);
+      });
+    };
+    captureNext(0);
   }, [figState, lang, cell, cellId, graph, layoutSpec, phase, tick, running, clipView, t, flashFigure]);
   // 有效布局: 贴面模式下级联投影到切面（相机跟随/教学引导同步使用投影后坐标）
   const effLayout = useMemo(
@@ -1187,6 +1287,15 @@ export function VirtualCell3D() {
           label={t('hud.fig')}
           highlight
           title={t('hud.figTip')}
+        />
+        {/* v59 发表模式: 多面板对照图版（2×2 四视角同表观尺度 → 拼版 PNG） */}
+        <HudToggle
+          active={figState !== 'idle'}
+          onClick={exportMultiFigure}
+          icon={figState === 'busy' ? Loader2 : Grid2x2}
+          label={t('hud.panel')}
+          highlight
+          title={t('hud.panelTip')}
         />
         {/* 移动端齿轮: 展开/收起其余显示开关（桌面恒显） */}
         <button

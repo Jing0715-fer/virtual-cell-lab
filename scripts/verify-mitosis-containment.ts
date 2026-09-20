@@ -62,7 +62,8 @@ const chrs = Array.from({ length: CHR_N }, (_, ci) => {
 
 /* ---------- v58 同源求解器（mitosis.tsx chrSolve 的脚本镜像 —— 口径同步） ---------- */
 const CHR_GAP = 0.26;
-const SEP_ITERS = 26;
+// v59: 26 → 40 + 末 4 轮逐轮钳（与 mitosis.tsx chrSolve 同步）
+const SEP_ITERS = 40;
 const solve = (t: number) => {
   const condense = ramp(t, 0.42, 1.45);
   const decondense = ramp(t, 4.3, 5.5);
@@ -117,7 +118,7 @@ const solve = (t: number) => {
         X[j] += ux * push; Y[j] += uy * push; Z[j] += uz * push;
       }
     }
-    if ((it & 3) === 3 || it === SEP_ITERS - 1) {
+    if ((it & 3) === 3 || it >= SEP_ITERS - 4) {
       for (let i = 0; i < CHR_N; i++) {
         const armR = ARMR[i];
         const zCap = Math.max(0.6, memL * 0.9 - CZW[i] - armR);

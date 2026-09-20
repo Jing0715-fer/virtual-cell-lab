@@ -3306,3 +3306,81 @@ Stage Summary:
 - 下阶段建议: ①教学引导回落根因定位（v55 遗留最高优先）②DrugMoleculeLayer 标签接入 v37
   防叠注册表③图版导出多面板 2×2 对照版式④引导模式接入减数分裂站点叙事⑤真机浏览器复核
   （SwiftShader 环境与真机渲染差异）
+
+---
+Task ID: 59
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户第 33 轮 —— 「继续打磨 3D 细胞和细胞分裂演示的细节, 优化 pathway 展示的效果, 打磨整个项目和 UI 细节」
+
+Work Log:
+- 【基线确认】git log v58 (0c59568) 在位 + 工作树干净; dev server 正常; 本轮四大板块:
+  pathway 展示优化 / 3D 分裂细节 / 全项目 UI 打磨 / 新功能（多面板图版）
+- 【v55 遗留 bug 复测闭环: 教学引导开关「点击后瞬间回落」】agent-browser 实测: 点击后 36s
+  按钮仍激活 + 暗角/章节 pill/解说卡 DOM 全在 + 关闭→重开循环稳定 —— v56 SceneContents
+  结构改动后已自愈（worklog 假设证实, 悬案销案）
+- 【pathway 展示效果优化（图谱视图五连）】pathway-map-view.tsx:
+  ① 剧场聚焦 —— 选中分子琥珀光环呼吸（pm-halo CSS）+ 邻接边琥珀流动（pm-focus-flow）
+    + 其余节点/边淡出至 0.16/0.06（pm-node/pm-edge 过渡）; 跨视图联动（3D/2D/图谱任一处
+    选中即生效）+ 顶部聚焦提示 pill + 点空白退出
+  ② LOD 标签 —— 拉远（>1.35× 全图宽）隐藏非核心非激活节点标签 + 淡出提示
+  ③ 点阵网格底图（pmGrid pattern, 实验坐标纸质感, 随 viewBox 自然适配）
+  ④ 悬停亮框反馈（边加亮 1.4/0.8 + 节点亮框）
+  ⑤ 缩放百分比指示 + 聚焦按钮（居中定位 + 适度放大）+ 双击节点居中 + 通路切换视图重置
+    （渲染期状态调整模式, 免 effect 级联）
+- 【真 bug 顺手根治: 叠加控件冒泡误伤】工作区容器 onClick（非 3D 视图清空选中）会捕获
+  图谱缩放/聚焦按钮的冒泡点击 → 选中被清 → 聚焦失效。图谱视图四块叠加层 + 2D 视图缩放
+  控件统一 stopPropagation; locate 按钮 vbBefore "0 0 1200 780" → vbAfter 居中 EGFR 实证
+- 【排障方法论沉淀】「querySelector('svg[role=img]') 读到的是 hero 区插图 svg（恰好也是
+  560×420 viewBox）而非图谱视图 svg」—— 多 svg 页面必须用 aria-label 精确定位, 差点把
+  正常功能误判为 bug
+- 【3D 分裂细节: v58 遗留末期钳位竞争根治】chrSolve/meiChrSolve/verify 脚本三镜像:
+  SEP_ITERS 26→40 + 钳制频率加密（(it&3)===3 周期钳 + 末 4 轮逐轮钳）;
+  verify 脚本: 两两最差净空 -0.032→-0.013; 浏览器探针全相位实测: 0~5.9 全程 0.0000
+  （紧约束对恰在阈值 = 完美收敛）, v58 最差点 t=4.64 实测 -0.00024（133 倍改善）;
+  v57 防线全绿: interClear +0.347 / centDauClear 0.5 / dauMtClear 0.3（dauMtN=20）
+  精确命中设计值; VLM 末期/胞质分裂截图: 收缩沟哑铃形科学✓ 零几何交叉✓
+- 【新功能: 2×2 多面板对照图版导出（worklog 建议项落地）】
+  · scene-capture.ts: FigureViewDir 视角覆盖通道（dir=null 沿用当前; 距离沿用 → 四面板
+    同表观尺度共享标尺标定）
+  · PublicationCapture v59b 延迟捕获设计: 覆盖帧只改相机 → 下一帧（已按新相机渲染）再
+    toDataURL —— 修复「覆盖发生在 composer 渲染后 → 同帧捕获读到旧相机画面」（VLM 首
+    版实测面板 B/C/D 图像滞后一帧确认）
+  · exportMultiFigure: 用户视角快照/恢复（流程结束回写相机位+目标）+ 四面板链式捕获
+  · figure-compose.ts composeAndDownloadFigureMulti: 2048px 纸面 2×2 网格 + A-D 字母
+    角标（白底黑字圆角块）+ 视角名 + 面板 A 比例标尺 + 刊头/标题/图注/脚注全套科研版式;
+    每面板独立空白检测降级排版
+  · HUD 新增「对照图版」按钮（Grid2x2 图标）+ i18n 中英
+- 【真 bug 顺手根治 #2: 标尺标定方向反转】niceScaleUm 把 umPerPx（µm/px）当 px/µm 用
+  （lo=64/umPerPx 应为 64×umPerPx）→ lo 恒远超候选上限 → 标尺从未渲染（单面板版同病）;
+  修复后 VLM 实测面板 A 右下 "5 µm" 白底胶囊标尺清晰可见
+- 【全项目 UI 细节打磨（VLM 评审建议采纳）】hero 主 CTA 强化（渐变实心填充+内衬高光+
+  悬停图标缩放）; 统计卡悬停上浮（-translate-y-0.5 + 投影）; footer 顶部呼吸间距 +
+  技术栈小字对比度提升（slate-600→500）
+- 【QA 双重验证】lint 零错误 / tsc src 零错误 / 全流程（通路加载→播放→分裂→图谱）控制台
+  零错误 / 无横向溢出 / dev.log 全 200; VLM 六连: 聚焦模式四项✓ 网格底图✓ 缩放指示✓
+  末期分裂科学性✓ 多面板四视角正确对应✓ 标尺 5µm✓; 多面板导出实测 2.73MB PNG 下载
+  【环境坑记录】①无头浏览器 rAF 节流至 ~1fps（多面板导出全链 ~60s, 测试等待须 ≥30s）
+  ②WebGL 帧外 toDataURL 恒黑（drawing buffer 已清）—— 判断捕获有效性必须在帧内
+  ③SwiftShader 判定 perfMode → preserveDrawingBuffer false, 帧内捕获仍有效（composer
+  priority 2 同帧读）④dev server 会话中崩溃一次（Fast Refresh runtime error）, 重启恢复
+
+Stage Summary:
+- 用户三项诉求全部闭环: ①pathway 展示优化 = 剧场聚焦+LOD+网格+悬停+定位五连（含冒泡
+  误伤真 bug 修复）; ②3D 分裂细节 = 末期钳位竞争净空 133 倍改善 + v57 防线全绿;
+  ③全项目 UI = hero CTA/统计卡/footer 打磨
+- 新功能: 2×2 多面板对照图版导出（四视角同表观尺度 + 相机快照恢复 + 科研拼版语言）
+- 顺手根治两个存量真 bug: 标尺标定方向反转（标尺从未渲染）/ 叠加控件冒泡清选中
+- 架构沉淀: ①「延迟一帧捕获」范式（渲染后置回调改相机 → 下一帧读帧, 视角与标签严格
+  对应）②「渲染期状态调整」替代 effect 重置（通路切换视图重置免级联）③多 svg 页面
+  的 aria-label 精确定位方法论
+- 产出: pathway-map-view.tsx（五连增强）/ virtual-cell-3d.tsx（多面板导出+延迟捕获）/
+  scene-capture.ts（ViewDir 通道）/ figure-compose.ts（Multi 版式+标尺修复）/
+  mitosis.tsx+meiosis.tsx+verify 脚本（迭代 40）/ page.tsx（hero/footer 打磨）/
+  virtual-cell.tsx（冒泡修复）/ i18n.tsx + globals.css（配套）; qa-shots/task59-*.png
+  十四张取证
+- 未解决/风险: ①无头环境 1fps 节流下多面板导出 ~60s（真机不受影响, rAF 正常频率下 <1s）
+  ②perfMode 下（低端设备/流畅模式+辉光关）多面板捕获走「读上一帧」路径 + 空白检测兜底,
+  极端情况下可能降级面板数 ③引式留 1 个 16px 高的文本开关（通路库表达筛选, 非触控主路径）
+- 下阶段建议: ①DrugMoleculeLayer 标签接入 v37 防叠注册表（worklog 长期建议项）②引导
+  模式接入减数分裂站点叙事 ③无通路态「先认识结构, 再装配信号」教学动线打磨 ④星体微管
+  NE 存活窗解析偏转（优先级低）

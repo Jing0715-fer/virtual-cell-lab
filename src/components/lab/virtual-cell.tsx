@@ -368,8 +368,8 @@ export function VirtualCellView() {
         </g>
       </svg>
 
-      {/* 缩放控件 */}
-      <div className="absolute right-3 top-3 flex flex-col gap-1">
+      {/* 缩放控件（v59 阻断冒泡：工作区容器「点空白清选中」不误伤控件） */}
+      <div className="absolute right-3 top-3 flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
         {[
           { label: '＋', fn: () => zoom(0.78), title: t('vc.zoomIn') },
           { label: '－', fn: () => zoom(1.28), title: t('vc.zoomOut') },
