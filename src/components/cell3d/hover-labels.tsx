@@ -154,7 +154,7 @@ export interface LocateReq {
 
 /* ============ 悬停标记层（画布内） ============ */
 
-export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
+export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge, onPick }: {
   targets: HoverTarget[];
   /** 悬停启用（HUD「悬停标记」开关; 关闭时彻底清空） */
   enabled: boolean;
@@ -162,7 +162,10 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
   locate: LocateReq | null;
   /** v21 悬停边 id 上报（整线高亮联动; null = 无边悬停） */
   onHoverEdge?: (id: string | null) => void;
+  /** v61 结构辨识挑战: 指针「点击」（非拖拽旋转）时上报当时悬停目标 —— 无悬停不报 */
+  onPick?: (target: HoverTarget) => void;
 }) {
+  const { gl } = useThree();
   const { lang } = useLang();
   const [hovered, setHovered] = useState<HoverTarget | null>(null);
   /** v29 QA: 实例标识（诊断多实例并存 —— 分裂演示与主视图同时挂载时状态互相覆盖） */
@@ -183,6 +186,42 @@ export function OrganelleHoverLayer({ targets, enabled, locate, onHoverEdge }: {
   const forcedUntil = useRef(0);
   /** v21 上次上报边 id（去重 setState） */
   const lastEdgeId = useRef<string | null>(null);
+  /** v61 点击 vs 拖拽判别: pointerdown 记录起点, pointerup 位移 ≤ 6px 视为点击（OrbitControls 旋转/缩放不误报） */
+  const hoveredRef = useRef<HoverTarget | null>(null);
+  hoveredRef.current = hovered;
+  const downAt = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const el = gl.domElement;
+    const onDown = (e: PointerEvent) => {
+      downAt.current = { x: e.clientX, y: e.clientY };
+    };
+    const onUp = (e: PointerEvent) => {
+      const d = downAt.current;
+      downAt.current = null;
+      // v61 QA 插桩（__cellQaProbe 门控 —— 与既有探针同方法论, 零常态成本）
+      if (typeof window !== 'undefined' && (window as unknown as { __cellQaProbe?: boolean }).__cellQaProbe) {
+        (window as unknown as { __pickQa?: unknown }).__pickQa = {
+          at: performance.now(),
+          hadDown: !!d,
+          dx: d ? Math.abs(e.clientX - d.x) : -1,
+          dy: d ? Math.abs(e.clientY - d.y) : -1,
+          hoverZh: hoveredRef.current?.zh ?? null,
+          enabled,
+        };
+      }
+      if (!d) return;
+      if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6) return; // 旋转/平移手势
+      const h = hoveredRef.current;
+      if (h && enabled) onPick?.(h);
+    };
+    el.addEventListener('pointerdown', onDown);
+    el.addEventListener('pointerup', onUp);
+    return () => {
+      el.removeEventListener('pointerdown', onDown);
+      el.removeEventListener('pointerup', onUp);
+    };
+  }, [gl, enabled, onPick]);
 
   useFrame((state) => {
     // 目录「定位」: 强制点亮该目标 2.4s（即使指针静止/相机飞行中）

@@ -19,7 +19,7 @@ import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, ChromaticAberration, DepthOfField, Noise, N8AO, Vignette } from '@react-three/postprocessing';
 import type { DepthOfFieldEffect } from 'postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Eye, Tags, Focus, RotateCw, RotateCcw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick, ListTree, Split, Play, Pause, LocateFixed, Camera, Loader2, CheckCircle2, Dna, Grid2x2, BookMarked } from 'lucide-react';
+import { Eye, Tags, Focus, RotateCw, RotateCcw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick, ListTree, Split, Play, Pause, LocateFixed, Camera, Loader2, CheckCircle2, Dna, Grid2x2, BookMarked, Brain, Trophy, Lightbulb, SkipForward } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
@@ -43,6 +43,30 @@ import { NUCLEUS_EXTENT, SHAPE_EXTENT, nucleusInstances, type ShapeKind } from '
 import { useLang } from '@/lib/i18n';
 
 type CamMode = 'free' | 'overview' | 'membrane' | 'nucleus' | 'follow' | 'tour';
+
+/* ============ v61 结构辨识挑战（状态契约） ============ */
+const QUIZ_LEN = 10;
+type QuizFeedback =
+  | { kind: 'correct'; gained: number }
+  | { kind: 'wrong'; pickedZh: string; pickedLatin: string }
+  | { kind: 'revealed' };
+interface QuizState {
+  active: boolean;
+  /** 本轮题目 latin 序列（悬停锚点去重池洗牌取样） */
+  queue: string[];
+  idx: number;
+  score: number;
+  streak: number;
+  bestStreak: number;
+  /** 一次答对题数（结算命中率分子） */
+  hits: number;
+  /** 点错总次数（跨题累计） */
+  misses: number;
+  /** 本题点错次数（≥2 触发提示 / 扣分因子） */
+  missesCur: number;
+  feedback: QuizFeedback | null;
+  done: boolean;
+}
 
 /** v20 信号传导边悬停词条映射（「红色的长条是什么」—— 玫红虚线弧线等边类型可悬停识别）
  *  accent 与 EDGE_COLORS 同源（抑制族玫红 / 激活族翡翠 / 表达琥珀） */
@@ -281,7 +305,7 @@ function trackedMolecule(layout: ReturnType<typeof layout3D> | null) {
   return null;
 }
 
-function SceneContents({ showAnatomy, showLabels, focus, perf, cutaway, sim, snapPlane, locate, onHoverTargets }: {
+function SceneContents({ showAnatomy, showLabels, focus, perf, cutaway, sim, snapPlane, locate, onHoverTargets, onPick }: {
   showAnatomy: boolean;
   showLabels: boolean;
   focus: boolean;
@@ -296,6 +320,8 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, cutaway, sim, sna
   locate: LocateReq | null;
   /** v14 悬停目录上报（索引面板数据源） */
   onHoverTargets: (targets: HoverTarget[]) => void;
+  /** v61 结构辨识挑战: 点击（非拖拽）上报悬停目标 */
+  onPick?: (target: HoverTarget) => void;
 }) {
   const graph = useLabStore((s) => s.graph);
   const cellId = useLabStore((s) => s.cellId);
@@ -372,7 +398,7 @@ function SceneContents({ showAnatomy, showLabels, focus, perf, cutaway, sim, sna
         />
       </mesh>
       {/* 剖面贴附模式: 核内部标注让位（核盘自带剖面标注）—— 消除核区标签互叠 */}
-      <CellBody spec={spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} cutaway={cutaway} locate={locate} onHoverTargets={onHoverTargets} extraHover={edgeHover} onHoverEdge={onHoverEdge} avoid={avoidCloud} planeMols={planeMols} />
+      <CellBody spec={spec} tint={tint} dim={focus ? 0.3 : 1} showAnatomy={showAnatomy} perf={perf} cutaway={cutaway} locate={locate} onHoverTargets={onHoverTargets} extraHover={edgeHover} onHoverEdge={onHoverEdge} onPick={onPick} avoid={avoidCloud} planeMols={planeMols} />
       {layout && <EdgeLayer edges={layout.edges} sim={sim} hoveredEdgeId={hoverEdgeId} />}
       {layout && <MoleculeLayer nodes={layout.nodes} sim={sim} showLabels={showLabels} />}
       {/* 激酶抑制剂 3D 药物分子（球棍模型，结合靶点） */}
@@ -593,10 +619,67 @@ export function VirtualCell3D() {
     locateNonce.current += 1;
     setLocateReq({ nonce: locateNonce.current, target, dist: Math.max(6.5, target.r * 3.2) });
   }, []);
+  /* ============ v61 结构辨识挑战（「找到并点击」测验玩法） ============
+   * 悬停系统（OrganelleHoverLayer onPick 点击通道）作答题输入; 题库 = 当前细胞类型
+   * 悬停锚点全集（dedupeTargets 去重后）; 跳过 = 相机飞行揭示答案（教学反馈而非惩罚）。 */
+  const [quiz, setQuiz] = useState<QuizState | null>(null);
+  const startQuiz = useCallback(() => {
+    const pool = hoverTargets.filter((t) => t.kind !== 'edge');
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const queue = pool.slice(0, Math.min(QUIZ_LEN, pool.length)).map((t) => t.latin);
+    if (queue.length === 0) return;
+    setShowAnatomy(true); // 答题依赖悬停命中 —— 悬停标记强制开启
+    setQuiz({ active: true, queue, idx: 0, score: 0, streak: 0, bestStreak: 0, hits: 0, misses: 0, missesCur: 0, feedback: null, done: false });
+  }, [hoverTargets]);
+  const stopQuiz = useCallback(() => setQuiz(null), []);
+  const onPickTarget = useCallback((target: HoverTarget) => {
+    setQuiz((q) => {
+      if (!q || !q.active || q.done || q.feedback) return q;
+      const want = q.queue[q.idx];
+      if (target.latin === want) {
+        const streak = q.streak + 1;
+        const gained = Math.max(5, 10 + Math.min(10, (streak - 1) * 2) - q.missesCur * 3);
+        return { ...q, score: q.score + gained, streak, bestStreak: Math.max(q.bestStreak, streak), hits: q.hits + 1, feedback: { kind: 'correct', gained } };
+      }
+      return { ...q, streak: 0, misses: q.misses + 1, missesCur: q.missesCur + 1, feedback: { kind: 'wrong', pickedZh: target.zh, pickedLatin: target.latin } };
+    });
+  }, []);
+  const skipQuizQuestion = useCallback(() => {
+    setQuiz((q) => {
+      if (!q || !q.active || q.done || q.feedback) return q;
+      return { ...q, misses: q.misses + 1, feedback: { kind: 'revealed' } };
+    });
+  }, []);
+  /* 反馈节奏: 正确 0.95s / 错误 1.5s / 揭示 1.8s 后推进（下一题 / 结算 / 同题继续） */
+  useEffect(() => {
+    const fb = quiz?.feedback;
+    if (!fb) return;
+    const dur = fb.kind === 'correct' ? 950 : fb.kind === 'wrong' ? 1500 : 1800;
+    const to = window.setTimeout(() => {
+      setQuiz((q) => {
+        if (!q || !q.feedback) return q;
+        if (q.feedback.kind === 'wrong') return { ...q, feedback: null }; // 同题继续作答
+        const next = q.idx + 1;
+        if (next >= q.queue.length) return { ...q, feedback: null, done: true };
+        return { ...q, feedback: null, idx: next, missesCur: 0 };
+      });
+    }, dur);
+    return () => window.clearTimeout(to);
+  }, [quiz?.feedback]);
   // v14 细胞分裂 3D 演示（用户需求: 单独增加, 基于现有 3D 细胞标准, 不过度简化）
   // v15: mitosis 改由 lab-store 单一真源驱动 —— workspace 视图切换器 Tab 与 HUD 按钮双入口等价
   const mitosis = useLabStore((s) => s.mitosisOpen);
   const setMitosis = useLabStore((s) => s.setMitosisOpen);
+  // 分裂演示开启 → 挑战终止（悬停锚点集切换, 答题环境失效）
+  // （渲染期状态调整模式 —— 与 tourKey 回站同范式, 免 effect 级联渲染）
+  const [quizMitosisLatch, setQuizMitosisLatch] = useState(false);
+  if (mitosis !== quizMitosisLatch) {
+    setQuizMitosisLatch(mitosis);
+    if (mitosis) setQuiz(null);
+  }
   // v36 分裂演示模式（有丝/减数）—— HUD 面板双 tab 切换, 相位数组/时钟长度随模式切换
   const divisionMode = useLabStore((s) => s.divisionMode);
   const setDivisionMode = useLabStore((s) => s.setDivisionMode);
@@ -748,6 +831,12 @@ export function VirtualCell3D() {
   // 教学级联步骤（通路切换时重建）
   const tour = useMemo(() => (graph ? buildGuidedTour(graph) : []), [graph]);
   const tourStep = tour.length > 0 ? tour[Math.min(tourIdx, tour.length - 1)] : null;
+  // v61 当前挑战题目对应的悬停目标（题面显示 + 提示分组 + 跳过揭示共用）
+  const quizTarget = quiz && !quiz.done ? hoverTargets.find((t) => t.latin === quiz.queue[quiz.idx]) : undefined;
+  // 跳过 = 相机飞行揭示答案（教学反馈而非惩罚; 脉冲高亮复用「定位」通道）
+  useEffect(() => {
+    if (quiz?.feedback?.kind === 'revealed' && quizTarget) locateTarget(quizTarget);
+  }, [quiz?.feedback?.kind, quizTarget, locateTarget]);
 
   // 通路切换时回到第一站（渲染期间状态调整模式，避免 effect 级联渲染）
   const [lastTourKey, setLastTourKey] = useState('');
@@ -1227,7 +1316,7 @@ export function VirtualCell3D() {
               />
             )
           ) : (
-            <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} cutaway={clipView} sim={sim} snapPlane={snapPlane} locate={locateReq} onHoverTargets={onHoverTargets} />
+            <SceneContents showAnatomy={showAnatomy} showLabels={showLabels} focus={focus} perf={perfMode} cutaway={clipView} sim={sim} snapPlane={snapPlane} locate={locateReq} onHoverTargets={onHoverTargets} onPick={onPickTarget} />
           )}
           {/* v14 目录定位 → 相机飞行（1.2s 阻尼聚焦; 用户任何交互立即让位）
            *  v21: 常驻挂载 —— 旧 {!mitosis && ...} 使分裂演示开启时的原点飞行与卸载同帧发生,
@@ -1415,6 +1504,8 @@ export function VirtualCell3D() {
           <HudToggle active={orgIndexOpen} onClick={() => setOrgIndexOpen(!orgIndexOpen)} icon={ListTree} label={t('hud.index')} disabled={mitosis} />
           {/* v60 细胞器图鉴: 四维双语百科 + 定位联动（分裂模式下悬停锚点集不同 —— 与目录同判据禁用） */}
           <HudToggle active={atlasOpen} onClick={() => setAtlasOpen(!atlasOpen)} icon={BookMarked} label={t('hud.atlas')} highlight disabled={mitosis} title={t('hud.atlasTip')} />
+          {/* v61 结构辨识挑战: 找到并点击（答题输入 = 悬停系统点击通道; 需悬停锚点池 ≥ 4） */}
+          <HudToggle active={!!quiz?.active} onClick={() => (quiz ? stopQuiz() : startQuiz())} icon={Brain} label={t('hud.quiz')} highlight disabled={mitosis || hoverTargets.filter((x) => x.kind !== 'edge').length < 4} title={t('hud.quizTip')} />
           <HudToggle active={showLabels} onClick={() => setShowLabels(!showLabels)} icon={Eye} label={t('hud.labels')} />
           <HudToggle active={focus} onClick={() => setFocus(!focus)} icon={Focus} label={t('hud.focus')} />
           <HudToggle active={clipView} onClick={() => setClipView(!clipView)} icon={Layers} label={t('hud.section')} highlight={false} />
@@ -1750,6 +1841,119 @@ export function VirtualCell3D() {
         </div>
       )}
 
+      {/* ============ v61 结构辨识挑战卡（顶部居中; 引导章同时开时下移避让） ============ */}
+      {quiz && (
+        <div className="pointer-events-none absolute left-1/2 top-3 z-20 w-[min(94vw,480px)] -translate-x-1/2">
+          <div className="pointer-events-auto rounded-xl border border-fuchsia-500/30 bg-slate-950/88 px-3 py-2 shadow-[0_8px_32px_rgba(0,0,0,0.5)] backdrop-blur-lg">
+            {/* 标题行: 玩法名 + 进度 + 分数/连击 */}
+            <div className="flex items-center gap-2">
+              <Brain className="h-3.5 w-3.5 shrink-0 text-fuchsia-400" />
+              <span className="shrink-0 text-[10.5px] font-semibold text-fuchsia-200">{t('quiz.title')}</span>
+              <span className="shrink-0 font-mono text-[9px] tabular-nums text-slate-400">
+                {quiz.done ? quiz.queue.length : quiz.idx + 1}<span className="text-slate-600">/{quiz.queue.length}</span>
+              </span>
+              <span className="ml-auto flex shrink-0 items-center gap-1 font-mono text-[9.5px] text-amber-300" title={t('quiz.score')}>
+                <Trophy className="h-3 w-3" />{quiz.score}
+              </span>
+              {quiz.streak >= 2 && (
+                <span className="shrink-0 rounded-full border border-amber-400/40 bg-amber-500/15 px-1.5 py-px font-mono text-[8.5px] text-amber-300">
+                  ×{quiz.streak} {t('quiz.streak')}
+                </span>
+              )}
+              <button
+                onClick={stopQuiz}
+                aria-label={t('quiz.end')}
+                className="shrink-0 rounded-md border border-white/10 bg-white/5 p-1 text-slate-500 transition hover:text-rose-300"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+            {!quiz.done ? (
+              <>
+                {/* 题面: 找到并点击目标结构 */}
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <MousePointerClick className="h-3 w-3 shrink-0 text-fuchsia-400/80" />
+                  <span className="shrink-0 text-[9.5px] text-slate-500">{t('quiz.find')}</span>
+                  <span className="truncate text-[12px] font-semibold text-slate-100">
+                    {lang === 'zh' ? quizTarget?.zh : quizTarget?.latin}
+                  </span>
+                  <span className="hidden truncate text-[8.5px] italic text-slate-600 sm:inline">{lang === 'zh' ? quizTarget?.latin : quizTarget?.zh}</span>
+                </div>
+                {/* 反馈区（正确 +分 / 错误指出所点结构 / 揭示答案） */}
+                {quiz.feedback?.kind === 'correct' && (
+                  <p className="quiz-fb-ok mt-1 flex items-center gap-1.5 text-[10px] font-medium text-emerald-300">
+                    <CheckCircle2 className="h-3 w-3 shrink-0" />
+                    {t('quiz.correct')}<span className="font-mono text-amber-300">+{quiz.feedback.gained}</span>
+                  </p>
+                )}
+                {quiz.feedback?.kind === 'wrong' && (
+                  <p className="quiz-fb-no mt-1 text-[10px] text-rose-300">
+                    {t('quiz.wrong')}「{lang === 'zh' ? quiz.feedback.pickedZh : quiz.feedback.pickedLatin}」
+                    <span className="ml-1 text-slate-500">{t('quiz.retry')}</span>
+                  </p>
+                )}
+                {quiz.feedback?.kind === 'revealed' && (
+                  <p className="quiz-fb-ok mt-1 text-[10px] text-amber-300">
+                    {t('quiz.answerIs')}「{lang === 'zh' ? quizTarget?.zh : quizTarget?.latin}」
+                  </p>
+                )}
+                {/* 提示（本题点错 ≥2 次）+ 跳过（相机飞行揭示答案） */}
+                <div className="mt-1.5 flex items-center gap-2">
+                  {quiz.missesCur >= 2 && quizTarget?.group && (
+                    <span className="flex min-w-0 items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-px text-[8.5px] text-slate-400">
+                      <Lightbulb className="h-2.5 w-2.5 shrink-0 text-amber-400/80" />
+                      <span className="truncate">{t('quiz.hint')} · {HOVER_GROUP_LABEL[quizTarget.group][lang]}</span>
+                    </span>
+                  )}
+                  {!quiz.feedback && (
+                    <button
+                      onClick={skipQuizQuestion}
+                      className="ml-auto flex shrink-0 items-center gap-1 rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[8.5px] text-slate-400 transition hover:border-amber-400/40 hover:text-amber-300"
+                    >
+                      <SkipForward className="h-2.5 w-2.5" />
+                      {t('quiz.skip')}
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : (
+              /* 结算卡: 得分 / 命中率 / 最佳连击 + 再来一轮 */
+              <div className="mt-2">
+                <div className="grid grid-cols-3 gap-1.5">
+                  <div className="rounded-lg border border-amber-400/25 bg-amber-500/8 px-2 py-1.5 text-center">
+                    <div className="font-mono text-[15px] font-semibold text-amber-300">{quiz.score}</div>
+                    <div className="text-[8px] text-slate-500">{t('quiz.score')}</div>
+                  </div>
+                  <div className="rounded-lg border border-emerald-400/25 bg-emerald-500/8 px-2 py-1.5 text-center">
+                    <div className="font-mono text-[15px] font-semibold text-emerald-300">{Math.round((quiz.hits / quiz.queue.length) * 100)}%</div>
+                    <div className="text-[8px] text-slate-500">{t('quiz.accuracy')} · {quiz.hits}/{quiz.queue.length}</div>
+                  </div>
+                  <div className="rounded-lg border border-fuchsia-400/25 bg-fuchsia-500/8 px-2 py-1.5 text-center">
+                    <div className="font-mono text-[15px] font-semibold text-fuchsia-300">×{quiz.bestStreak}</div>
+                    <div className="text-[8px] text-slate-500">{t('quiz.best')}</div>
+                  </div>
+                </div>
+                <div className="mt-2 flex items-center gap-1.5">
+                  <button
+                    onClick={startQuiz}
+                    className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-fuchsia-400/50 bg-fuchsia-500/15 px-2 py-1.5 text-[10px] font-medium text-fuchsia-200 transition hover:bg-fuchsia-500/25"
+                  >
+                    <Brain className="h-3 w-3" />
+                    {t('quiz.again')}
+                  </button>
+                  <button
+                    onClick={stopQuiz}
+                    className="flex items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-[10px] text-slate-400 transition hover:text-slate-200"
+                  >
+                    {t('quiz.close')}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* v31 沉浸式级联引导 —— 剧场暗角 + 章节章 + 剧场式解说卡（逐步推进 + 行进脉冲 + 级联点亮） */}
       {tourOpen && (
         <>
@@ -1764,7 +1968,7 @@ export function VirtualCell3D() {
         </>
       )}
       {tourOpen && tourStep && (
-        <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2">
+        <div className={`pointer-events-none absolute left-1/2 z-20 -translate-x-1/2 ${quiz ? 'top-[104px]' : 'top-3'}`}>
           <div className="flex max-w-[92vw] items-center gap-2 rounded-full border border-emerald-500/25 bg-slate-950/75 px-3.5 py-1.5 backdrop-blur-md">
             <BookOpen className="h-3 w-3 shrink-0 text-emerald-400" />
             <span className="truncate text-[10.5px] font-medium text-emerald-200">{graph?.meta.nameZh}</span>

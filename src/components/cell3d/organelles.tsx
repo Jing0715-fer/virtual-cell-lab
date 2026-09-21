@@ -5023,7 +5023,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
  *  v14: 解剖标注改为「悬停即现」（用户需求） —— 常显标签墙退役,
  *  OrganelleHoverLayer 按指针邻近检测显示单一标记卡（中文名 + 拉丁名 + 一句科学描述）; 全细胞器覆盖。
  *  v20: extraHover —— 信号传导边等外来悬停目标并入同一标记层（单一胜者, 不与细胞器互扰）。 */
-export const CellBody = ({ spec, tint, dim, showAnatomy, perf, cutaway, locate, onHoverTargets, extraHover, onHoverEdge, avoid, planeMols }: {
+export const CellBody = ({ spec, tint, dim, showAnatomy, perf, cutaway, locate, onHoverTargets, extraHover, onHoverEdge, onPick, avoid, planeMols }: {
   spec: CellBodySpec;
   tint: string;
   dim: number;
@@ -5041,6 +5041,8 @@ export const CellBody = ({ spec, tint, dim, showAnatomy, perf, cutaway, locate, 
   extraHover?: HoverTarget[];
   /** v21 悬停边 id 上报（整线高亮联动） */
   onHoverEdge?: (id: string | null) => void;
+  /** v61 结构辨识挑战: 点击（非拖拽）上报悬停目标（透传 OrganelleHoverLayer.onPick） */
+  onPick?: (target: HoverTarget) => void;
   /** v54 空旷域分子云（游离细胞器避让真源 —— 布局 3D 基准, 重建触发源之一） */
   avoid?: AvoidPoint[];
   /** v54 剖面投影分子集（示教锚面内避让 —— 随切深/通路变化实时写入, 不触发重建） */
@@ -5089,7 +5091,7 @@ export const CellBody = ({ spec, tint, dim, showAnatomy, perf, cutaway, locate, 
   return (
     <>
       <primitive object={build.group} />
-      <OrganelleHoverLayer targets={allHover} enabled={showAnatomy} locate={locate ?? null} onHoverEdge={onHoverEdge} />
+      <OrganelleHoverLayer targets={allHover} enabled={showAnatomy} locate={locate ?? null} onHoverEdge={onHoverEdge} onPick={onPick} />
     </>
   );
 };

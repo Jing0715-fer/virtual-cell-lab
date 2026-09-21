@@ -149,6 +149,8 @@ export function OrganelleAtlasPanel({
   const { lang, t } = useLang();
   const [query, setQuery] = useState('');
   const [locatedLatin, setLocatedLatin] = useState('');
+  /* v61 在场筛选: 全部 / 仅在场（当前细胞类型呈现的） —— 特化结构续编后 47 条全量过长 */
+  const [presenceFilter, setPresenceFilter] = useState<'all' | 'present'>('all');
   // 无障碍: 用户系统偏好减动效时退化为纯淡入（无位移/缩放）
   const reduceMotion = useReducedMotion();
 
@@ -161,11 +163,12 @@ export function OrganelleAtlasPanel({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return ORG_ATLAS;
-    return ORG_ATLAS.filter(
-      (e) => e.latin.toLowerCase().includes(q) || e.zh.includes(query.trim()) || e.group.includes(q),
-    );
-  }, [query]);
+    return ORG_ATLAS.filter((e) => {
+      if (presenceFilter === 'present' && !targetByLatin.has(e.latin)) return false;
+      if (!q) return true;
+      return e.latin.toLowerCase().includes(q) || e.zh.includes(query.trim()) || e.group.includes(q);
+    });
+  }, [query, presenceFilter, targetByLatin]);
 
   const presentCount = useMemo(() => {
     let n = 0;
@@ -231,6 +234,23 @@ export function OrganelleAtlasPanel({
           <p className="mt-1 flex items-center gap-1 text-[8px] text-slate-500">
             <span className="font-mono text-emerald-400/70">{presentCount}</span>
             <span>· {t('atlas.subtitle')}</span>
+            {/* v61 在场筛选 chips（全部 / 仅在场） */}
+            <span className="ml-auto flex items-center gap-1">
+              {(['all', 'present'] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setPresenceFilter(f)}
+                  aria-pressed={presenceFilter === f}
+                  className={`rounded-full border px-1.5 py-px text-[8px] transition ${
+                    presenceFilter === f
+                      ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-300'
+                      : 'border-white/10 bg-white/[0.03] text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  {t(f === 'all' ? 'atlas.filterAll' : 'atlas.filterPresent')}
+                </button>
+              ))}
+            </span>
           </p>
         </div>
         {/* 分组条目列表 */}
@@ -241,10 +261,15 @@ export function OrganelleAtlasPanel({
           {ATLAS_GROUP_ORDER.map((gk) => {
             const items = filtered.filter((e) => e.group === gk);
             if (items.length === 0) return null;
+            /* v61 分组在场计数徽章（如 3/5 —— 换细胞类型即时感知「哪些组在场」） */
+            const gkPresent = items.filter((e) => targetByLatin.has(e.latin)).length;
             return (
               <div key={gk}>
-                <div className="mb-1 px-1 text-[8px] font-semibold uppercase tracking-wider text-slate-500">
-                  {ATLAS_GROUP_LABEL[gk][lang]}
+                <div className="mb-1 flex items-center gap-1.5 px-1 text-[8px] font-semibold uppercase tracking-wider text-slate-500">
+                  <span className="truncate">{ATLAS_GROUP_LABEL[gk][lang]}</span>
+                  <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.03] px-1 py-px font-mono text-[7px] font-normal normal-case tracking-normal text-slate-500">
+                    <span className={gkPresent > 0 ? 'text-emerald-400/80' : ''}>{gkPresent}</span>/{items.length}
+                  </span>
                 </div>
                 <div className="space-y-0.5">
                   {items.map((e) => (

@@ -3473,3 +3473,82 @@ Stage Summary:
 - 下阶段建议: ①特化结构图鉴扩充（HOVER_TARGETS 特化清单 → ORG_ATLAS 续编）
   ②引导模式接入减数分裂站点叙事（worklog v59 建议项②仍悬置）③VLM 恢复后补视觉
   复核 + 移动端真机 QA ④DrugMoleculeLayer 视距补偿与图鉴定位联动的深度联动打磨
+
+---
+Task ID: 61
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户第 35 轮 —— 「继续打磨整个项目, 开发新功能, 优化 UI」
+
+Work Log:
+- 【基线确认】git log v60 (9babbc7) + defb4a4 (QA 截图 checkpoint) 在位; dev server 正常;
+  本轮三大板块: 新功能 ×2（特化结构图鉴续编 + 结构辨识挑战）+ 图鉴 UI 打磨
+- 【新功能 A: 特化结构图鉴续编（worklog v60 建议项①落地）】
+  · organelle-atlas.ts: ORG_ATLAS 22→47 条 —— 新增 25 条四维双语档案（超微结构/生理
+    功能/临床关联/标志蛋白 + 关键尺度）, 全部 latin 与 3D 悬停锚点严格同名:
+    ① 内膜系统续编: Peripheral rough ER / CGN / TGN / Secretory transport (TGN→PM)
+    / Cytoplasmic actin network（细胞骨架组）
+    ② 特化结构组（新分组 specialized · 20 条）: 微绒毛/终末网/紧密连接/桥粒/基底膜/
+    胆小管/双核肝细胞/髓鞘轴突/基底树突/突触扣结/顶端树突丛/肌原纤维/闰盘/T 小管/
+    肌浆网/应力纤维/胶原纤维/膜出芽/微核/TCR 微簇 —— 覆盖 7 种细胞类型的标志性
+    特化结构; 内容基准 Alberts 6e（含天疱疮/ACM/CPVT/Baraitser-Winter 等临床锚点）
+  · AtlasGroup 增加 'specialized' + ATLAS_GROUP_ORDER/LABEL 配套; 面板零改动适配
+    （分组渲染本就是泛型映射）
+- 【新功能 B: 结构辨识挑战（「找到并点击」测验玩法）】
+  · hover-labels.tsx: OrganelleHoverLayer 新增 onPick 点击通道 —— pointerdown 记录
+    起点, pointerup 位移 ≤6px 判定「点击」（OrbitControls 旋转/平移手势不误报）,
+    当时悬停目标即答题输入; hoveredRef 渲染期同步 + 每次挂载一次性监听
+  · 线缆: CellBody(onPick) → SceneContents(onPick) → VirtualCell3D(onPickTarget)
+  · 玩法状态机 QuizState: 题库 = 当前细胞类型悬停锚点池（kind!=='edge' 洗牌取 10）
+    · 正确: 基础 10 分 + 连击×2 奖励（封顶+10）− 本题失误×3（下限 5）→ +分动画推进
+    · 错误: 指出所点结构（「不是这个 —— 你点的是『滑面内质网』」教学反馈）同题继续
+    · 提示: 本题点错 ≥2 次亮出分组标签（「提示 · 细胞骨架」）
+    · 跳过: 相机飞行揭示答案（复用 locateTarget 脉冲高亮通道 —— 教学反馈而非惩罚）
+    · 结算: 得分/命中率/最佳连击三格 + 再来一轮/结束; 开始时强制开启悬停标记
+  · 生命周期: 分裂演示开启 → 挑战自动终止（渲染期 latch 模式, 同 tourKey 范式;
+    lint react-hooks/set-state-in-effect 规避）; 引导章与挑战同开 → 引导 pill 下移
+    104px 避让
+- 【图鉴 UI 打磨】
+  · 在场筛选 chips（全部/在场 —— 47 条全量浏览过长, 一键聚焦当前细胞类型呈现的）
+  · 分组头在场计数徽章（如「特化结构 2/20」—— 换细胞类型即时感知在场构成变化）
+- 【QA 插桩（__cellQaProbe 门控, 零常态成本）】__pickQa: onUp 全链诊断（hadDown/
+  位移/悬停目标/enabled 四真源）—— 点击通道验证关键
+- 【QA 全链实证（agent-browser）】
+  · 图鉴: 47 条档案 ✓ 在场筛选 ✓ 分组计数（肝细胞: 特化 2/20, 内膜 8, 核区 4…）✓
+    特化条目展开四维内容（胆小管 MRP2/BSEP 临床锚点全渲染）✓ 定位飞行脉冲 ✓
+    换神经元细胞 → 髓鞘轴突 ● 在场 + 定位联动 ✓（细胞类型感知实证）
+  · 挑战全玩法闭环: 答对（线粒体 → +10 → 2/10 推进）✓ 答错（「不是这个——你点的是
+    『滑面内质网』再试一次」）✓ 二次失误 → 提示亮出「细胞骨架」分组 ✓ 跳过 → 「答案是
+    『胞质肌动蛋白网』」+ 推进 ✓ 10 题跑完 → 结算卡（10 分/10% 命中率 1/10/×1 连击）✓
+    再来一轮（新题序）✓ X 关闭 ✓ 分裂演示开启 → 挑战卡消失（自动终止 latch）✓
+  · 页面级: 无横向溢出 / footer 在位 / 移动端 390px 视口无溢出 / console 零页面错误
+  · 【环境坑记录】①CDP Runtime.evaluate 超时后脚本仍在页面内继续执行（超时 ≠ 中止
+    —— 进度落 window 变量轮询读取）②点击模拟必须加画布 rect 偏移（rect.y=-53 滚动
+    偏移直接吃掉投影坐标）③折线目标（actin 网）取 poly 中点为点击位（锚点可能远离
+    纤维本体）④v29 归一化仲裁对折线目标的影响: 指针深入细胞器足迹内圈时本体无条件
+    胜出 —— 同点位反复尝试折线命中会稳定失败, 换锚点/换点位即解（设计行为非 bug）
+    ⑤cell-picker 下拉展开会覆盖 HUD 按钮（inset-0 overlay）—— Escape 关闭后再操作
+  · 【VLM 缺席】视觉评审 API 全程 429 限流（与 v60 相同）; DOM/数值验证覆盖功能面,
+    截图 5 张存档（task61-*.png）待后续 VLM 恢复补审
+
+Stage Summary:
+- 用户三项诉求全部闭环: ①新功能 = 特化结构图鉴续编（25 条档案, 47 条全集）+ 结构
+  辨识挑战（完整测验玩法闭环）; ②UI 优化 = 图鉴在场筛选 + 分组计数徽章 + 挑战卡
+  动效（答对弹入/答错摇头/reduced-motion 降级）; ③打磨 = 悬停系统新增点击通道
+  （所有「点击细胞器」类未来功能的通用基础设施）
+- 回归: lint 零错误 / tsc src 零错误 / dev.log 全 200 / v57-v60 既有功能面 QA 通过
+  （图鉴定位/分裂演示开启挑战自动终止）
+- 架构沉淀: ①「点击 vs 拖拽」6px 位移阈值判别（悬停系统从只读升级为可交互输入
+  通道）②「渲染期 latch」替代 effect setState（lint 合规 + 免级联渲染）③QA 插桩
+  __pickQa 四真源诊断范式
+- 产出: organelle-atlas.ts（+25 条/specialized 组）/ hover-labels.tsx（onPick +
+  __pickQa）/ organelles.tsx + virtual-cell-3d.tsx（线缆 + 挑战玩法 + HUD）/ 
+  organelle-atlas.tsx（筛选 chips + 计数徽章）/ i18n.tsx（quiz.* 17 词条 +
+  atlas.filter*）/ globals.css（quiz-fb 动效）; qa-scripts/quiz-click.js（QA 工具）
+  + qa-shots/task61-*.png 5 张取证
+- 未解决/风险: ①VLM 429 限流致视觉评审缺位（DOM 验证已覆盖; 建议下轮补审）②挑战
+  题库完全依赖悬停锚点池 —— 折线目标（骨架纤维类）在细胞器密集区命中难度天然偏高
+  （v29 仲裁设计行为）; 可考虑后续按 hitPx 加权出题难度 ③真机触摸拖拽/点击 6px 阈值
+  未实测（无头环境无触摸模拟）
+- 下阶段建议: ①挑战玩法深化: 计时模式/难度分级（按结构尺寸加权）/ 错题回顾卡
+  ②图鉴 ↔ 挑战联动（答错的结构推荐打开对应档案卡）③引导模式接入减数分裂站点
+  叙事（worklog v59 建议项②仍悬置）④真机移动端 QA（触摸目标 44px 达标复核）

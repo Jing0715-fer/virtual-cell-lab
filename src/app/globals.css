@@ -883,6 +883,30 @@
   100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
 }
 
+/* ============ v61 结构辨识挑战反馈动效 ============ */
+/* 答对: 弹入 + 上浮消散（+分 数字伴随感） */
+.quiz-fb-ok {
+  animation: quiz-fb-pop 0.42s cubic-bezier(0.2, 0.9, 0.3, 1.4);
+}
+@keyframes quiz-fb-pop {
+  0% { opacity: 0; transform: translateY(5px) scale(0.92); }
+  55% { opacity: 1; transform: translateY(-1px) scale(1.04); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* 答错: 轻微摇头（克制 —— 反馈而非惩罚） */
+.quiz-fb-no {
+  animation: quiz-fb-shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+@keyframes quiz-fb-shake {
+  10%, 90% { transform: translateX(-1px); }
+  20%, 80% { transform: translateX(2px); }
+  30%, 50%, 70% { transform: translateX(-3px); }
+  40%, 60% { transform: translateX(3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .quiz-fb-ok, .quiz-fb-no { animation: none; }
+}
+
 /* ============ v60 分裂演示连续时间轴 scrubber ============ */
 /* 拖拽热区: 视觉 4px 轨道 + ±10px 隐形命中带（触控 44px 目标的折中 —— 全宽横移手势优先） */
 .mito-scrub {
