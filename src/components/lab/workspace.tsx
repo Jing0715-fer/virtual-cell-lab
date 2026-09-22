@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useQuery } from '@tanstack/react-query';
-import { Microscope, Map as MapIcon, FlaskConical, Boxes, Orbit, Pill, Activity, GitCompare, AlertTriangle, X, Split, BookMarked } from 'lucide-react';
+import { Microscope, Map as MapIcon, FlaskConical, Orbit, GitCompare, AlertTriangle, X, Split, BookMarked } from 'lucide-react';
 import type { PathwayGraph } from '@/types/kegg';
 import { useLabStore } from '@/store/lab-store';
 import { useCompareStore } from '@/store/compare-store';
@@ -313,20 +313,22 @@ export function LabWorkspace() {
       {/* 右栏 */}
       <div className="order-3 h-[560px] overflow-hidden rounded-2xl border border-white/8 bg-slate-950/50 lg:h-[760px]">
         <Tabs defaultValue="inspector" className="flex h-full flex-col">
-          <TabsList className="mx-3 mt-2 grid h-8 grid-cols-5 bg-white/5">
-            <TabsTrigger value="inspector" className="h-6 px-1 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
-              <Boxes className="mr-1 h-3 w-3" />{t('ws.tab.inspector')}
+          {/* v64 tab 防重叠: grid-cols-5 均分在 360px 列内放不下长标签（Pharmacology/Transcriptome）
+              → flex + nowrap + 横向滚动, 触发器 shrink-0 不再挤压换行叠字; 图标移除保余量 */}
+          <TabsList className="mx-3 mt-2 flex h-8 gap-0.5 overflow-x-auto bg-white/5 lab-scrollbar">
+            <TabsTrigger value="inspector" className="h-6 shrink-0 whitespace-nowrap px-2.5 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
+              {t('ws.tab.inspector')}
             </TabsTrigger>
-            <TabsTrigger value="timeline" className="h-6 px-1 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
+            <TabsTrigger value="timeline" className="h-6 shrink-0 whitespace-nowrap px-2.5 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
               {t('ws.tab.timeline')}
             </TabsTrigger>
-            <TabsTrigger value="pharmacology" className="h-6 px-1 text-[11px] data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-300">
-              <Pill className="mr-1 h-3 w-3" />{t('view.drug')}
+            <TabsTrigger value="pharmacology" className="h-6 shrink-0 whitespace-nowrap px-2.5 text-[11px] data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-300">
+              {t('view.drug')}
             </TabsTrigger>
-            <TabsTrigger value="transcriptome" className="h-6 px-1 text-[11px] data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-300">
-              <Activity className="mr-1 h-3 w-3" />{t('ws.tab.heatmap')}
+            <TabsTrigger value="transcriptome" className="h-6 shrink-0 whitespace-nowrap px-2.5 text-[11px] data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-300">
+              {t('ws.tab.heatmap')}
             </TabsTrigger>
-            <TabsTrigger value="ai" className="h-6 px-1 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
+            <TabsTrigger value="ai" className="h-6 shrink-0 whitespace-nowrap px-2.5 text-[11px] data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-300">
               AI
             </TabsTrigger>
           </TabsList>

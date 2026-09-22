@@ -3677,3 +3677,66 @@ Stage Summary:
   6.5 视距本就合适, 暂不动
 - 下阶段建议: ①VLM 恢复后补审 task63-*.png ②挑战玩法难度分级（worklog v61 建议悬置）
   ③ER/高尔基参照图再校色（v62 建议第 2/3 条悬置）④引导模式接入减数分裂站点叙事
+
+---
+Task ID: 64
+Agent: 主协调 Agent (Z.ai Code)
+Task: 用户第 37 轮 —— 「3D 细胞右侧框 tab 重叠 + 画布内信息/按钮过多遮挡细胞 → 迁出画布」
+
+Work Log:
+- 【基线】git 干净于 v63 (fd0e3fd); 用户报告两处 UI 问题: ①右栏 360px 列 TabsList
+  grid-cols-5 均分放不下英文长标签（Pharmacology/Transcriptome ≈ 88px > 63px/格）→
+  挤压换行叠字 ②画布内常驻 HUD 过多（左上 3 信息卡 + 右列 15 按钮 + 右下 4 相机键 +
+  左下图例）遮挡细胞
+- 【修复① 右栏 tab】workspace.tsx: TabsList grid-cols-5 → flex + overflow-x-auto +
+  lab-scrollbar, 触发器 shrink-0 + whitespace-nowrap + px-2.5, 移除 3 个图标保余量;
+  实测 zh 245px / en 368px 全列零重叠（box 逐对相交检测）
+- 【重构② HUD 迁出画布】virtual-cell-3d.tsx 根节点改 flex flex-col:
+  · 新增画布外 HudBar 工具条（!fullscreen 态渲染）: 单行分组 chips —— 信息组（细胞×通路
+    + T+时钟/阶段/分子数/⌀尺度, 只读）| 演示组（分裂/导览/图鉴/挑战/目录, 琥珀）|
+    显示组（辉光/高清|流畅/悬停/标签/专注/剖面/环视/图例）| 相机组（全景/质膜/核内/跟随）|
+    发表组（图版/对照/全屏）; 窄屏横滚、桌面 md:flex-wrap 自动换行
+  · 剖切参数行（clipView 时展开: 正/俯/侧剖 + 剖深滑条 + 信号贴面）迁入工具条第二行
+  · 图例迁为工具条下拉浮层（BarChip 图例 toggle + 收起按钮, legendOpen 默认 false）
+  · 新增 BarChip 组件（chrome 质感 h-6 小 chip, title 承载全称语义）+ i18n 短标签键
+    hud.b.*（分裂/导览/图鉴/挑战/目录/辉光/流畅/高清/悬停/标签/专注/剖面/环视/图例/
+    图版/对照/全屏）+ cam.b.*（质膜/核内/跟随）
+  · 画布内仅保留按需/瞬态浮层: 目录面板（左中）/图鉴（右中）/分裂控制台（底部）/
+    挑战卡（顶部）/导览卡/图版 toast/ctxLost 遮罩/底部提示 pill
+  · 全屏态（vc-fs-in fixed）完全保留原沉浸布局: 顶部信息条 + 右列开关 + 右下相机 +
+    左下图例（legendOpen 同一状态源贯通）—— 已 QA 实证
+  · 删除: 左上信息卡 / 常态右列开关 / 常态相机键 / 常态图例（全迁出或转全屏专属）;
+    Ruler 图标 import 清理
+- 【顺手修复】底部提示 pill 与无通路引导 pill 同在 bottom-3 居中叠压（预存 bug）:
+  提示 pill 改为 !!graph 才渲染, 无通路时让位给引导 pill
+- 【QA 实证（agent-browser DOM 几何验证, VLM 全程 429 限流）】
+  · 画布视口内常驻按钮 = 0（重构前 15+）✓ 视口 876×481 ✓
+  · tab 零重叠（zh+en 双语逐对 box 检测）✓
+  · 图例下拉 380×258 开合正常 ✓ 剖切行参数齐全 ✓ 相机 chip 激活态切换 ✓
+  · 分裂演示按需控制台入画布 ✓ 目录面板（29 器官+30 定位钮）+ 定位点击（Nuclear pore
+    complex）无错 ✓ 图鉴面板 336px 开合 ✓ 挑战卡（Find & click Autophagosome）渲染 ✓
+  · MAPK 通路装配: 信息卡 48 分子 ✓ 引导 pill→提示 pill 正确互斥 ✓
+  · 全屏: vc-fs-in + 顶栏 + 右列全保留 ✓ ESC 退出 ✓
+  · 移动端 390px: 工具条单行横滚（scrollW 1822/clientW 356）不换行爆炸, 剖切行零溢出,
+    画布 315px 高 ✓
+  · 中途踩坑×2: ①嵌套三元缺 else 分支致 JSX 解析错（补 : null）②pathwayId 不在
+    VirtualCell3D 作用域（改用 !!graph）
+- 【环境】dev server QA 中途再遭 OOM 死亡（进程全灭/连接拒绝）→ start-stop-daemon
+  --background 双 fork 常驻重启（PID 13091, 端口 3000 监听实证）
+- 【收尾】lint 零错误 / tsc src 零错误 / dev.log 全 200
+
+Stage Summary:
+- 用户两项诉求闭环: ①右栏 5 tab 永不再挤压叠字（flex+nowrap+横滚, 长英文标签安全）
+  ②画布内常驻 HUD 清零 —— 15 按钮/3 信息卡/相机键/图例全数迁至画布上方 chrome 工具条,
+  细胞完整裸露可视; 剖面参数与图例同条内调节, 全屏沉浸态保持原布局不受影响
+- 架构沉淀: root flex-col + 视口 div(relative flex-1) 分层 —— 浮层定位上下文随视口
+  而非根, 全屏无工具条时布局与旧版逐像素等价; BarChip chrome 组件 + hud.b.* 短标签
+  i18n 体系可复用于后续工具条扩展
+- 产出: workspace.tsx（tab 修复）/ virtual-cell-3d.tsx（HudBar + 迁移重构 + tip pill
+  互斥）/ i18n.tsx（+24 短标签键）/ qa-v64/ 9 张取证截图
+- 未解决/风险: ①VLM 本轮全程 429（配额窗口未恢复）—— 视觉终审未做, DOM 几何验证
+  已覆盖布局正确性; qa-v64/10-final-fresh-zh.png 等存档待 VLM 恢复后补审 ②分裂演示
+  线粒体未同步豆形弯曲（task62 遗留）③worklog 历史遗留项（pathway 展示优化等）仍悬置
+- 下阶段建议: ①VLM 恢复后对 qa-v64 截图补视觉终审（重点: 工具条分组视觉层次/移动端
+  横滚体验）②HudBar 分组可加 subtle 组标签或分隔线微调（当前纯分隔线, 视觉密度可再降）
+  ③分裂演示时工具条「显示组」中 hover/labels 等在 mitosis 下语义失效的项可联动禁用

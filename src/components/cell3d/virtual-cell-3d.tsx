@@ -19,7 +19,7 @@ import { Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, ChromaticAberration, DepthOfField, Noise, N8AO, Vignette } from '@react-three/postprocessing';
 import type { DepthOfFieldEffect } from 'postprocessing';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Eye, Tags, Focus, RotateCw, RotateCcw, Maximize, Shell, Atom, Crosshair, Ruler, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick, ListTree, Split, Play, Pause, LocateFixed, Camera, Loader2, CheckCircle2, Dna, Grid2x2, BookMarked, Brain, Trophy, Lightbulb, SkipForward } from 'lucide-react';
+import { Eye, Tags, Focus, RotateCw, RotateCcw, Maximize, Shell, Atom, Crosshair, Sparkles, BookOpen, ChevronLeft, ChevronRight, X, CirclePlay, Gauge, Layers, Scissors, AlertTriangle, Expand, Shrink, Magnet, SlidersHorizontal, MousePointerClick, ListTree, Split, Play, Pause, LocateFixed, Camera, Loader2, CheckCircle2, Dna, Grid2x2, BookMarked, Brain, Trophy, Lightbulb, SkipForward, Palette } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useLabStore } from '@/store/lab-store';
 import { CELL_TYPE_MAP } from '@/data/cell-types';
@@ -582,7 +582,8 @@ export function VirtualCell3D() {
   // 移动端 HUD 折叠: 开关组/图例默认收起, 避免纵向长列遮挡 3D 画布
   // （ssr:false 动态导入 → 首渲染即可安全读取 window; 桌面 ≥768px 维持原展开布局）
   const [hudOpen, setHudOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 768 : true));
-  const [legendOpen, setLegendOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 768 : true));
+  // v64 图例迁入画布外工具条下拉（默认收起 —— 画布零常驻遮挡; 全屏态复用同一状态可展开）
+  const [legendOpen, setLegendOpen] = useState(false);
   const [glow, setGlow] = useState(true);
   const [tourOpen, setTourOpen] = useState(false);
   const [tourIdx, setTourIdx] = useState(0);
@@ -1208,11 +1209,161 @@ export function VirtualCell3D() {
       ref={rootRef}
       className={
         fullscreen
-          ? 'vc-fs-in fixed inset-0 z-[200] overflow-hidden bg-[#030812]'
-          : 'relative h-full w-full overflow-hidden'
+          ? 'vc-fs-in fixed inset-0 z-[200] flex flex-col overflow-hidden bg-[#030812]'
+          : 'relative flex h-full w-full flex-col overflow-hidden'
       }
       aria-label={fullscreen ? t('hud.fs') : undefined}
     >
+      {/* v64 画布外 HUD 工具条（用户需求: 画布内信息/按钮过多遮挡细胞 → 常驻 HUD 全量迁出画布）
+          仅常规嵌入态渲染; 全屏态沿用沉浸式画布内 HUD（顶部信息条 + 右列开关, 原 QA 布局不变）。
+          主行窄屏横向滚动 / 桌面自动换行; 剖面参数行与图例下拉均挂在本条内 —— 画布视口零常驻遮挡 */}
+      {!fullscreen && (
+        <div className="relative z-20 shrink-0 border-b border-white/8 bg-[#04101c]/95">
+          {/* 主行: 实验信息 | 演示模式 | 显示选项 | 相机预设 | 导出/全屏 */}
+          <div className="lab-scrollbar flex items-center gap-1 overflow-x-auto px-2 py-1.5 md:flex-wrap">
+            {/* 信息组（只读: 细胞 × 通路 + 模拟状态 + 尺度） */}
+            <div className="flex h-6 shrink-0 items-center gap-1.5 rounded-md border border-emerald-500/20 bg-emerald-500/8 px-2 text-[10px]">
+              <Shell className="h-3 w-3 shrink-0 text-emerald-400" />
+              <span className="max-w-[130px] truncate font-medium text-emerald-300">
+                {(lang === 'zh' ? cell?.name : cell?.nameEn ?? cell?.name) ?? t('loading.cell')}
+              </span>
+              <span className="text-slate-600">·</span>
+              <span className="max-w-[110px] truncate text-slate-400">
+                {graph ? (lang === 'zh' ? graph.meta.nameZh : graph.meta.name) : lang === 'zh' ? '结构浏览' : 'Structure'}
+              </span>
+            </div>
+            <div className="flex h-6 shrink-0 items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.03] px-2 font-mono text-[9px] text-slate-400">
+              <span className={running ? 'text-emerald-400' : 'text-slate-600'}>●</span>
+              <span>T+{(tick * 0.5).toFixed(1)}s</span>
+              <span className="text-slate-600">·</span>
+              <span>{t('hud.phase')} {phase}/4</span>
+              <span className="hidden text-slate-600 sm:inline">·</span>
+              <span className="hidden sm:inline">{graph ? graph.stats.coreCount : '—'} {t('hud.molecules')}</span>
+              <span className="hidden text-slate-600 lg:inline">·</span>
+              <span className="hidden lg:inline" title={t('hud.scale')}>⌀ {(lang === 'zh' ? cell?.diameter : cell?.diameterEn ?? cell?.diameter) ?? '—'}</span>
+            </div>
+
+            <span className="mx-0.5 h-4 w-px shrink-0 bg-white/8" />
+            {/* 演示模式组（教学入口 —— 琥珀强调） */}
+            <BarChip active={mitosis} onClick={() => openMitosis(!mitosis)} icon={Split} label={t('hud.b.mitosis')} highlight title={t('hud.mitosis')} />
+            <BarChip active={tourOpen} onClick={() => openTour(!tourOpen)} icon={BookOpen} label={t('hud.b.tour')} highlight disabled={tour.length === 0 || mitosis} title={t('hud.tour')} />
+            <BarChip active={atlasOpen} onClick={() => setAtlasOpen(!atlasOpen)} icon={BookMarked} label={t('hud.b.atlas')} highlight disabled={mitosis} title={t('hud.atlasTip')} />
+            <BarChip active={!!quiz?.active} onClick={() => (quiz ? stopQuiz() : startQuiz())} icon={Brain} label={t('hud.b.quiz')} highlight disabled={mitosis || hoverTargets.filter((x) => x.kind !== 'edge').length < 4} title={t('hud.quizTip')} />
+            <BarChip active={orgIndexOpen} onClick={() => setOrgIndexOpen(!orgIndexOpen)} icon={ListTree} label={t('hud.b.index')} highlight disabled={mitosis} title={t('hud.index')} />
+
+            <span className="mx-0.5 h-4 w-px shrink-0 bg-white/8" />
+            {/* 显示选项组 */}
+            <BarChip active={glow} onClick={() => setGlow(!glow)} icon={Sparkles} label={t('hud.b.glow')} title={t('hud.glow')} />
+            <BarChip active={perfMode} onClick={() => setPerfMode(!perfMode)} icon={Gauge} label={perfMode ? t('hud.b.perf') : t('hud.b.hd')} title={perfMode ? t('hud.perf') : t('hud.hd')} />
+            <BarChip active={showAnatomy} onClick={() => setShowAnatomy(!showAnatomy)} icon={Tags} label={t('hud.b.hover')} title={t('hud.hover')} />
+            <BarChip active={showLabels} onClick={() => setShowLabels(!showLabels)} icon={Eye} label={t('hud.b.labels')} title={t('hud.labels')} />
+            <BarChip active={focus} onClick={() => setFocus(!focus)} icon={Focus} label={t('hud.b.focus')} title={t('hud.focus')} />
+            <BarChip active={clipView} onClick={() => setClipView(!clipView)} icon={Layers} label={t('hud.b.section')} title={t('hud.section')} />
+            <BarChip active={autoRotate} onClick={() => setAutoRotate(!autoRotate)} icon={RotateCw} label={t('hud.b.rotate')} title={t('hud.rotate')} />
+            <BarChip active={legendOpen} onClick={() => setLegendOpen(!legendOpen)} icon={Palette} label={t('hud.b.legend')} title={t('legend.title')} />
+
+            <span className="mx-0.5 h-4 w-px shrink-0 bg-white/8" />
+            {/* 相机预设组 */}
+            <BarChip active={camMode === 'overview'} onClick={() => setCamMode('overview')} icon={Maximize} label={t('cam.overview')} title={t('cam.overview')} />
+            <BarChip active={camMode === 'membrane'} onClick={() => setCamMode('membrane')} icon={Crosshair} label={t('cam.b.membrane')} title={t('cam.membrane')} />
+            <BarChip active={camMode === 'nucleus'} onClick={() => setCamMode('nucleus')} icon={Atom} label={t('cam.b.nucleus')} title={t('cam.nucleus')} />
+            <BarChip active={camMode === 'follow'} onClick={() => setCamMode(camMode === 'follow' ? 'free' : 'follow')} icon={Focus} label={t('cam.b.follow')} title={camMode === 'follow' ? t('cam.following') : t('cam.follow')} />
+
+            <span className="mx-0.5 h-4 w-px shrink-0 bg-white/8" />
+            {/* 发表/全屏组 */}
+            <BarChip active={figState !== 'idle'} onClick={exportFigure} icon={Camera} label={t('hud.b.fig')} title={t('hud.figTip')} />
+            <BarChip active={figState !== 'idle'} onClick={exportMultiFigure} icon={Grid2x2} label={t('hud.b.panel')} title={t('hud.panelTip')} />
+            <BarChip active={false} onClick={enterFullscreen} icon={Expand} label={t('hud.b.fs')} highlight title={t('hud.fsTip')} />
+          </div>
+
+          {/* 剖切参数行（剖面展示激活时展开 —— 画布外调节, 不遮挡细胞） */}
+          {clipView && (
+            <div className="flex items-center gap-2 border-t border-white/5 px-2 py-1">
+              <Scissors className="h-3 w-3 shrink-0 text-teal-400" />
+              <span className="shrink-0 text-[9px] font-medium text-slate-300">{t('hud.axis')}</span>
+              <div className="flex shrink-0 gap-1">
+                {(Object.keys(SECTION_ORIENTS) as SectionAxis[]).map((ax) => (
+                  <button
+                    key={ax}
+                    onClick={() => setClipAxis(ax)}
+                    title={SECTION_ORIENTS[ax].hint[lang]}
+                    className={`rounded-md border px-1.5 py-0.5 text-[9px] transition ${
+                      clipAxis === ax
+                        ? 'border-teal-400/60 bg-teal-500/20 text-teal-200'
+                        : 'border-white/10 bg-white/[0.03] text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    {SECTION_ORIENTS[ax].label[lang]}
+                  </button>
+                ))}
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <span className="shrink-0 text-[9px] text-slate-400">{t('hud.depth')}</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={Math.round(clipDepth * 100)}
+                  onChange={(e) => setClipDepth(Number(e.target.value) / 100)}
+                  className="h-1 min-w-16 w-full max-w-44 cursor-pointer accent-teal-400"
+                  aria-label={t('hud.depth')}
+                />
+                <span className="w-7 shrink-0 text-right font-mono text-[9px] text-teal-300">{Math.round(clipDepth * 100)}%</span>
+              </div>
+              <button
+                onClick={() => setSectionSnap(!sectionSnap)}
+                title={t('hud.snapTip')}
+                className={`flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 text-[9px] transition ${
+                  sectionSnap
+                    ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-300'
+                    : 'border-white/10 bg-white/[0.03] text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <Magnet className={`h-3 w-3 shrink-0 ${sectionSnap ? 'text-emerald-300' : ''}`} />
+                <span>{t('hud.snap')}</span>
+                <span className={`font-mono text-[8px] ${sectionSnap ? 'text-emerald-400/70' : 'text-slate-600'}`}>{sectionSnap ? 'ON' : 'OFF'}</span>
+              </button>
+              <span className="hidden max-w-56 truncate text-[8px] text-slate-500 xl:block">{SECTION_ORIENTS[clipAxis].hint[lang]}</span>
+            </div>
+          )}
+
+          {/* 图例下拉（画布外浮层: 分子类别 / 边型 / 交互提示速查; 再点「图例」或「收起」关闭） */}
+          {legendOpen && (
+            <div className="absolute left-2 top-full z-30 mt-1 w-[min(96%,380px)] rounded-lg border border-white/10 bg-slate-950/95 p-2.5 shadow-[0_12px_36px_rgba(0,0,0,0.55)] backdrop-blur-lg">
+              <div className="mb-1.5 flex items-center justify-between gap-3">
+                <span className="text-[9px] font-medium text-slate-300">{t('legend.title')}</span>
+                <button className="text-[9px] text-slate-500 hover:text-slate-300" onClick={() => setLegendOpen(false)}>{t('legend.collapse')}</button>
+              </div>
+              <div className="lab-scrollbar max-h-[42vh] overflow-y-auto pr-0.5">
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-3 md:grid-cols-4">
+                  {Object.entries(KIND_COLORS).map(([k, v]) => (
+                    <div key={k} className="flex items-center gap-1.5">
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: v.color, boxShadow: `0 0 6px ${v.color}` }} />
+                      <span className="text-[9px] text-slate-400">{t(`kind.${k}`)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 space-y-1 border-t border-white/8 pt-1.5">
+                  <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-emerald-400" /><span className="text-[9px] text-slate-400">{t('legend.activation')}</span></div>
+                  <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-dashed border-rose-400" /><span className="text-[9px] text-slate-400">{t('legend.inhibition')}</span></div>
+                  <div className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-amber-400" /><span className="text-[9px] text-slate-400">{t('legend.expression')}</span></div>
+                  <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full border border-amber-400" /><span className="text-[9px] text-slate-400">{t('legend.phospho')}</span></div>
+                  <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-400/80 shadow-[0_0_6px_rgba(251,191,36,0.8)]" /><span className="text-[9px] text-slate-400">{t('legend.mrna')}</span></div>
+                  <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.9)]" /><span className="text-[9px] text-slate-400">{t('legend.pulse')}</span></div>
+                  <div className="flex items-center gap-1.5 border-t border-white/8 pt-1.5 text-[9px] text-slate-500">
+                    <MousePointerClick className="h-3 w-3 shrink-0 text-emerald-400/80" />
+                    <span>{t('legend.hint')}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 3D 画布视口（flex-1 —— 常驻 HUD 已上移画布外, 视口内仅保留按需面板与瞬态浮层） */}
+      <div className="relative min-h-0 flex-1">
       {/* 3D 画布（错误边界包裹: WebGL 崩溃时降级为提示卡 + 2D 切面回退, 不掀翻整页） */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,#04211d_0%,#020617_55%,#01030e_100%)]">
         <Cell3DErrorBoundary
@@ -1418,41 +1569,14 @@ export function VirtualCell3D() {
       )}
 
       {/* ============ HUD ============ */}
-      {/* 左上: 实验信息（全屏时并入顶部信息条, 不重复显示） */}
-      <div className={`pointer-events-none absolute left-3 top-3 z-10 space-y-1.5 ${fullscreen ? 'hidden' : ''}`}>
-        <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-slate-950/70 px-2.5 py-1.5 backdrop-blur-md">
-          <Shell className="h-3.5 w-3.5 text-emerald-400" />
-          <div>
-            <div className="text-[11px] font-medium text-emerald-300">
-              {(lang === 'zh' ? cell?.name : cell?.nameEn ?? cell?.name) ?? t('loading.cell')}
-            </div>
-            <div className="text-[9px] text-slate-500">{(graph ? (lang === 'zh' ? graph.meta.nameZh : graph.meta.name) : (lang === 'zh' ? '结构浏览' : 'Structure'))} · {t('hud.3dview')}</div>
-          </div>
-        </div>
-        <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-white/10 bg-slate-950/70 px-2.5 py-1 backdrop-blur-md font-mono text-[9px] text-slate-400">
-          <span className={running ? 'text-emerald-400' : 'text-slate-600'}>●</span>
-          <span>T+{(tick * 0.5).toFixed(1)}s</span>
-          <span className="text-slate-600">|</span>
-          <span>{t('hud.phase')} {phase}/4</span>
-          <span className="text-slate-600">|</span>
-          <span>{graph ? graph.stats.coreCount : '—'} {t('hud.molecules')}</span>
-        </div>
-        <div className="pointer-events-auto flex items-center gap-1.5 rounded-lg border border-white/10 bg-slate-950/70 px-2.5 py-1 backdrop-blur-md text-[9px] text-slate-500">
-          <Ruler className="h-3 w-3 text-slate-400" />
-          <span>⌀ {(lang === 'zh' ? cell?.diameter : cell?.diameterEn ?? cell?.diameter) ?? '—'}</span>
-          <span className="text-slate-600">{t('hud.scale')}</span>
-        </div>
-      </div>
+      {/* v64 左上实验信息卡已上移画布外工具条（全屏态信息在顶部信息条） —— 画布零常驻遮挡 */}
 
-      {/* 右上: 显示开关（移动端折叠进「显示」齿轮面板, 避免整列遮挡画布; 全屏时下移避开顶部信息条）
+      {/* 右上: 显示开关 —— v64 仅全屏态使用（常规态已全部上移画布外 HudBar; 全屏沿用沉浸式右列开关）
           · 容器 pointer-events-none —— 仅按钮/面板本体接收事件:
             列容器因剖切面板（w-44）宽达 176px, 若容器可命中会在画布右侧形成大片隐形死区,
             遮住其下方所有分子的悬停/点击（用户报告“点不中蛋白球”的根因之一） */}
-      <div
-        className={`pointer-events-none absolute right-3 z-10 flex flex-col items-end gap-1.5 ${
-          fullscreen ? 'top-[68px] md:top-3' : 'top-3'
-        }`}
-      >
+      {fullscreen && (
+      <div className="pointer-events-none absolute right-3 top-[68px] z-10 flex flex-col items-end gap-1.5 md:top-3">
         {/* 网页内全屏（始终可见 —— 移动端尤佳: 画布铺满视口放大观察） */}
         <HudToggle
           active={fullscreen}
@@ -1571,16 +1695,20 @@ export function VirtualCell3D() {
           </div>
         )}
       </div>
+      )}
 
-      {/* 右下: 相机预设（容器穿透 —— 仅按钮本体可命中, 不遮挡其下方分子的交互） */}
+      {/* 右下: 相机预设 —— v64 仅全屏态（常规态已迁入画布外 HudBar 相机组; 容器穿透 —— 仅按钮本体可命中） */}
+      {fullscreen && (
       <div className="pointer-events-none absolute bottom-3 right-3 z-10 flex flex-wrap justify-end gap-1.5">
         <CamBtn active={camMode === 'overview'} onClick={() => setCamMode('overview')} icon={Maximize} label={t('cam.overview')} />
         <CamBtn active={camMode === 'membrane'} onClick={() => setCamMode('membrane')} icon={Crosshair} label={t('cam.membrane')} />
         <CamBtn active={camMode === 'nucleus'} onClick={() => setCamMode('nucleus')} icon={Atom} label={t('cam.nucleus')} />
         <CamBtn active={camMode === 'follow'} onClick={() => setCamMode(camMode === 'follow' ? 'free' : 'follow')} icon={Focus} label={camMode === 'follow' ? t('cam.following') : t('cam.follow')} />
       </div>
+      )}
 
-      {/* 左下: 图例（移动端默认收起; 展开时限高滚动, 不再遮挡画布主体） */}
+      {/* 左下: 图例 —— v64 仅全屏态（常规态已迁入画布外 HudBar 图例下拉; 展开时限高滚动） */}
+      {fullscreen && (
       <div className="absolute bottom-3 left-3 z-10 max-w-[min(72vw,340px)] md:max-w-none">
         {legendOpen ? (
           <div className="rounded-lg border border-white/10 bg-slate-950/75 p-2.5 backdrop-blur-md">
@@ -1621,6 +1749,7 @@ export function VirtualCell3D() {
           </button>
         )}
       </div>
+      )}
 
       {/* v14 左中: 细胞器目录面板（点击定位 → 相机飞行 + 脉冲环; 悬停 3D 即现标记） */}
       {orgIndexOpen && !mitosis && hoverTargets.length > 0 && (
@@ -2200,7 +2329,8 @@ export function VirtualCell3D() {
             </motion.div>
           </AnimatePresence>
         </div>
-      ) : (
+      ) : !!graph ? (
+        /* v64 底部提示 pill 仅在通路装配后显示 —— 无通路时让位给 v56a 引导 pill（两者同在 bottom-3 居中, 避免叠压） */
         <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 hidden -translate-x-1/2 items-center gap-2 rounded-full border border-white/8 bg-slate-950/60 px-3 py-1 text-[9px] text-slate-500 backdrop-blur-md md:flex">
           {clipView ? (
             <>
@@ -2222,7 +2352,7 @@ export function VirtualCell3D() {
             <span>{t('hud.tip.free')}</span>
           )}
         </div>
-      )}
+      ) : null}
 
       {/* v35 发表模式导出反馈胶囊（合成中/已导出/失败 —— 底部居中浮层, 2.8s 自动消隐） */}
       <AnimatePresence>
@@ -2257,7 +2387,40 @@ export function VirtualCell3D() {
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
+      {/* /3D 画布视口 */}
     </div>
+  );
+}
+
+/** v64 画布外 HUD 工具条按钮（chrome 质感小 chip: 图标 + 短标签, active 点亮组色, title 承载全称语义） */
+function BarChip({ active, onClick, icon: Icon, label, highlight, disabled, title }: {
+  active: boolean;
+  onClick: () => void;
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  highlight?: boolean;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-md border px-2 text-[10px] transition ${
+        active
+          ? highlight
+            ? 'border-amber-500/50 bg-amber-500/15 text-amber-300'
+            : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+          : highlight
+            ? 'border-amber-500/25 bg-white/[0.02] text-amber-300/60 hover:border-amber-500/45 hover:text-amber-300'
+            : 'border-white/10 bg-white/[0.02] text-slate-500 hover:border-white/20 hover:text-slate-200'
+      } ${disabled ? 'cursor-not-allowed opacity-35' : ''}`}
+    >
+      <Icon className="h-3 w-3 shrink-0" />
+      {label}
+    </button>
   );
 }
 
