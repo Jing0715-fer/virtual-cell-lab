@@ -39,7 +39,7 @@ import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import type { CellBodySpec, Vec3 } from '@/lib/simulation/layout3d';
 import { NUCLEUS_FORM, SHAPE_NOISE, nucleusCenter, nucleusInstances, nucleusRadius, nucleusRayExit, shapeCrossRadius, shapeRadius, shapeXExtent, type ShapeKind } from '@/lib/simulation/cell-shape';
-import { displaceGeometry, fbm3, fibSphere, hash01, mergeGeoms, sph } from './procedural';
+import { bendGeometryY, bendY, displaceGeometry, fbm3, fibSphere, hash01, mergeGeoms, sph } from './procedural';
 import { glowSpriteTexture, organicNormalMap, speckleNormalMap, stripeNormalMap } from './textures';
 import { createTimeUniform, glowMaterial, organelleMaterial, volumeMaterial, REF, type TimeUniform } from './materials';
 import { autophagyLevel, AUTOPHAGY_VISIBLE_THRESHOLD } from '@/lib/simulation/autophagy';
@@ -1849,9 +1849,22 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   const mitoCount = perf ? Math.max(4, Math.round(spec.mitoCount * 0.6)) : spec.mitoCount;
   // v26 嵴密度: 12 → 16 片（perf 9）—— 参照图「紧密均匀填满整个内部」
   const cristaeN = perf ? 9 : 16;
+  /* v62 豆形弯曲变体池（VLM 评审「线粒体呈规整胶囊/药丸几何体」根治）:
+   * 电镜下线粒体恒为轻度弧弯的豆形/香蕉形（基质流变 + 微管轨道贴合）;
+   * 弯曲在外膜/内膜/基质/嵴/ATP/mtDNA 六处同源施加 —— 「整套解剖结构一起弯」,
+   * 外膜与内膜共用同 FBM 位移种子（v25 语义保持）, 弯曲在位移之后施加。
+   * 变体池 8 档曲率（含 0 直档）共享几何, 逐颗按索引取档 → 群体里弯直混合、左右交替。 */
+  const MITO_K = [0, -0.24, 0.16, -0.12, 0.28, -0.08, 0.2, 0.11];
+  // 示教前 3 颗取温和档（剖面示教可读性优先: 弯曲不干扰切平面纵贯剖开）
+  const mitoKIdx = (i: number): number => (i < 3 ? [6, 3, 7][i] : (i * 5 + 2) % MITO_K.length);
   // 外膜: 总长 2.3 / 半径 0.4 ≈ 2.9:1 长条豆状（对应 2D Mitochondrion 椭圆 rx54/ry22 ≈ 2.45:1）
   // v10: FBM 幅度 0.05 + 频率 3.1 —— 有机豆状轮廓更明显（近似电镜下不规则线粒体外形）
-  const mitoOuterGeo = track(displaceGeometry(new THREE.CapsuleGeometry(0.4, 1.5, 12, 28), 3.1, 0.05, 17));
+  const mitoOuterGeos = MITO_K.map((k) =>
+    track(bendGeometryY(displaceGeometry(new THREE.CapsuleGeometry(0.4, 1.5, 12, 28), 3.1, 0.05, 17), k)),
+  );
+  const mitoInnerGeos = MITO_K.map((k) =>
+    track(bendGeometryY(displaceGeometry(new THREE.CapsuleGeometry(0.365, 1.46, 12, 24), 3.1, 0.05, 17), k)),
+  );
   const mitoOuterMat = mat({
     // v12 参照图: 线粒体暖古铜族（实测 100,74,69）—— 高饱和青绿退役
     color: REF.mitoOuter,
@@ -1871,7 +1884,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   // v25 内膜（inner boundary membrane）: 双膜三明治读感 —— 外膜 0.4 / 膜间隙 ~0.035 / 内膜 0.365;
   //   科学: 嵴是内膜向内折叠 —— 嵴板层片缘（Rm 0.345）恰贴内膜内面, 「嵴从内膜折出」解剖学直读;
   //   剖面切缘双环 + 膜间隙暗带 = 电镜双层膜标准剪影。与外膜同 FBM 种子 → 有机轮廓相互跟踪。
-  const mitoInnerGeo = track(displaceGeometry(new THREE.CapsuleGeometry(0.365, 1.46, 12, 24), 3.1, 0.05, 17));
+  //   v62: 几何改由 mitoInnerGeos 变体池承担（弯曲同源）。
   const mitoInnerMat = mat({
     color: REF.mitoCristae,
     emissive: '#6a4a3e',
@@ -1911,28 +1924,31 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   const SHOWCASE_YAW = [0.22, 0.3, 0.15]; // 长轴沿 X 的微有机偏航（别于呆板平行）
   for (let i = 0; i < mitoCount; i++) {
     const g = new THREE.Group();
+    // v62 豆形弯曲档（外膜/内膜/基质/嵴/ATP/mtDNA 全部同源施加）
+    const kb = MITO_K[mitoKIdx(i)];
     // 外膜（透射）
-    const outer = new THREE.Mesh(mitoOuterGeo, mitoOuterMat);
+    const outer = new THREE.Mesh(mitoOuterGeos[mitoKIdx(i)], mitoOuterMat);
     outer.scale.set(1, 1, 0.82);
     // v22 剖面窗口化: 切面盘（renderOrder 96）后方的外膜剖开壳体绘制于盘后 ——
     // 剖面视图下线粒体以真 3D 剖开形态呈现（替代旧版 2D 贴图; 同高尔基 v15 手法）
     outer.renderOrder = cutaway ? 100 : 46;
     g.add(outer);
-    // 基质（随外膜缩小, 与 2.3 长度匹配）
-    const matrix = new THREE.Mesh(track(new THREE.CapsuleGeometry(0.35, 1.38, 6, 16)), mitoMatrixMat);
+    // 基质（随外膜缩小, 与 2.3 长度匹配; v62 同源弯曲）
+    const matrix = new THREE.Mesh(track(bendGeometryY(new THREE.CapsuleGeometry(0.35, 1.38, 6, 16), kb)), mitoMatrixMat);
     matrix.scale.set(1, 1, 0.82);
     matrix.renderOrder = cutaway ? 99.6 : 45; // v22 剖面窗口化（先于外膜壳绘制）
     g.add(matrix);
     // v25 内膜（inner boundary membrane）: 外膜与基质之间的独立壳体 —— 双膜 + 膜间隙;
     //   嵴板层从内膜折出（片缘 Rm 0.345 贴内膜内面 0.365）—— 教科书级剖面剪影
-    const inner = new THREE.Mesh(mitoInnerGeo, mitoInnerMat);
+    const inner = new THREE.Mesh(mitoInnerGeos[mitoKIdx(i)], mitoInnerMat);
     inner.scale.set(1, 1, 0.82);
     inner.renderOrder = cutaway ? 100.2 : 46.5; // v22 体系: 外膜壳 100 → 内膜 100.2 → 嵴 100.4
     g.add(inner);
     // v26 板层嵴: 满腔密集近垂直蛇形板层堆（16 片 perf 9, halfSpan 0.78 —— 参照图
     // 「紧密均匀填满整个内部」; 片缘贴基质壁 = 嵴连接; 胶囊端帽钳 → 端部板层顺冠面内收）
+    // v62: 嵴几何同源弯曲 kb —— 板层堆随豆形整体弯, ATP 锚点表 lamellae 亦经 bendY 同步
     const { geometry: cristaeGeo, lamellae } = cristaeLamellaeGeometry(i * 31, cristaeN, 0.345, 0.69, 0.78, perf);
-    const cristae = new THREE.Mesh(track(cristaeGeo), cristaeMat);
+    const cristae = new THREE.Mesh(track(bendGeometryY(cristaeGeo, kb)), cristaeMat);
     cristae.scale.set(1, 1, 0.82);
     cristae.renderOrder = cutaway ? 100.4 : 47; // v22 剖面窗口化（嵴板层剖开直读）
     g.add(cristae);
@@ -1952,18 +1968,21 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
           const u = (j === 0 ? -1 : 1) * (0.3 + hash01(`atpu${i}${c}${j}`) * 0.45);
           const side = (c + j) % 2 === 0 ? 1 : -1;
           const pt = cristaPoint(lm, u, side * (CRISTA_THICK * 0.5 + 0.014), (hash01(`atpz${i}${c}${j}`) - 0.5) * 1.3);
+          // v62: 弯曲后的嵴表面贴附（cristaPoint 产出直线局部系 → bendY 变换到弯曲局部系）
+          const bp = bendY(kb, pt.x, pt.y, pt.z);
           const sc = 0.8 + hash01(`atp${i}${k}`) * 0.6;
           mm.makeScale(sc, sc, sc);
-          mm.setPosition(pt.x, pt.y, pt.z);
+          mm.setPosition(bp.x, bp.y, bp.z);
           atps.setMatrixAt(k, mm);
         }
       }
-      // 余量 2 颗贴内膜内缘（boundary membrane 区亦有小密度分布 —— 两栖真实性）
+      // 余量 2 颗贴内膜内缘（boundary membrane 区亦有小密度分布 —— 两栖真实性; v62 弯曲同步）
       for (; k < atpCount; k++) {
         const ang = hash01(`atpb${i}${k}`) * Math.PI * 2;
         const yy = (hash01(`atpby${i}${k}`) - 0.5) * 1.3;
+        const bp = bendY(kb, Math.cos(ang) * 0.3, yy, Math.sin(ang) * 0.26);
         mm.makeScale(0.9, 0.9, 0.9);
-        mm.setPosition(Math.cos(ang) * 0.3, yy, Math.sin(ang) * 0.26);
+        mm.setPosition(bp.x, bp.y, bp.z);
         atps.setMatrixAt(k, mm);
       }
       atps.instanceMatrix.needsUpdate = true;
@@ -1975,13 +1994,11 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       const mdParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
       for (let d = 0; d < 3; d++) {
         const dr = 0.045 + hash01(`md${i}${d}`) * 0.03;
+        // v62: mtDNA 位点随豆形弯曲同源变换（贴弯曲后的基质壁）
+        const md = bendY(kb, (hash01(`mdx${i}${d}`) - 0.5) * 0.5, (hash01(`mdy${i}${d}`) - 0.5) * 1.1, (hash01(`mdz${i}${d}`) - 0.5) * 0.34);
         mdParts.push({
           geo: track(new THREE.SphereGeometry(dr, 6, 5)),
-          matrix: new THREE.Matrix4().setPosition(
-            (hash01(`mdx${i}${d}`) - 0.5) * 0.5,
-            (hash01(`mdy${i}${d}`) - 0.5) * 1.1,
-            (hash01(`mdz${i}${d}`) - 0.5) * 0.34,
-          ),
+          matrix: new THREE.Matrix4().setPosition(md.x, md.y, md.z),
         });
       }
       const mtdna = new THREE.Mesh(track(mergeGeoms(mdParts)), mtdnaMat);
@@ -2787,15 +2804,27 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       const bodyGeo = track(displacedSphere(0.38, 2, 3.2, 0.035, 101));
       const bodyMat = mat({
         // v12 参照图: 溶酶体暗红棕族（酸性细胞器低饱和化）
+        // v62: emissive 0.3→0.24 —— VLM 评审「发光塑料球」收敛（酸性仓的暗腔读感优先）
         color: REF.lyso,
         emissive: '#5a342e',
-        emissiveIntensity: 0.3,
+        emissiveIntensity: 0.24,
         roughness: 0.34,
         clearcoat: 0.4,
         normalMap: coatNormal,
         normalScale: 0.5,
         opacity: 0.9,
         flow: { color: REF.lysoHi, strength: 0.14, scale: 1.2, speed: 0.08, rim: 0.24 },
+      });
+      /* v62 暗腔核心（VLM 评审「完美发光球体」根治）: 每颗溶酶体腔心嵌一颗深色致密球
+       * （r×0.62, 暗红棕半透明）—— 水解酶货物的「浓稠酸性内容物」体积读感;
+       * 限制膜(亮) + 腔内容物(暗) 的双层结构直读, 替代均一发光球。 */
+      const lumenGeo = track(displacedSphere(0.24, 2, 2.6, 0.03, 107));
+      const lumenMat = mat({
+        color: '#4a2820',
+        emissive: '#381c16',
+        emissiveIntensity: 0.16,
+        roughness: 0.5,
+        opacity: 0.72,
       });
       const bodies = new THREE.InstancedMesh(bodyGeo, bodyMat, lysoN);
       // 腔内水解酶颗粒（酸性磷酸酶/组织蛋白酶等 ~60 种酸性水解酶）
@@ -2817,6 +2846,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         const mm = new THREE.Matrix4();
         const qq = new THREE.Quaternion();
         const eu = new THREE.Euler();
+        // v62 暗腔核心实例池（与限制膜同中心/同缩放 —— 腔内容物随体）
+        const lumens = new THREE.InstancedMesh(lumenGeo, lumenMat, lysoN);
         for (let i = 0; i < lysoN; i++) {
           // v6: 体内形状化采样（溶酶体在核周→近膜胞质区分布）
           const lyDir = new THREE.Vector3(
@@ -2832,8 +2863,14 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
           qq.setFromEuler(eu);
           mm.compose(centers[i], qq, new THREE.Vector3(s, s, s));
           bodies.setMatrixAt(i, mm);
+          // v62 暗腔核心（微缩 0.9 —— 内容物不贴限制膜, 膜-内容物间隙读感）
+          mm.compose(centers[i], qq, new THREE.Vector3(s * 0.9, s * 0.9, s * 0.9));
+          lumens.setMatrixAt(i, mm);
         }
         bodies.instanceMatrix.needsUpdate = true;
+        lumens.instanceMatrix.needsUpdate = true;
+        lumens.renderOrder = cutaway ? 97.85 : 46.1; // 限制膜之后、颗粒之前
+        group.add(lumens);
         bodies.renderOrder = cutaway ? 97.8 : 46; // v22 剖面窗口化（溶酶体酸性体剖开直读）
         const dir = new THREE.Vector3();
         let si = 0;
@@ -3242,21 +3279,36 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   /* ================= 脂滴（中性脂储存库 —— 肝/心肌/癌细胞） ================= */
   if (spec.lipidDroplets) {
     const ldN = perf ? 3 : 5;
+    /* v62 折射油感升级（VLM 评审「完美发光球体/像 UI 图标」根治）:
+     * ① transmission 0.5→0.66 + 厚度提升 —— 中性脂高折射率 (n≈1.45) 的「油润透光」直读;
+     * ② 内亮核 fake-SSS: 每滴内偏光侧嵌一颗暖亮小球（r×0.55, additive 低透明）——
+     *    模拟光穿入油滴后的暖色散射峰, 透射外壳下形成「腊烛芯」读感而非均一发光;
+     * ③ 卫星小滴并置: 大滴旁贴一颗 r×0.42~0.5 小滴（融合前夜叙事 —— 脂滴体内
+     *    通过融合生长的真实动力学读感）; 逐滴独立悬停锚。 */
     const ldMat = mat({
       // v12 参照图: 脂滴琥珀金族低饱和（中性脂油润感保留）
       color: REF.lipid,
-      transmission: transOn ? 0.5 : 0,
-      thickness: 0.8,
+      transmission: transOn ? 0.66 : 0,
+      thickness: 1.1,
       roughness: 0.12,
       clearcoat: 0.65,
       clearcoatRoughness: 0.18,
       emissive: '#5a421a',
-      emissiveIntensity: 0.12,
+      emissiveIntensity: 0.08,
       opacity: transOn ? 1 : 0.5,
       iridescence: 0.22,
       sheen: 0.4,
       sheenColor: REF.lipidHi,
     });
+    const ldCoreMat = track(new THREE.MeshBasicMaterial({
+      // v62 内亮核: 暖琥珀光芯（additive —— 透射外壳内的 fake 次表面散射）
+      color: '#f0c98a',
+      transparent: true,
+      opacity: 0.4 * dim,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: false,
+    }));
     let ld0 = new THREE.Vector3();
     for (let i = 0; i < ldN; i++) {
       const r = 0.3 + hash01(`ld${i}`) * 0.26;
@@ -3271,6 +3323,29 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       d.position.set(p.x, p.y, p.z);
       d.renderOrder = cutaway ? 97.6 : 46; // v22 剖面窗口化（脂滴剖开）
       group.add(d);
+      // v62 内亮核（偏主光侧 —— 左上暖白主光位下的透光读感）
+      {
+        const core = new THREE.Mesh(track(new THREE.SphereGeometry(r * 0.52, 10, 8)), ldCoreMat);
+        core.position.set(p.x - r * 0.28, p.y + r * 0.2, p.z + r * 0.12);
+        core.renderOrder = cutaway ? 97.7 : 46.2;
+        group.add(core);
+      }
+      // v62 卫星小滴（2/5 概率并置融合 —— 尺寸层次打破「等大连」读感）
+      if (i % 2 === 1) {
+        const rs = r * (0.42 + hash01(`lds${i}`) * 0.1);
+        const sd = new THREE.Mesh(track(displacedSphere(rs, 2, 2.8, rs * 0.05, 163 + i)), ldMat);
+        const sAng = hash01(`ldsa${i}`) * Math.PI * 2;
+        const sLat = (hash01(`ldsl${i}`) - 0.5) * 1.2;
+        const off = new THREE.Vector3(
+          Math.cos(sLat) * Math.cos(sAng),
+          Math.sin(sLat),
+          Math.cos(sLat) * Math.sin(sAng),
+        ).multiplyScalar(r + rs * 0.88);
+        sd.position.set(p.x + off.x, p.y + off.y, p.z + off.z);
+        sd.renderOrder = cutaway ? 97.6 : 46;
+        group.add(sd);
+        hover.push({ pos: { x: sd.position.x, y: sd.position.y, z: sd.position.z }, r: rs + 0.3, zh: '脂滴（中性脂）', latin: 'Lipid droplet', group: 'endomembrane' });
+      }
       // v21 逐颗悬停锚（旧版仅首颗 label 派生锚 —— 指到其余脂滴无响应; 旧 label 退役）
       hover.push({ pos: { x: p.x, y: p.y, z: p.z }, r: r + 0.34, zh: '脂滴（中性脂）', latin: 'Lipid droplet', group: 'endomembrane' });
       if (i === 0) ld0 = p;

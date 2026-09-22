@@ -84,6 +84,34 @@ export function displaceGeometry(geo: THREE.BufferGeometry, freq: number, amp: n
   return geo;
 }
 
+/* ============ 圆弧弯曲（v62 —— 豆形线粒体） ============ */
+
+/**
+ * 局部 Y 长轴的圆弧弯曲（点变换）—— 电镜下线粒体的香蕉/豆形轮廓
+ * @param k 曲率（rad/单位长; >0 时 +Y 端弯向 -X, C 口朝 +X; 0 = 不弯）
+ * 圆心位于 (-1/k, 0, 0), 长轴弧长保持不变（ρ = R + x 处弧长 = ρ·θ）
+ */
+export function bendY(k: number, x: number, y: number, z: number): { x: number; y: number; z: number } {
+  if (k === 0) return { x, y, z };
+  const R = 1 / k;
+  const th = y * k;
+  const rho = R + x;
+  return { x: rho * Math.cos(th) - R, y: rho * Math.sin(th), z };
+}
+
+/** 几何整体弯曲（就地修改; 弯后法线重算） */
+export function bendGeometryY(geo: THREE.BufferGeometry, k: number): THREE.BufferGeometry {
+  if (!k) return geo;
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const p = bendY(k, pos.getX(i), pos.getY(i), pos.getZ(i));
+    pos.setXYZ(i, p.x, p.y, p.z);
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+  return geo;
+}
+
 /* ============ 几何合并（减 draw call） ============ */
 
 /**
