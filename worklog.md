@@ -3740,3 +3740,54 @@ Stage Summary:
 - 下阶段建议: ①VLM 恢复后对 qa-v64 截图补视觉终审（重点: 工具条分组视觉层次/移动端
   横滚体验）②HudBar 分组可加 subtle 组标签或分隔线微调（当前纯分隔线, 视觉密度可再降）
   ③分裂演示时工具条「显示组」中 hover/labels 等在 mitosis 下语义失效的项可联动禁用
+
+---
+Task ID: 65
+Agent: 主协调 Agent (Z.ai Code)
+Task: 图鉴迁出画布 —— 用户「atlas 也迁出吧」（继 v64 HUD 迁出后, 画布内按需面板仅剩图鉴仍浮层遮挡细胞 → 三形态迁出）
+
+Work Log:
+- 现状核验: git 干净领先 2 commits（v63/v64 已在本地）; dev server 常驻 3000; v64 后画布内
+  仅存按需面板 = 目录/图鉴/分裂台/挑战卡/导览, 其中图鉴为最大浮层遮挡源（336px×72vh 右中悬浮）
+- organelle-atlas.tsx 重构: 抽取 AtlasBody 共享体（标题/搜索/筛选/47 条分组列表, 状态内聚）,
+  面板入口按 variant 三形态:
+  · drawer: motion.aside 静态流内元素（flex 兄弟）, width 0↔320 动画 + overflow-hidden,
+    满列高 + 左缘 emerald 荧光分隔线 + HudBar 同款 chrome 底色; `hidden md:block lg:hidden xl:block`
+  · sheet: 画布内底部抽屉表（<md 移动端 / lg 三栏窄中栏 —— 并排空间不足的让步形态）,
+    slide-up + grabber 拖拽暗示; `md:hidden lg:block xl:hidden`; max-h-[min(68vh,calc(100%_-_16px))]
+    —— 双重坑修复: ①68vh 在 315px 移动画布上溢出上方 268px（盖到视图头）→ % 上限锚定视口
+    ②max-h 必须挂 absolute 外层 motion.div（非定位内层 % 参照 auto 高度失效, 曾致 1747px 爆高）
+  · overlay: 全屏沉浸态保持 v60 原右中浮层逐像素不变（旧 QA 基线不动）
+- virtual-cell-3d.tsx 结构重构: 视口外包「行包装」flex 行（视口 flex-1 + 抽屉兄弟并排）;
+  全屏/lg 态抽屉不挂载 —— 单 flex-1 子节点与 v64 布局逐像素等价; 三形态挂载守卫
+  fullscreen/mitosis 分治, 共享 lab-store atlasOpen 真源（HudBar chip/引导 pill/全屏右列三入口不变）
+- 断点策略（中栏宽度实测驱动: lg 1024 时中栏仅 318px 并排不可行）:
+  <md=sheet / md–lg(768-1023 全宽中栏)=drawer / lg–xl(1024-1279 窄中栏)=sheet / xl+(≥1280)=drawer
+- i18n: hud.atlasTip 补「画布外抽屉展开, 不遮挡细胞」语义
+- 踩坑×3: ①Tailwind 动态模板类名 w-[${ATLAS_W}px] 不生成 CSS → 静态字面量 w-[320px]
+  ②agent-browser 同页测中 HMR full reload 重置 zustand（图鉴"自动关闭"假象, 复测稳定）
+  ③agent-browser viewport 需 `set viewport <w> <h>` 子命令语法
+- 【QA 实证（agent-browser DOM 几何, VLM 仍 429 限流 —— 截图存档 qa-v65/ 待补审）】
+  · 1600px 抽屉: canvas[327-883] + drawer[883-1203] 相邻 gap=0 零重叠, 画布收缩让位 ✓
+  · 1280px 边界: drawer 320 出现, canvas 236, 零重叠 ✓
+  · 1100px(lg): drawer display:none, sheet 接管且 fully-inside 视口 ✓
+  · 390px: sheet 299px 完全在画布视口内（修复后）, 画布 315px 上方 peek ✓
+  · 定位联动: 展开核仁 → 点击「在细胞中定位」无错 ✓ X 关闭 ✓ 分裂开启图鉴自动关闭 ✓
+  · 全屏: overlay 原 v60 定位（absolute right-3 top-1/2 336px）✓ ESC 退出后状态保持（dialogs 2 挂载）
+  · 内容完整性: 47 条档案/28 定位钮/搜索框/195 分组标签/zh+en 双语全绿, 零水平溢出 ✓
+  · 右栏 tab 零重叠回归（zh+en 逐对 box 检测）✓
+  · lint 零错误 / tsc src 零错误 / console 零 error / dev.log 全 200
+
+Stage Summary:
+- 用户「atlas 也迁出」闭环: 图鉴从画布内 336px×72vh 浮层（全遮细胞右半）迁为画布外右侧
+  320px 满列抽屉 —— 画布收缩让位而非覆盖, 细胞永不被图鉴遮挡; 移动端/lg 窄中栏底部抽屉表
+  最小遮挡; 全屏沉浸态原浮层不变。定位联动（locate → 相机飞行）在并排布局下即时可见
+- 架构沉淀: AtlasBody 三形态复用组件 + 行包装分层（root flex-col → 行包装 flex → 视口）,
+  浮层定位上下文仍锚视口, 全屏无抽屉时与 v64 逐像素等价
+- 产出: organelle-atlas.tsx（三形态）/ virtual-cell-3d.tsx（行包装+三挂载点）/ i18n.tsx
+  （atlasTip）/ qa-v65/ 6 张取证截图
+- 未解决/风险: ①VLM 连续两轮 429（配额窗口未恢复）—— qa-v64 + qa-v65 共 15 张截图待
+  视觉终审 ②1280px 恰好边界画布仅 236px（可接受, 关抽屉即恢复; 后续可做 xl 下 288px 窄抽屉）
+  ③目录面板（org index）仍为画布内左中浮层 —— 用户未提, 暂保持
+- 下阶段建议: ①VLM 恢复后补审截图（重点: 抽屉 chrome 质感/移动 sheet grabber）②目录面板
+  可复用行包装模式迁出（左抽屉）③worklog 历史遗留项（pathway 展示优化等）仍悬置

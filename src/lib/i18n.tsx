@@ -148,8 +148,8 @@ export const T: Record<string, Entry> = {
   /* v60 细胞器图鉴（双语百科 + 3D 定位联动） */
   'hud.atlas': { zh: '细胞器图鉴', en: 'Atlas' },
   'hud.atlasTip': {
-    zh: '细胞器百科 · 结构/功能/临床/标志物四维档案（中文/拉丁双语）· 一键在细胞中定位',
-    en: 'Organelle encyclopedia · structure / physiology / clinic / markers · locate in the cell',
+    zh: '细胞器百科 · 结构/功能/临床/标志物四维档案（中/拉丁双语）· 一键在细胞中定位 —— 画布外抽屉展开, 不遮挡细胞',
+    en: 'Organelle encyclopedia · structure / physiology / clinic / markers · locate in the cell — opens beside the canvas, never covers it',
   },
   'atlas.title': { zh: '细胞器图鉴', en: 'Organelle Atlas' },
   'atlas.subtitle': { zh: '结构 · 功能 · 临床 · 标志物', en: 'Structure · Function · Clinic · Markers' },

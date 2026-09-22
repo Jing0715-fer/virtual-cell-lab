@@ -1,6 +1,13 @@
 'use client';
 
-/* ============ v60 细胞器图鉴面板（Organelle Atlas panel） ============
+/* ============ v60 细胞器图鉴面板（Organelle Atlas panel）→ v65 三形态 ============
+ * v65 图鉴迁出画布（用户需求: 「atlas 也迁出」—— 与 v64 HUD 迁出同思路, 画布零遮挡）:
+ *   · drawer（xl+ 桌面 / md–lg 全宽中栏）: 画布右侧外挂抽屉 —— 与视口 flex 并排,
+ *     画布收缩让位而非覆盖; 满列高度, 档案检索与 3D 定位联动左右并览
+ *   · sheet（<md 移动端 / lg 三栏窄中栏）: 画布过窄无法并排 → 底部抽屉表,
+ *     in-viewport 最小遮挡（移动端标准范式）
+ *   · overlay（全屏沉浸态）: 保持 v60 原右中浮层 —— 全屏无画布外空间, 沉浸布局不变
+ * 三形态由宿主按 fullscreen/断点挂载 + CSS 显隐协同, 共享 lab-store atlasOpen 真源。
  * 双语四维百科（结构/功能/临床/标志物）+ 与 3D 悬停锚点（HoverTarget.latin）联动定位:
  *   「在细胞中定位」→ 宿主 locateTarget() → FlyToController 1.2s 相机飞行 + 脉冲高亮。
  * 未在当前细胞类型呈现的结构以禁用态保留（学习完整性优先 —— 图鉴独立于 3D 资产存在）。
@@ -15,9 +22,14 @@ import {
   ATLAS_GROUP_ORDER,
   ATLAS_GROUP_LABEL,
   type OrgAtlasEntry,
-  type AtlasGroup,
 } from '@/data/organelle-atlas';
 import type { HoverTarget } from './hover-labels';
+
+/** 图鉴呈现形态（宿主按全屏态/断点选择） */
+export type AtlasVariant = 'drawer' | 'sheet' | 'overlay';
+
+/** 抽屉固定宽（px）—— 外层 width 动画目标与内层固定宽保持同值（避免动画期文字重排） */
+const ATLAS_W = 320;
 
 const ACCENT_DOT: Record<OrgAtlasEntry['accent'], string> = {
   emerald: 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]',
@@ -88,7 +100,7 @@ function AtlasItem({
           {lang === 'zh' ? entry.zh : entry.latin}
         </span>
         {lang === 'zh' && <span className="truncate text-[7.5px] italic text-slate-600">{entry.latin}</span>}
-        {/* 可用性徽标: 在场 ✓ / 缺席 ⊘ */}
+        {/* 可用性徽标: 在场 ● / 缺席 ○ */}
         <span
           className={`ml-auto shrink-0 font-mono text-[7px] ${present ? 'text-emerald-400/80' : 'text-slate-600'}`}
           title={present ? t('atlas.locate') : t('atlas.absent')}
@@ -134,13 +146,18 @@ function AtlasItem({
   );
 }
 
-export function OrganelleAtlasPanel({
-  open,
+/* ============ 共享面板体（标题/搜索/筛选/分组列表 —— 三形态复用） ============
+ * 外壳形态化:
+ *   drawer —— 画布外 chrome: 满列高 + 固定宽（供外层 width 动画裁切）+ 左缘荧光分隔线 + 工具条同款底色
+ *   sheet  —— 底部抽屉表: 圆角浮层 + 68vh 限高 + 顶部 grabber（移动端拖拽语义暗示）
+ *   overlay —— 全屏沉浸态原 v60 浮层: 72vh 限高 */
+function AtlasBody({
+  variant,
   onClose,
   hoverTargets,
   onLocate,
 }: {
-  open: boolean;
+  variant: AtlasVariant;
   onClose: () => void;
   /** 当前细胞类型的 3D 悬停锚点全集（定位联动 + 在场判定） */
   hoverTargets: HoverTarget[];
@@ -151,8 +168,6 @@ export function OrganelleAtlasPanel({
   const [locatedLatin, setLocatedLatin] = useState('');
   /* v61 在场筛选: 全部 / 仅在场（当前细胞类型呈现的） —— 特化结构续编后 47 条全量过长 */
   const [presenceFilter, setPresenceFilter] = useState<'all' | 'present'>('all');
-  // 无障碍: 用户系统偏好减动效时退化为纯淡入（无位移/缩放）
-  const reduceMotion = useReducedMotion();
 
   // latin → 首个悬停锚点（同名多锚点取其一即可 —— 飞行目标等价）
   const targetByLatin = useMemo(() => {
@@ -182,112 +197,195 @@ export function OrganelleAtlasPanel({
     window.setTimeout(() => setLocatedLatin((cur) => (cur === ht.latin ? '' : cur)), 1500);
   };
 
+  /* 形态化外壳（Tailwind 需静态字面量类名 —— 抽屉宽与 ATLAS_W 手工保持同值 320px） */
+  const shell =
+    variant === 'drawer'
+      ? 'flex h-full w-[320px] flex-col border-l border-emerald-500/20 bg-[#04101c] shadow-[-10px_0_28px_rgba(0,0,0,0.4)]'
+      : variant === 'sheet'
+        ? 'flex h-full w-full flex-col rounded-xl border border-emerald-500/25 bg-slate-950/92 shadow-[0_-10px_36px_rgba(0,0,0,0.55)] backdrop-blur-lg'
+        : 'flex max-h-[72vh] flex-col rounded-xl border border-emerald-500/25 bg-slate-950/90 shadow-[0_8px_32px_rgba(0,0,0,0.45)] backdrop-blur-lg';
+
+  return (
+    <div className={shell}>
+      {variant === 'sheet' && (
+        /* grabber: 底部抽屉标准拖拽暗示（纯装饰, 无拖拽行为 —— 关闭经 X / 图鉴 chip） */
+        <div className="mx-auto mb-0.5 mt-1.5 h-1 w-9 shrink-0 rounded-full bg-white/15" aria-hidden />
+      )}
+      {/* 标题行 */}
+      <div className="flex items-center gap-1.5 border-b border-white/8 px-2.5 py-2">
+        <BookMarked className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+        <span className="text-[11px] font-semibold text-slate-100">{t('atlas.title')}</span>
+        <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-px font-mono text-[8px] leading-tight text-emerald-300">
+          {ORG_ATLAS.length} {t('atlas.entries')}
+        </span>
+        <button
+          onClick={onClose}
+          aria-label={t('atlas.title')}
+          className="ml-auto rounded-md border border-white/10 bg-white/5 p-1 text-slate-500 transition hover:text-rose-300"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+      {/* 搜索框 */}
+      <div className="border-b border-white/8 px-2.5 py-1.5">
+        <div className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/30 px-2 py-1 focus-within:border-emerald-400/40">
+          <Search className="h-3 w-3 shrink-0 text-slate-500" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t('atlas.search')}
+            className="w-full bg-transparent text-[9.5px] text-slate-200 placeholder:text-slate-600 focus:outline-none"
+            aria-label={t('atlas.search')}
+          />
+          {query && (
+            <button
+              onClick={() => setQuery('')}
+              aria-label="clear"
+              className="shrink-0 text-slate-600 transition hover:text-slate-300"
+            >
+              <X className="h-2.5 w-2.5" />
+            </button>
+          )}
+        </div>
+        <p className="mt-1 flex items-center gap-1 text-[8px] text-slate-500">
+          <span className="font-mono text-emerald-400/70">{presentCount}</span>
+          <span>· {t('atlas.subtitle')}</span>
+          {/* v61 在场筛选 chips（全部 / 仅在场） */}
+          <span className="ml-auto flex items-center gap-1">
+            {(['all', 'present'] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setPresenceFilter(f)}
+                aria-pressed={presenceFilter === f}
+                className={`rounded-full border px-1.5 py-px text-[8px] transition ${
+                  presenceFilter === f
+                    ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-300'
+                    : 'border-white/10 bg-white/[0.03] text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                {t(f === 'all' ? 'atlas.filterAll' : 'atlas.filterPresent')}
+              </button>
+            ))}
+          </span>
+        </p>
+      </div>
+      {/* 分组条目列表（drawer 满列高 → flex-1 随视口伸缩） */}
+      <div className="lab-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
+        {filtered.length === 0 && (
+          <p className="px-2 py-6 text-center text-[9.5px] text-slate-600">{t('atlas.noResults')}</p>
+        )}
+        {ATLAS_GROUP_ORDER.map((gk) => {
+          const items = filtered.filter((e) => e.group === gk);
+          if (items.length === 0) return null;
+          /* v61 分组在场计数徽章（如 3/5 —— 换细胞类型即时感知「哪些组在场」） */
+          const gkPresent = items.filter((e) => targetByLatin.has(e.latin)).length;
+          return (
+            <div key={gk}>
+              <div className="mb-1 flex items-center gap-1.5 px-1 text-[8px] font-semibold uppercase tracking-wider text-slate-500">
+                <span className="truncate">{ATLAS_GROUP_LABEL[gk][lang]}</span>
+                <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.03] px-1 py-px font-mono text-[7px] font-normal normal-case tracking-normal text-slate-500">
+                  <span className={gkPresent > 0 ? 'text-emerald-400/80' : ''}>{gkPresent}</span>/{items.length}
+                </span>
+              </div>
+              <div className="space-y-0.5">
+                {items.map((e) => (
+                  <AtlasItem
+                    key={e.latin}
+                    entry={e}
+                    present={targetByLatin.get(e.latin)}
+                    onLocate={handleLocate}
+                    located={locatedLatin === e.latin}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============ 面板三形态入口 ============ */
+export function OrganelleAtlasPanel({
+  open,
+  onClose,
+  hoverTargets,
+  onLocate,
+  variant = 'overlay',
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** 当前细胞类型的 3D 悬停锚点全集（定位联动 + 在场判定） */
+  hoverTargets: HoverTarget[];
+  onLocate: (t: HoverTarget) => void;
+  /** v65 呈现形态: drawer=画布外右侧抽屉 / sheet=画布内底部抽屉表 / overlay=全屏沉浸浮层 */
+  variant?: AtlasVariant;
+}) {
+  const { t } = useLang();
+  const label = t('atlas.title');
+  // 无障碍: 用户系统偏好减动效时退化为纯淡入（无位移/缩放/宽度）
+  const reduceMotion = useReducedMotion();
+
+  if (variant === 'drawer') {
+    /* 画布外右侧抽屉: 与视口 flex 并排的静态流内元素（非 absolute 浮层）—— 画布收缩让位。
+     * width 0↔ATLAS_W 动画 + overflow-hidden: 内容固定宽不重排, 画布随每帧宽度平滑伸缩。 */
+    return (
+      <AnimatePresence>
+        {open && (
+          <motion.aside
+            role="dialog"
+            aria-label={label}
+            initial={reduceMotion ? { opacity: 0 } : { width: 0, opacity: 0 }}
+            animate={reduceMotion ? { opacity: 1 } : { width: ATLAS_W, opacity: 1 }}
+            exit={reduceMotion ? { opacity: 0 } : { width: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: [0.22, 0.61, 0.36, 1] }}
+            className="hidden shrink-0 overflow-hidden md:block lg:hidden xl:block"
+          >
+            <AtlasBody variant="drawer" onClose={onClose} hoverTargets={hoverTargets} onLocate={onLocate} />
+          </motion.aside>
+        )}
+      </AnimatePresence>
+    );
+  }
+
+  if (variant === 'sheet') {
+    /* 画布内底部抽屉表（<md 移动端 / lg 三栏窄中栏 —— 并排空间不足的让步形态）:
+     * 仅占画布底部, 细胞上半区仍可视 */
+    return (
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            role="dialog"
+            aria-label={label}
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 28 }}
+            animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 28 }}
+            transition={{ duration: 0.28, ease: [0.22, 0.61, 0.36, 1] }}
+            className="absolute inset-x-2 bottom-2 z-20 flex max-h-[min(68vh,calc(100%_-_16px))] flex-col md:hidden lg:block xl:hidden"
+          >
+            <AtlasBody variant="sheet" onClose={onClose} hoverTargets={hoverTargets} onLocate={onLocate} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    );
+  }
+
+  /* overlay —— 全屏沉浸态原 v60 右中浮层（全屏无画布外空间; 布局不变保持旧 QA 基线） */
   return (
     <AnimatePresence>
       {open && (
-    <motion.div
-      role="dialog"
-      aria-label={t('atlas.title')}
-      initial={reduceMotion ? { opacity: 0, y: '-50%' } : { opacity: 0, x: 18, scale: 0.98, y: '-50%' }}
-      animate={reduceMotion ? { opacity: 1, y: '-50%' } : { opacity: 1, x: 0, scale: 1, y: '-50%' }}
-      exit={reduceMotion ? { opacity: 0, y: '-50%' } : { opacity: 0, x: 18, scale: 0.98, y: '-50%' }}
-      transition={{ duration: 0.26, ease: [0.22, 0.61, 0.36, 1] }}
-      className="absolute right-3 top-1/2 z-20 w-[min(92vw,336px)]"
-    >
-      <div className="flex max-h-[72vh] flex-col rounded-xl border border-emerald-500/25 bg-slate-950/90 shadow-[0_8px_32px_rgba(0,0,0,0.45)] backdrop-blur-lg">
-        {/* 标题行 */}
-        <div className="flex items-center gap-1.5 border-b border-white/8 px-2.5 py-2">
-          <BookMarked className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
-          <span className="text-[11px] font-semibold text-slate-100">{t('atlas.title')}</span>
-          <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-px font-mono text-[8px] leading-tight text-emerald-300">
-            {ORG_ATLAS.length} {t('atlas.entries')}
-          </span>
-          <button
-            onClick={onClose}
-            aria-label={t('atlas.title')}
-            className="ml-auto rounded-md border border-white/10 bg-white/5 p-1 text-slate-500 transition hover:text-rose-300"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        </div>
-        {/* 搜索框 */}
-        <div className="border-b border-white/8 px-2.5 py-1.5">
-          <div className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/30 px-2 py-1 focus-within:border-emerald-400/40">
-            <Search className="h-3 w-3 shrink-0 text-slate-500" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t('atlas.search')}
-              className="w-full bg-transparent text-[9.5px] text-slate-200 placeholder:text-slate-600 focus:outline-none"
-              aria-label={t('atlas.search')}
-            />
-            {query && (
-              <button
-                onClick={() => setQuery('')}
-                aria-label="clear"
-                className="shrink-0 text-slate-600 transition hover:text-slate-300"
-              >
-                <X className="h-2.5 w-2.5" />
-              </button>
-            )}
-          </div>
-          <p className="mt-1 flex items-center gap-1 text-[8px] text-slate-500">
-            <span className="font-mono text-emerald-400/70">{presentCount}</span>
-            <span>· {t('atlas.subtitle')}</span>
-            {/* v61 在场筛选 chips（全部 / 仅在场） */}
-            <span className="ml-auto flex items-center gap-1">
-              {(['all', 'present'] as const).map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setPresenceFilter(f)}
-                  aria-pressed={presenceFilter === f}
-                  className={`rounded-full border px-1.5 py-px text-[8px] transition ${
-                    presenceFilter === f
-                      ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-300'
-                      : 'border-white/10 bg-white/[0.03] text-slate-500 hover:text-slate-300'
-                  }`}
-                >
-                  {t(f === 'all' ? 'atlas.filterAll' : 'atlas.filterPresent')}
-                </button>
-              ))}
-            </span>
-          </p>
-        </div>
-        {/* 分组条目列表 */}
-        <div className="lab-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
-          {filtered.length === 0 && (
-            <p className="px-2 py-6 text-center text-[9.5px] text-slate-600">{t('atlas.noResults')}</p>
-          )}
-          {ATLAS_GROUP_ORDER.map((gk) => {
-            const items = filtered.filter((e) => e.group === gk);
-            if (items.length === 0) return null;
-            /* v61 分组在场计数徽章（如 3/5 —— 换细胞类型即时感知「哪些组在场」） */
-            const gkPresent = items.filter((e) => targetByLatin.has(e.latin)).length;
-            return (
-              <div key={gk}>
-                <div className="mb-1 flex items-center gap-1.5 px-1 text-[8px] font-semibold uppercase tracking-wider text-slate-500">
-                  <span className="truncate">{ATLAS_GROUP_LABEL[gk][lang]}</span>
-                  <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.03] px-1 py-px font-mono text-[7px] font-normal normal-case tracking-normal text-slate-500">
-                    <span className={gkPresent > 0 ? 'text-emerald-400/80' : ''}>{gkPresent}</span>/{items.length}
-                  </span>
-                </div>
-                <div className="space-y-0.5">
-                  {items.map((e) => (
-                    <AtlasItem
-                      key={e.latin}
-                      entry={e}
-                      present={targetByLatin.get(e.latin)}
-                      onLocate={handleLocate}
-                      located={locatedLatin === e.latin}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </motion.div>
+        <motion.div
+          role="dialog"
+          aria-label={label}
+          initial={reduceMotion ? { opacity: 0, y: '-50%' } : { opacity: 0, x: 18, scale: 0.98, y: '-50%' }}
+          animate={reduceMotion ? { opacity: 1, y: '-50%' } : { opacity: 1, x: 0, scale: 1, y: '-50%' }}
+          exit={reduceMotion ? { opacity: 0, y: '-50%' } : { opacity: 0, x: 18, scale: 0.98, y: '-50%' }}
+          transition={{ duration: 0.26, ease: [0.22, 0.61, 0.36, 1] }}
+          className="absolute right-3 top-1/2 z-20 w-[min(92vw,336px)]"
+        >
+          <AtlasBody variant="overlay" onClose={onClose} hoverTargets={hoverTargets} onLocate={onLocate} />
+        </motion.div>
       )}
     </AnimatePresence>
   );

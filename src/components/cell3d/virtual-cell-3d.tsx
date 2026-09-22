@@ -1362,6 +1362,10 @@ export function VirtualCell3D() {
         </div>
       )}
 
+      {/* v65 行包装: 视口 + 画布外图鉴抽屉并排（用户「atlas 也迁出」—— 画布零遮挡）
+          · xl+ / md–lg: 抽屉在视口右侧（flex 兄弟节点）, 画布收缩让位而非覆盖
+          · 全屏 / lg 窄中栏: 抽屉不挂载 —— 单 flex-1 子节点, 布局与 v64 逐像素等价 */}
+      <div className="flex min-h-0 flex-1">
       {/* 3D 画布视口（flex-1 —— 常驻 HUD 已上移画布外, 视口内仅保留按需面板与瞬态浮层） */}
       <div className="relative min-h-0 flex-1">
       {/* 3D 画布（错误边界包裹: WebGL 崩溃时降级为提示卡 + 2D 切面回退, 不掀翻整页） */}
@@ -1806,9 +1810,21 @@ export function VirtualCell3D() {
         </div>
       )}
 
-      {/* v60 右中: 细胞器图鉴面板（双语四维百科 + 「在细胞中定位」联动相机飞行与脉冲高亮） */}
-      {!mitosis && (
+      {/* v60→v65 图鉴迁出画布（用户「atlas 也迁出」）: 桌面抽屉挂画布外（视口兄弟节点）;
+          移动端/lg 窄中栏以底部抽屉表呈现（in-viewport 最小遮挡）; 全屏沉浸态保持原右中浮层
+          —— 三形态共享 atlasOpen 真源与定位联动, CSS 断点协同互斥显隐 */}
+      {fullscreen && !mitosis && (
         <OrganelleAtlasPanel
+          variant="overlay"
+          open={atlasOpen}
+          onClose={() => setAtlasOpen(false)}
+          hoverTargets={hoverTargets}
+          onLocate={locateTarget}
+        />
+      )}
+      {!fullscreen && !mitosis && (
+        <OrganelleAtlasPanel
+          variant="sheet"
           open={atlasOpen}
           onClose={() => setAtlasOpen(false)}
           hoverTargets={hoverTargets}
@@ -2389,6 +2405,20 @@ export function VirtualCell3D() {
       </AnimatePresence>
       </div>
       {/* /3D 画布视口 */}
+
+      {/* v65 画布外右侧图鉴抽屉（xl+ 与 md–lg 全宽中栏）: 满列高度与画布并排,
+          档案检索与「在细胞中定位」飞行联动左右并览 —— 画布收缩让位, 细胞永不被覆盖 */}
+      {!fullscreen && !mitosis && (
+        <OrganelleAtlasPanel
+          variant="drawer"
+          open={atlasOpen}
+          onClose={() => setAtlasOpen(false)}
+          hoverTargets={hoverTargets}
+          onLocate={locateTarget}
+        />
+      )}
+      </div>
+      {/* /行包装（视口 + 图鉴抽屉） */}
     </div>
   );
 }
