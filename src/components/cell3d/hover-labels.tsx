@@ -55,6 +55,10 @@ export interface HoverTarget {
   refId?: string;
   /** v23 副题行（信号边源/靶分子对等补充信息 —— 悬停卡 latin 副题下渲染） */
   note?: string;
+  /** v63 定位特写视距（世界单位）—— 微小结构（桥粒/微簇/扣结等）在默认 6.5 视距下
+   *  成不可见斑点; 定位套环已锚到本体, 视距收紧让「定位后看得见」闭环。缺省回退
+   *  max(6.5, r·3.2)。 */
+  fly?: number;
 }
 
 export type HoverGroupKey = 'nuclear' | 'endomembrane' | 'energy' | 'cytoskeleton' | 'surface' | 'specialized';

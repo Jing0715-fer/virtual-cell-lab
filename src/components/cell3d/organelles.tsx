@@ -3821,7 +3821,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     inst.instanceMatrix.needsUpdate = true;
     inst.renderOrder = 60;
     group.add(inst);
-    const lp = sph(R * 1.32, 1.3, 0.5);
+    // v63 锚点归位: 旧位 R·1.32 悬在刷状缘尖端上方空域（绒毛胶囊带 f≈1.0-1.17）→
+    // 落位绒毛带中程（顶端极性采样下 lat 1.15 为高密度区, 套环恒套住绒毛簇）
+    const lp = sph(R * 1.09, 1.15, 0.5);
     labels.push({ pos: lp, zh: '微绒毛（刷状缘）', latin: 'Microvilli' });
   }
 
@@ -3838,7 +3840,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     ring.position.y = tR * tDir.y;
     ring.renderOrder = 62;
     group.add(ring);
-    labels.push({ pos: { x: ringR * 1.12, y: ring.position.y + 0.9, z: ringR * 0.35 }, zh: '紧密连接（封闭索）', latin: 'Tight junction' });
+    // v63 锚点归位: 旧位 (ringR·1.12, +0.9) 悬在封闭索环外上方空域 → 落位环本体
+    // （θ=0.85 取前右象限弧段, +0.12 略高于管顶避免套环与环面重叠遮挡）
+    labels.push({ pos: { x: ringR * Math.cos(0.85), y: ring.position.y + 0.12, z: ringR * Math.sin(0.85) }, zh: '紧密连接（封闭索）', latin: 'Tight junction' });
   }
 
   if (spec.collagen) {
@@ -3853,6 +3857,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       sheen: 0.8,
       sheenColor: '#fde68a',
     });
+    // v63: 纤维曲线引用（锚点归位用 —— 定位套环要落在纤维本体上）
+    const coCurves: THREE.CatmullRomCurve3[] = [];
     for (let i = 0; i < 7; i++) {
       const lat = (hash01(`co${i}`) > 0.5 ? 1 : -1) * (0.55 + hash01(`co${i}`, 3) * 0.6);
       const lon = hash01(`co${i}`, 5) * Math.PI * 2;
@@ -3868,11 +3874,26 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         const coR = cellSurf(coDir, R, SHAPE) + 0.3 + t * 0.72 * R;
         pts.push(new THREE.Vector3(coDir.x * coR, coDir.y * coR, coDir.z * coR));
       }
-      const fiber = new THREE.Mesh(track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 0.078, 9)), m5);
+      const coCurve = new THREE.CatmullRomCurve3(pts);
+      const fiber = new THREE.Mesh(track(new THREE.TubeGeometry(coCurve, 40, 0.078, 9)), m5);
       fiber.renderOrder = 62;
       group.add(fiber);
+      coCurves.push(coCurve);
     }
-    labels.push({ pos: sph(R * 1.66, 0.95, 3.6), zh: '胶原纤维（I 型 D-带）', latin: 'Collagen fiber' });
+    // v63 锚点归位: 旧固定球坐标 (R·1.66, 0.95, 3.6) 与 7 条随机走向纤维无交集（悬空）→
+    // 新锚 = 朝向默认相机 (+x/+z) 的纤维中段本体上（D-带横纹直读位）
+    let coPos = sph(R * 1.3, 0.95, 3.6);
+    {
+      let best = -Infinity;
+      for (const cc of coCurves) {
+        const p = cc.getPoint(0.6);
+        if (p.x + p.z > best) {
+          best = p.x + p.z;
+          coPos = { x: p.x, y: p.y, z: p.z };
+        }
+      }
+    }
+    labels.push({ pos: coPos, zh: '胶原纤维（I 型 D-带）', latin: 'Collagen fiber' });
   }
 
   if (spec.blebs) {
@@ -3885,6 +3906,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       opacity: transOn ? 1 : 0.35,
       roughness: 0.35,
     });
+    // v63: 芽体中心引用（锚点归位用）
+    const blebPos: THREE.Vector3[] = [];
     for (let i = 0; i < 9; i++) {
       const r = 0.26 + hash01(`bb${i}`) * 0.3;
       const dir = new THREE.Vector3(0, 0, 1).setFromSphericalCoords(1, Math.acos((hash01(`bb${i}`, 3) - 0.5) * 2.6), hash01(`bb${i}`, 5) * Math.PI * 2);
@@ -3893,8 +3916,21 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       b.position.set(dir.x * rr, dir.y * rr, dir.z * rr);
       b.renderOrder = 62;
       group.add(b);
+      blebPos.push(b.position.clone());
     }
-    labels.push({ pos: sph(R * 1.36, -0.9, 5.2), zh: '膜出芽（侵袭表型）', latin: 'Membrane blebbing' });
+    // v63 锚点归位: 旧位 R·1.36 越过全部芽体外表（芽心 ≈ 膜面 -0.1, 芽半径 ≤0.56）→
+    // 新锚 = 朝向默认相机的芽体中心（套环直接套住该芽本体）
+    let blPos = sph(R * 1.36, -0.9, 5.2);
+    {
+      let best = -Infinity;
+      for (const p of blebPos) {
+        if (p.x + p.z > best) {
+          best = p.x + p.z;
+          blPos = { x: p.x, y: p.y, z: p.z };
+        }
+      }
+    }
+    labels.push({ pos: blPos, zh: '膜出芽（侵袭表型）', latin: 'Membrane blebbing' });
   }
 
   if (spec.neurites) {
@@ -3936,11 +3972,15 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       seg.renderOrder = 63;
       group.add(seg);
     }
-    labels.push({ pos: curve.getPoint(0.66).clone().multiplyScalar(1.2), zh: '髓鞘轴突（郎飞氏结）', latin: 'Myelinated axon' });
+    // v63 锚点归位: 旧位 ×1.2 径向缩放把锚点推离轴突本体 ~1.5 单位（悬空）→
+    // t=0.66 恰为第 3-4 节髓鞘 (0.585/0.72) 之间的郎飞氏结裸轴区 —— 教学点位本尊
+    labels.push({ pos: curve.getPoint(0.66).clone(), zh: '髓鞘轴突（郎飞氏结）', latin: 'Myelinated axon' });
     // 树突 + 棘突
     const spineGeo = track(new THREE.SphereGeometry(0.055, 5, 5));
     const spineMat = track(new THREE.MeshStandardMaterial({ color: '#5eead4', emissive: '#0d9488', emissiveIntensity: 0.4 * dim, transparent: true, opacity: 0.7 * dim, depthWrite: false }));
     const spinePts: THREE.Vector3[] = [];
+    /** v63: 树突曲线引用（锚点归位用 —— d=3 走向前右象限 lon≈0.1, 默认相机方位直读） */
+    const dendCurves: THREE.CatmullRomCurve3[] = [];
     for (let d = 0; d < 4; d++) {
       const lat = -0.85 + d * 0.3;
       const lon = 2.2 + d * 1.4;
@@ -3950,11 +3990,13 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         const p = sphShape(0.96 + t * 0.36, lat + t * 0.1, lon + Math.sin(t * 3 + d) * 0.15);
         dpts.push(new THREE.Vector3(p.x, p.y, p.z));
       }
-      const dend = new THREE.Mesh(track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(dpts), 24, 0.16, 9)), axonMat);
+      const dCurve = new THREE.CatmullRomCurve3(dpts);
+      const dend = new THREE.Mesh(track(new THREE.TubeGeometry(dCurve, 24, 0.16, 9)), axonMat);
       dend.renderOrder = 62;
       group.add(dend);
+      dendCurves.push(dCurve);
       for (let s = 0; s < 7; s++) {
-        spinePts.push(new THREE.CatmullRomCurve3(dpts).getPoint(0.15 + s * 0.12).multiplyScalar(1.06));
+        spinePts.push(dCurve.getPoint(0.15 + s * 0.12).multiplyScalar(1.06));
       }
     }
     const spines = new THREE.InstancedMesh(spineGeo, spineMat, spinePts.length);
@@ -3970,7 +4012,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       spines.renderOrder = 62;
     }
     group.add(spines);
-    labels.push({ pos: sph(R * 1.32, -0.9, 2.4), zh: '基底树突（棘突）', latin: 'Basal dendrite' });
+    // v63 锚点归位: 旧固定球坐标与 4 条树突曲线无交（悬空）→ 新锚 = 前向树突 d=3
+    // 中段管本体上（t=0.7 处, 周旁棘突簇同屏）
+    labels.push({ pos: dendCurves[3].getPoint(0.7).clone(), zh: '基底树突（棘突）', latin: 'Basal dendrite' });
 
     if (spec.synapticBoutons) {
       // 突触扣结: 轴突末端扣结 + 结旁 en-passant 扣结（突触囊泡簇 + 致密芯囊泡 + 扣结内线粒体）
@@ -4039,7 +4083,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         if (side.lengthSq() < 0.01) side.set(1, 0, 0);
         mkBouton(bp.clone().addScaledVector(side, 0.52), bt, 0.85, `ep${t}`);
       }
-      labels.push({ pos: endP.clone().addScaledVector(endT, 1.0), zh: '突触扣结（囊泡释放）', latin: 'Synaptic bouton' });
+      // v63 锚点归位: 旧位 endT·1.0 悬在末端扣结外 0.86 → 新锚 = 扣结本体中心
+      // （与 mkBouton('end') 同位 —— 套环套住囊泡簇+致密芯囊泡+扣结内线粒体全套）
+      labels.push({ pos: endP.clone().addScaledVector(endT, 0.14), zh: '突触扣结（囊泡释放）', latin: 'Synaptic bouton' });
     }
   }
 
@@ -4061,12 +4107,15 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       new THREE.Vector3(-0.5, 0.62, 0.6),
       new THREE.Vector3(-0.3, 0.45, -0.85),
     ];
+    /** v63: 顶丛分支曲线引用（锚点归位用） */
+    let tuftPos: THREE.Vector3 | null = null;
     branchDirs.forEach((bd, bi) => {
       const bdN = bd.clone().normalize();
       const start = trunkPts[2].clone();
       const end = start.clone().addScaledVector(bdN, R * 0.33);
       const ctrl = start.clone().lerp(end, 0.55).add(new THREE.Vector3(0, R * 0.09, 0));
-      const br = new THREE.Mesh(track(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(start, ctrl, end), 12, 0.085 - bi * 0.008, 7)), tuftMat);
+      const bCurve = new THREE.QuadraticBezierCurve3(start, ctrl, end);
+      const br = new THREE.Mesh(track(new THREE.TubeGeometry(bCurve, 12, 0.085 - bi * 0.008, 7)), tuftMat);
       br.renderOrder = 62;
       group.add(br);
       // 丛末梢小棘（棘突剪影）
@@ -4079,8 +4128,10 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         tip.renderOrder = 62;
         group.add(tip);
       }
+      if (bi === 0) tuftPos = bCurve.getPoint(0.62);
     });
-    labels.push({ pos: { x: -0.3, y: apexR * 1.62, z: -0.4 }, zh: '顶端树突丛', latin: 'Apical tuft' });
+    // v63 锚点归位: 旧手调坐标悬在丛枝旁空域 → 新锚 = 分支 0（前右向）曲线中段本体
+    labels.push({ pos: tuftPos ?? { x: -0.3, y: apexR * 1.55, z: -0.4 }, zh: '顶端树突丛', latin: 'Apical tuft' });
   }
 
   if (spec.striated) {
@@ -4175,7 +4226,9 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         group.add(gap);
       }
     }
-    labels.push({ pos: { x: xEnd + 0.32, y: R * 0.5, z: 0 }, zh: '闰盘（缝隙连接）', latin: 'Intercalated disc' });
+    // v63 锚点归位: 旧位 (xEnd+0.32, 0.5R) 悬在最大盘缘外上方 → 新锚 = +x 端主盘面内
+    // （si=0 盘半径 0.5R, 取盘内 (0.3R, 0.16R) 处与盘面同 x 平面 —— 套环套住阶梯盘面）
+    labels.push({ pos: { x: xEnd, y: R * 0.3, z: R * 0.16 }, zh: '闰盘（缝隙连接）', latin: 'Intercalated disc' });
   }
 
   if (spec.stressFibers) {
@@ -4248,15 +4301,19 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
   if (spec.basalLamina) {
     // 基底膜: 底部薄层基板（laminin/IV 型胶原网剪影, 微弱发光纹理盘）
     const bDir = new THREE.Vector3(0, -1, 0);
-    const bR = cellSurf(bDir, R, SHAPE, -0.3);
+    // v63 双重归位: ①盘体旧位 +bR-0.05 挂在细胞顶端（注释却写「底部」—— 朝向符号丢失）
+    //   → 移到基底面（-y）; ②基板属胞外基质（laminin/IV 型胶原网附于膜外）→ offset
+    //   -0.3（胞内）改 +0.26 贴膜外置（与胶原纤维膜外锚定惯例一致）
+    const bR = cellSurf(bDir, R, SHAPE, 0.26);
     const disc = new THREE.Mesh(
       track(new THREE.CylinderGeometry(R * 0.6, R * 0.6, 0.075, 36)),
       mat({ color: '#e2e8f0', emissive: '#94a3b8', emissiveIntensity: 0.22, roughness: 0.55, opacity: 0.5, normalMap: coatNormal, normalScale: 0.9 }),
     );
-    disc.position.y = bR - 0.05;
+    disc.position.y = -bR - 0.05;
     disc.renderOrder = 63;
     group.add(disc);
-    labels.push({ pos: { x: R * 0.55, y: bR - 0.3, z: 0 }, zh: '基底膜（基板）', latin: 'Basal lamina' });
+    // v63 锚点归位: 旧锚悬在盘下空隙（盘-膜夹层）→ 新锚 = 盘面前右象限本体上
+    labels.push({ pos: { x: R * 0.42, y: -bR - 0.05, z: R * 0.18 }, zh: '基底膜（基板）', latin: 'Basal lamina' });
   }
 
   if (spec.bileCanaliculus) {
@@ -4351,6 +4408,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     };
     const ttParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
     const jsrParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
+    /** v63: T 小管锚点（k=1 管朝顶前 +z, 站位取前 1/3 象限 —— 默认相机方位直读） */
+    let ttPos: { x: number; y: number; z: number } | null = null;
     for (let x0 = -xMax; x0 <= xMax; x0 += stationStep) {
       // 该站位处真实横截面半径（旋转体求解; 超椭球杆端自动收缩）
       const rr = shapeCrossRadius(SHAPE, x0, R) * 0.93;
@@ -4360,6 +4419,10 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         const th = (k / perStation) * Math.PI * 2 + hash01(`tt${stationSeed}`) * 0.8;
         const sy = Math.cos(th) * rr;
         const sz = Math.sin(th) * rr * 1.06;
+        // v63 锚点候选: 内陷中程深度（管体 0.34→0.98 径向跨度的中点）
+        if (!ttPos && k === 1 && x0 >= xMax * 0.25) {
+          ttPos = { x: x0, y: sy * 0.66, z: sz * 0.66 };
+        }
         // 横管: 肌膜内陷 → 向心深入（0.62 深度比）
         ttParts.push(capsuleBetween(
           new THREE.Vector3(x0, sy * 0.98, sz * 0.98),
@@ -4381,6 +4444,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const lsrParts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [];
     const nL = perf ? 6 : 10;
     const rodMid = shapeCrossRadius(SHAPE, 0, R);
+    /** v63: 纵行 SR 管锚点（i=2 走向 +z 前侧面, fpts[1] 为管长中点） */
+    let srPos: { x: number; y: number; z: number } | null = null;
     for (let i = 0; i < nL; i++) {
       const th = (i / nL) * Math.PI * 2 + 0.3;
       const ring = 0.74 + hash01(`lsr${i}`) * 0.18;
@@ -4393,6 +4458,7 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
         new THREE.Vector3(0, fy + bow, fz + bow * 0.4),
         new THREE.Vector3(xr, fy, fz),
       ];
+      if (i === 2) srPos = { x: fpts[1].x, y: fpts[1].y, z: fpts[1].z };
       lsrParts.push({ geo: track(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(fpts), 24, 0.034, 6)) });
     }
     const tt = new THREE.Mesh(track(mergeGeoms(ttParts)), mat({
@@ -4413,8 +4479,11 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     }));
     lsr.renderOrder = 60;
     group.add(lsr);
-    labels.push({ pos: { x: R * 1.05, y: -rodMid * 0.82, z: rodMid * 0.55 }, zh: 'T 小管（Z 线位内陷）', latin: 'T-tubule' });
-    labels.push({ pos: { x: -R * 1.25, y: rodMid * 0.85, z: 0 }, zh: '肌浆网（Ca²⁺ 库）', latin: 'Sarcoplasmic reticulum' });
+    // v63 锚点归位: 旧手调坐标 (R·1.05, -0.82·rodMid) 悬在内陷环带外空域 → 新锚 = 横管
+    // 中程深度本体上（与管体几何同源求解）
+    labels.push({ pos: ttPos ?? { x: R * 0.6, y: -rodMid * 0.5, z: rodMid * 0.55 }, zh: 'T 小管（Z 线位内陷）', latin: 'T-tubule' });
+    // v63 锚点归位: 旧位 (-1.25R, 0.85·rodMid) 与纵行管网无交（悬空）→ 新锚 = 前侧网管中点
+    labels.push({ pos: srPos ?? { x: -R * 0.8, y: rodMid * 0.7, z: rodMid * 0.5 }, zh: '肌浆网（Ca²⁺ 库）', latin: 'Sarcoplasmic reticulum' });
   }
 
   if (spec.micronuclei) {
@@ -4479,10 +4548,13 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const inst = new THREE.InstancedMesh(geo, m9, clusters * perC);
     const mm = new THREE.Matrix4();
     let idx = 0;
+    // v63: 簇心引用（锚点归位用 —— 定位套环要落在簇本体上）
+    const tcCenters: THREE.Vector3[] = [];
     fibSphere(clusters, 1).forEach((base, c) => {
       const dir = new THREE.Vector3(base.x, base.y, base.z).normalize();
       const rr = cellSurf(dir, R, SHAPE, 0.08);
       const center = new THREE.Vector3(dir.x * rr, dir.y * rr, dir.z * rr);
+      tcCenters.push(center);
       mm.makeScale(1.3, 1.3, 1.3);
       mm.setPosition(center.x, center.y, center.z);
       inst.setMatrixAt(idx++, mm);
@@ -4502,7 +4574,18 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     inst.instanceMatrix.needsUpdate = true;
     inst.renderOrder = 62;
     group.add(inst);
-    const lp = sph(R * 1.28, 0.9, 2.0);
+    // v63 锚点归位: 旧位 R·1.28 悬在膜外空域（簇心在膜面 +0.08, 卫星 ±0.22）→
+    // 新锚 = 朝向默认相机的簇心（套环套住中心珠+卫星珠）
+    let lp = sph(R * 1.03, 0.9, 2.0);
+    {
+      let best = -Infinity;
+      for (const p of tcCenters) {
+        if (p.x + p.z > best) {
+          best = p.x + p.z;
+          lp = { x: p.x, y: p.y, z: p.z };
+        }
+      }
+    }
     labels.push({ pos: lp, zh: 'TCR/CD3 微簇', latin: 'TCR microcluster' });
   }
 
@@ -4537,7 +4620,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     inst.instanceMatrix.needsUpdate = true;
     inst.renderOrder = 61;
     group.add(inst);
-    labels.push({ pos: { x: webR * 0.95, y: webY + 0.35, z: 0 }, zh: '终末网（微绒毛根微丝）', latin: 'Terminal web' });
+    // v63 锚点归位: 旧位 +0.35 悬在网层上方（胶囊层 y ∈ webY±0.11）→ 落入网带内
+    labels.push({ pos: { x: webR * 0.78, y: webY + 0.05, z: webR * 0.28 }, zh: '终末网（微绒毛根微丝）', latin: 'Terminal web' });
   }
 
   if (spec.desmosomes) {
@@ -4545,6 +4629,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     const plaqueGeo = track(new THREE.SphereGeometry(0.09, 8, 6));
     const plaqueMat = track(new THREE.MeshStandardMaterial({ color: '#fde68a', emissive: '#f59e0b', emissiveIntensity: 0.75 * dim, transparent: true, opacity: 0.92 * dim }));
     const n = 7;
+    // v63: 斑块位置引用（锚点归位用）
+    const dsPts: { x: number; y: number; z: number }[] = [];
     for (let i = 0; i < n; i++) {
       const lon = (i / n) * Math.PI * 2 + 0.4;
       const lat = (hash01(`ds${i}`) - 0.5) * 0.85;
@@ -4555,8 +4641,20 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       p.scale.set(1.5, 0.7, 1.05);
       p.renderOrder = 62;
       group.add(p);
+      dsPts.push({ x: d.x * rr, y: d.y * rr, z: d.z * rr });
     }
-    labels.push({ pos: sph(R * 1.3, 0.15, 3.8), zh: '桥粒（中间丝锚定）', latin: 'Desmosome' });
+    // v63 锚点归位: 旧位 R·1.3 悬在膜外空域 → 新锚 = 朝向默认相机的斑本体（膜面 -0.03）
+    let dsPos = sph(R * 1.0, 0.15, 3.8);
+    {
+      let best = -Infinity;
+      for (const p of dsPts) {
+        if (p.x + p.z > best) {
+          best = p.x + p.z;
+          dsPos = p;
+        }
+      }
+    }
+    labels.push({ pos: dsPos, zh: '桥粒（中间丝锚定）', latin: 'Desmosome' });
   }
 
   /* ================= 胞外悬浮微粒（浸没感） ================= */
@@ -5032,6 +5130,16 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
       ['Golgi apparatus', 2.6], ['Transport vesicle', 1.7], ['Lysosome', 1.8], ['Autophagosome', 1.7],
       ['Peroxisome', 1.6], ['Lipid droplet', 1.6], ['Microtubules', 2.4], ['Intermediate filaments', 2.0],
     ];
+    // v63 定位特写距离表（latin 前缀匹配）: 微小结构在默认 6.5 视距下成不可见斑点 ——
+    // 套环已锚到本体, 视距同步收紧让「定位后看得见」闭环（缺省回退 max(6.5, r·3.2)）
+    const FLY_TABLE: [string, number][] = [
+      ['Desmosome', 3.6], ['TCR microcluster', 3.8], ['Synaptic bouton', 4.0],
+      ['Tight junction', 4.2], ['Terminal web', 4.4], ['Membrane blebbing', 4.4],
+      ['Micronucleus', 4.6], ['Bile canaliculus', 4.6], ['T-tubule', 4.8],
+      ['Basal lamina', 5.0], ['Intercalated disc', 5.2], ['Microvilli', 5.2],
+      ['Basal dendrite', 5.2], ['Sarcoplasmic', 5.4], ['Collagen fiber', 5.6],
+      ['Apical tuft', 5.6], ['Myelinated axon', 7.0],
+    ];
     const G_TABLE: [string, HoverGroupKey][] = [
       ['Nuclear', 'nuclear'], ['Nucleolus', 'nuclear'], ['Heterochromatin', 'nuclear'], ['Micronucleus', 'nuclear'], ['Binucleate', 'nuclear'],
       ['Rough ER', 'endomembrane'], ['Smooth ER', 'endomembrane'], ['Golgi', 'endomembrane'], ['vesicle', 'endomembrane'],
@@ -5046,7 +5154,8 @@ export function buildCellBody(spec: CellBodySpec, tint: string, dim: number, per
     for (const l of labels) {
       const r = R_TABLE.find(([k]) => l.latin.startsWith(k))?.[1] ?? 1.7;
       const grp = G_TABLE.find(([k]) => l.latin.includes(k))?.[1] ?? 'specialized';
-      hover.push({ pos: l.pos, r, zh: l.zh, latin: l.latin, when: l.when, group: grp });
+      const fly = FLY_TABLE.find(([k]) => l.latin.startsWith(k))?.[1];
+      hover.push({ pos: l.pos, r, zh: l.zh, latin: l.latin, when: l.when, group: grp, ...(fly !== undefined ? { fly } : {}) });
     }
   }
 

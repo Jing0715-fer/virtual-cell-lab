@@ -617,7 +617,8 @@ export function VirtualCell3D() {
   const onHoverTargets = useCallback((t: HoverTarget[]) => setHoverTargets(t), []);
   const locateTarget = useCallback((target: HoverTarget) => {
     locateNonce.current += 1;
-    setLocateReq({ nonce: locateNonce.current, target, dist: Math.max(6.5, target.r * 3.2) });
+    // v63: 定位特写视距 —— 微小结构默认 6.5 视距下成不可见斑点（fly 表收紧）
+    setLocateReq({ nonce: locateNonce.current, target, dist: target.fly ?? Math.max(6.5, target.r * 3.2) });
   }, []);
   /* ============ v61 结构辨识挑战（「找到并点击」测验玩法） ============
    * 悬停系统（OrganelleHoverLayer onPick 点击通道）作答题输入; 题库 = 当前细胞类型
@@ -1321,7 +1322,7 @@ export function VirtualCell3D() {
           {/* v14 目录定位 → 相机飞行（1.2s 阻尼聚焦; 用户任何交互立即让位）
            *  v21: 常驻挂载 —— 旧 {!mitosis && ...} 使分裂演示开启时的原点飞行与卸载同帧发生,
            *  飞行永不执行（此前定位过细胞器再开分裂 → 舞台偏出画面中心）。 */}
-          <FlyToController req={locateReq} />
+          <FlyToController req={locateReq} minDist={3.4} />
           <SceneCapture />
           {/* v35 发表模式捕获: 辉光管线存在时 priority 2（composer 之后同帧捕获含后处理画面）*/}
           <PublicationCapture controlsRef={controlsRef} priority={glow ? 2 : 0} />
